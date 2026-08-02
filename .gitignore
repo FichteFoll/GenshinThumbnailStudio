@@ -10,3 +10,5 @@ __pycache__/
 gui_smoke.png
 live_pipeline_test.jpg
 GenshinThumbnailStudio.spec
+plans/
+*.jpg
