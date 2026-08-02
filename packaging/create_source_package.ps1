@@ -34,8 +34,7 @@ try {
     foreach ($Name in @(
         "launch.py",
         "pyproject.toml",
-        "requirements.txt",
-        "requirements-dev.txt",
+        "uv.lock",
         "README.md",
         ".gitignore"
     )) {

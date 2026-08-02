@@ -1,25 +1,13 @@
-param(
-    [string]$Python = "py"
-)
-
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $PSScriptRoot
-$Venv = Join-Path ([System.IO.Path]::GetTempPath()) "gts-build-venv"
 $Release = Join-Path $Root "release"
 
-if (-not (Test-Path $Venv)) {
-    & $Python -m venv $Venv
-}
-
-$Py = Join-Path $Venv "Scripts\python.exe"
-& $Py -m pip install --upgrade pip
-& $Py -m pip install -r (Join-Path $Root "requirements-dev.txt")
-& $Py -m pip install -e $Root
-& $Py -m pytest $Root
+uv sync --directory $Root --extra dev
+uv run --directory $Root pytest $Root
 
 Remove-Item -Recurse -Force (Join-Path $Root "build") -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force (Join-Path $Root "dist") -ErrorAction SilentlyContinue
-& $Py -m PyInstaller `
+uv run --directory $Root pyinstaller `
     --noconfirm `
     --clean `
     --windowed `

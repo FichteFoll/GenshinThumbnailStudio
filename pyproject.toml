@@ -12,6 +12,12 @@ dependencies = [
   "PySide6>=6.7,<7",
 ]
 
+[project.optional-dependencies]
+dev = [
+  "PyInstaller>=6.10,<7",
+  "pytest>=8.2,<9",
+]
+
 [project.gui-scripts]
 genshin-thumbnail-studio = "genshin_thumbnail_studio.gui:run"
 

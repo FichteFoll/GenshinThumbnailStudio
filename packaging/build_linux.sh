@@ -2,17 +2,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VENV="$ROOT/.venv-build"
 RELEASE="$ROOT/release"
 
-python3 -m venv "$VENV"
-"$VENV/bin/python" -m pip install --upgrade pip
-"$VENV/bin/python" -m pip install -r "$ROOT/requirements-dev.txt"
-"$VENV/bin/python" -m pip install -e "$ROOT"
-QT_QPA_PLATFORM=offscreen QTWEBENGINE_CHROMIUM_FLAGS=--no-sandbox "$VENV/bin/python" -m pytest "$ROOT"
+uv sync --directory "$ROOT" --extra dev
+QT_QPA_PLATFORM=offscreen QTWEBENGINE_CHROMIUM_FLAGS=--no-sandbox uv run --directory "$ROOT" pytest
 
 rm -rf "$ROOT/build" "$ROOT/dist"
-"$VENV/bin/python" -m PyInstaller \
+uv run --directory "$ROOT" pyinstaller \
   --noconfirm \
   --clean \
   --windowed \

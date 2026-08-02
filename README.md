@@ -16,23 +16,19 @@ Standalone desktop application for creating the established 1280x720 Genshin tea
 
 ## Run from source
 
-Windows:
-
-```powershell
-py -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m genshin_thumbnail_studio
-```
-
-Linux:
+This project uses [uv](https://docs.astral.sh/uv/) for dependency management.
 
 ```bash
-python3 -m venv .venv
-./.venv/bin/python -m pip install -r requirements.txt
-./.venv/bin/python -m genshin_thumbnail_studio
+uv run genshin-thumbnail-studio
 ```
 
-When running from a checkout without installing the package, set `PYTHONPATH=src` or install it with `pip install -e .`.
+`uv run` creates the virtual environment and installs dependencies automatically on first use.
+For development, install the `dev` extra as well:
+
+```bash
+uv sync --extra dev
+uv run pytest
+```
 
 ## Build standalone packages
 
