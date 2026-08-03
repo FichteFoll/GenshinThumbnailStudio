@@ -749,26 +749,29 @@ class MainWindow(QMainWindow):
             builds = self._validate_team()
             self.preview_button.setEnabled(False)
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            self.assets = {}
-            self.assets = download_assets(
-                builds,
-                cache_dir() / "assets",
-                progress=lambda current, total, name: (
-                    self.statusBar().showMessage(f"Lade {name} ({current}/{total}) ..."),
-                    QApplication.processEvents(),
-                ),
-                on_asset=self._on_asset_ready,
-            )
-            for team in self.project.teams:
-                for member in team:
-                    self._apply_preset(member)
-            self._dispatch_render()
+            self._generate_preview_from_builds(builds)
             self.statusBar().showMessage("Vorschau bereit", 5000)
         except Exception as error:
             self._show_error("Vorschau konnte nicht erzeugt werden", error)
         finally:
             QApplication.restoreOverrideCursor()
             self.preview_button.setEnabled(True)
+
+    def _generate_preview_from_builds(self, builds: list[Build]) -> None:
+        self.assets = {}
+        self.assets = download_assets(
+            builds,
+            cache_dir() / "assets",
+            progress=lambda current, total, name: (
+                self.statusBar().showMessage(f"Lade {name} ({current}/{total}) ..."),
+                QApplication.processEvents(),
+            ),
+            on_asset=self._on_asset_ready,
+        )
+        for team in self.project.teams:
+            for member in team:
+                self._apply_preset(member)
+        self._dispatch_render()
 
     def _dispatch_render(self) -> None:
         self._render_token += 1
