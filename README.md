@@ -12,7 +12,7 @@ Standalone desktop application for creating the established 1280x720 Genshin tea
 - Shows C/R labels and weapon icons without additional thumbnail text.
 - Lets users select and drag every character directly in the preview. The mouse wheel and X/Y/zoom sliders provide fine control.
 - Saves reusable placement presets and JSON project files.
-- Exports supersampled JPEG files at 1280x720.
+- Exports supersampled PNG files at 1280x720.
 
 ## Run from source
 

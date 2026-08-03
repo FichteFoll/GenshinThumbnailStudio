@@ -67,6 +67,9 @@ def test_abyss_render_and_export(tmp_path: Path) -> None:
     written = export_project(project, assets, tmp_path / "out")
     assert len(written) == 1
     assert written[0].exists()
+    assert written[0].suffix == ".png"
+    with Image.open(written[0]) as image:
+        assert image.format == "PNG"
 
 
 def test_export_uses_configured_output_resolution(tmp_path: Path) -> None:

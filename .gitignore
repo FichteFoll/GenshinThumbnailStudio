@@ -7,8 +7,7 @@ __pycache__/
 .pytest_cache/
 .live-test-data/
 .gui-test-data/
-gui_smoke.png
-live_pipeline_test.jpg
 GenshinThumbnailStudio.spec
 plans/
 *.jpg
+*.png

@@ -432,23 +432,23 @@ def render_preview(project: Project, assets: dict[str, Asset]) -> Image.Image:
     return render_image([project.teams[project.active_team]], assets, compact=False, scale=1)
 
 
-def export_project(project: Project, assets: dict[str, Asset], directory: Path, quality: int = 94) -> list[Path]:
+def export_project(project: Project, assets: dict[str, Asset], directory: Path) -> list[Path]:
     project.ensure_shape()
     directory.mkdir(parents=True, exist_ok=True)
     scale = min(4, max(2, math.ceil(2 * project.output_height / BASE_H)))
     output_size = project.output_size
     written = []
     if project.mode == "abyss":
-        target = directory / f"{safe_name(project.output_name)}.jpg"
+        target = directory / f"{safe_name(project.output_name)}.png"
         render_image(project.teams, assets, compact=True, scale=scale, output_size=output_size).save(
-            target, quality=quality, optimize=True
+            target, optimize=True
         )
         written.append(target)
     else:
         for index, team in enumerate(project.teams, start=1):
-            target = directory / f"{safe_name(project.output_name)}_boss{index}.jpg"
+            target = directory / f"{safe_name(project.output_name)}_boss{index}.png"
             render_image([team], assets, compact=False, scale=scale, output_size=output_size).save(
-                target, quality=quality, optimize=True
+                target, optimize=True
             )
             written.append(target)
     return written

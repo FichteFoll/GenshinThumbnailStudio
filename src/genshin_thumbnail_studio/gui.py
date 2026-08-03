@@ -252,7 +252,7 @@ class MainWindow(QMainWindow):
 
         self.preview_button = QPushButton("Vorschau erzeugen")
         self.preview_button.clicked.connect(self.prepare_preview)
-        self.export_button = QPushButton(self._icon(QStyle.StandardPixmap.SP_DialogSaveButton), "JPG exportieren")
+        self.export_button = QPushButton(self._icon(QStyle.StandardPixmap.SP_DialogSaveButton), "PNG exportieren")
         self.export_button.clicked.connect(self.export)
         controls_layout.addWidget(self.preview_button)
         controls_layout.addWidget(self.export_button)
