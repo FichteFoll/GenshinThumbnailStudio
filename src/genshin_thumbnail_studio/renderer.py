@@ -374,7 +374,7 @@ def add_badges(
             draw.ellipse(
                 geometry.circle,
                 fill=(0, 0, 0, 170),
-                outline=(255, 255, 255, 240),
+                outline=hex_to_rgba(card_color(member, asset), 240),
                 width=2 * scale,
             )
             icon = Image.open(asset.weapon_path).convert("RGBA")

@@ -224,3 +224,38 @@ def test_badge_constellation_and_refinement_use_distinct_rarity_colors(tmp_path:
 
     assert _color_present_in_box(preview, geometry.box, RARITY_COLORS[5])
     assert _color_present_in_box(preview, geometry.box, RARITY_COLORS[4])
+
+
+def test_weapon_circle_outline_uses_element_color(tmp_path: Path) -> None:
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names, elements={names[0]: "Pyro"})
+    preview = render_preview(project, assets)
+
+    # Same leftmost-slot geometry as the badge tests above, but probing the
+    # weapon icon's circle rather than the C/R box.
+    scale = 1
+    compact = True
+    row_height = 360
+    step = 320.0
+    font = find_font((38 if compact else 54) * scale)
+    canvas = Image.new("RGBA", (1280, 720), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+    center = int(round(0 * step + step / 2))
+    top_y = 0 * row_height + row_height - (68 if compact else 107) * scale
+    build = assets[names[0].casefold()].build
+    text = f"C{build.constellation}R{build.refinement}"
+    geometry = badge_geometry(draw, text, font, center_x=center, top_y=top_y, scale=scale, compact=compact)
+
+    # Probe a thin strip on the circle's left edge, which is outline only: the
+    # weapon icon is thumbnailed and centered, so its own (white) art never
+    # reaches this far out.
+    circle_x0, circle_y0, _, circle_y1 = geometry.circle
+    mid_y = (circle_y0 + circle_y1) // 2
+    ring = (circle_x0, mid_y - 2, circle_x0 + 4, mid_y + 2)
+
+    assert _color_present_in_box(preview, ring, ELEMENT_COLORS["pyro"])
+    # The outline was plain white before; make sure it no longer is, so this
+    # test fails if the element color stops being applied.
+    assert not _color_present_in_box(preview, ring, "#ffffff", tolerance=12)
