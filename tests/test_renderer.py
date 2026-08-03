@@ -3,7 +3,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 from genshin_thumbnail_studio.models import Asset, Build, Project
-from genshin_thumbnail_studio.renderer import badge_geometry, export_project, find_font, render_preview
+from genshin_thumbnail_studio.renderer import BACKGROUND_COLOR, badge_geometry, export_project, find_font, render_preview
 
 
 def create_assets(directory: Path, names: list[str]) -> dict[str, Asset]:
@@ -61,6 +61,22 @@ def test_export_uses_configured_output_resolution(tmp_path: Path) -> None:
     assert len(written) == 1
     with Image.open(written[0]) as image:
         assert image.size == (2560, 1440)
+
+
+def test_card_gap_shows_background_between_panels(tmp_path: Path) -> None:
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)
+    preview = render_preview(project, assets)
+
+    # Boundary between the first row's slot 0 and slot 1 (step = 1280 / 4 = 320),
+    # sampled at the row's mid-height where the slanted card edges are centered
+    # on the shared boundary. If the gap ever collapsed to zero this pixel
+    # would show card art/background glow instead of the near-black canvas.
+    pixel = preview.getpixel((320, 180))
+    assert isinstance(pixel, tuple)
+    assert pixel[:3] == BACKGROUND_COLOR[:3]
 
 
 def test_stygian_exports_three_files(tmp_path: Path) -> None:

@@ -13,6 +13,12 @@ from .models import Asset, Placement, Project
 BASE_W = 1280
 BASE_H = 720
 
+# Design-space constants (px at scale 1, multiplied by `scale` where used).
+LINE = 3
+CARD_BORDER = LINE
+CARD_GAP = 2 * LINE
+BACKGROUND_COLOR = (14, 14, 18, 255)  # #0e0e12
+
 
 def safe_name(value: str) -> str:
     cleaned = re.sub(r'[<>:"/\\|?*]+', "_", value).strip(" ._")
@@ -65,16 +71,54 @@ def cover_resize_focal(
     return resized.crop((left, top, left + target_w, top + target_h))
 
 
-def panel_polygon(index: int, row: int, width: int, row_height: int, step: float, slant: int) -> list[tuple[int, int]]:
-    y0 = row * row_height
-    y1 = y0 + row_height
-    x0 = int(round(index * step))
-    x1 = int(round((index + 1) * step))
+def panel_polygon(
+    index: int,
+    row: int,
+    num_rows: int,
+    width: int,
+    row_height: int,
+    step: float,
+    slant: int,
+    gap: float,
+    border: float,
+) -> list[tuple[int, int]]:
+    """Compute one card's outline, inset by half the gap/border on every
+    shared or outer edge so neighbouring cards never touch.
+
+    Vertical (slanted) edges are inset horizontally by more than the plain
+    gap/2, scaled by the secant of the slant angle, so the resulting inset
+    is perpendicular to the slanted edge rather than a raw horizontal shift.
+    """
+    half_gap = gap / 2
+    half_border = border / 2
+    y0 = row * row_height + (half_border if row == 0 else half_gap)
+    y1 = (row + 1) * row_height - (half_border if row == num_rows - 1 else half_gap)
+
+    perp_scale = math.hypot(row_height, 2 * slant) / row_height if slant else 1.0
+
+    x0 = index * step
+    x1 = (index + 1) * step
+
     if index == 0:
-        return [(0, y0), (x1 + slant, y0), (x1 - slant, y1), (0, y1)]
+        left_top = left_bottom = half_border
+    else:
+        left_inset = half_gap * perp_scale
+        left_top = x0 + slant + left_inset
+        left_bottom = x0 - slant + left_inset
+
     if index == 3:
-        return [(x0 + slant, y0), (width, y0), (width, y1), (x0 - slant, y1)]
-    return [(x0 + slant, y0), (x1 + slant, y0), (x1 - slant, y1), (x0 - slant, y1)]
+        right_top = right_bottom = width - half_border
+    else:
+        right_inset = half_gap * perp_scale
+        right_top = x1 + slant - right_inset
+        right_bottom = x1 - slant - right_inset
+
+    return [
+        (round(left_top), round(y0)),
+        (round(right_top), round(y0)),
+        (round(right_bottom), round(y1)),
+        (round(left_bottom), round(y1)),
+    ]
 
 
 def panel_background(size: tuple[int, int], color: str, compact: bool) -> Image.Image:
@@ -106,6 +150,7 @@ def make_panel(
     asset: Asset,
     index: int,
     row: int,
+    num_rows: int,
     row_height: int,
     panel_width: int,
     step: float,
@@ -145,35 +190,30 @@ def make_panel(
     panel = Image.alpha_composite(panel, shade)
 
     width, _ = canvas_size
+    gap = CARD_GAP * scale
+    border = CARD_BORDER * scale
     layer = Image.new("RGBA", canvas_size, (0, 0, 0, 0))
     layer.paste(panel, (int(round(index * step - slant)), row * row_height), panel)
     mask = Image.new("L", canvas_size, 0)
-    ImageDraw.Draw(mask).polygon(panel_polygon(index, row, width, row_height, step, slant), fill=255)
+    ImageDraw.Draw(mask).polygon(
+        panel_polygon(index, row, num_rows, width, row_height, step, slant, gap, border), fill=255
+    )
     layer.putalpha(ImageChops.multiply(layer.getchannel("A"), mask))
     return layer
 
 
-def add_separators(image: Image.Image, teams: list[list[Placement]], row_height: int, step: float, slant: int, scale: int, compact: bool) -> None:
-    width, height = image.size
+def add_card_borders(
+    image: Image.Image, teams: list[list[Placement]], row_height: int, step: float, slant: int, scale: int
+) -> None:
+    width, _ = image.size
+    gap = CARD_GAP * scale
+    border = CARD_BORDER * scale
+    num_rows = len(teams)
     draw = ImageDraw.Draw(image)
-    draw.rectangle((0, 0, width - 1, height - 1), outline=(12, 12, 12, 235), width=8 * scale)
-    if compact:
-        draw.line((0, row_height, width, row_height), fill=(255, 255, 255, 145), width=2 * scale)
-        draw.line((0, row_height + 4 * scale, width, row_height + 4 * scale), fill=(0, 0, 0, 150), width=2 * scale)
     for row, team in enumerate(teams):
-        y0 = row * row_height
-        y1 = y0 + row_height
-        for index in (1, 2, 3):
-            x = int(round(index * step))
-            color = team[index].color
-            overshoot = (24 if compact else 40) * scale
-            offset = (4 if compact else 5) * scale
-            draw.line((x + slant, y0 - overshoot, x - slant, y1 + overshoot), fill=hex_to_rgba(color, 235), width=3 * scale)
-            draw.line(
-                (x + slant + offset, y0 - overshoot, x - slant + offset, y1 + overshoot),
-                fill=(255, 255, 255, 125),
-                width=max(1, scale),
-            )
+        for index, member in enumerate(team):
+            points = panel_polygon(index, row, num_rows, width, row_height, step, slant, gap, border)
+            draw.polygon(points, outline=hex_to_rgba(member.color, 255), width=round(border))
 
 
 @dataclass(frozen=True)
@@ -289,7 +329,8 @@ def render_image(
     step = width / 4
     slant = (38 if compact else 52) * scale
     panel_width = (340 if compact else 360) * scale
-    canvas = Image.new("RGBA", (width, height), (22, 22, 22, 255))
+    canvas = Image.new("RGBA", (width, height), BACKGROUND_COLOR)
+    num_rows = len(teams)
     for row, team in enumerate(teams):
         for index, member in enumerate(team):
             if not member.name or member.name.casefold() not in assets:
@@ -300,6 +341,7 @@ def render_image(
                 assets[member.name.casefold()],
                 index,
                 row,
+                num_rows,
                 row_height,
                 panel_width,
                 step,
@@ -308,7 +350,7 @@ def render_image(
                 compact,
             )
             canvas = Image.alpha_composite(canvas, panel)
-    add_separators(canvas, teams, row_height, step, slant, scale, compact)
+    add_card_borders(canvas, teams, row_height, step, slant, scale)
     add_badges(canvas, teams, assets, row_height, step, scale, compact)
     return canvas.convert("RGB").resize(output_size, Image.Resampling.LANCZOS)
 
