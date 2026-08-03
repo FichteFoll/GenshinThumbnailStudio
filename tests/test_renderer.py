@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import NamedTuple
 
 from PIL import Image, ImageChops, ImageDraw
 
@@ -6,10 +7,15 @@ from genshin_thumbnail_studio import renderer
 from genshin_thumbnail_studio.models import Asset, Build, Project
 from genshin_thumbnail_studio.renderer import (
     BACKGROUND_COLOR,
+    BASE_H,
+    BASE_W,
+    CARD_BORDER,
+    CARD_GAP,
     ELEMENT_COLORS,
     PAN_OVERSCAN,
     RARITY_COLORS,
     STANDARD_ART_SIZE,
+    apply_panel_mask,
     badge_geometry,
     clear_render_cache,
     cover_resize_offset,
@@ -20,11 +26,38 @@ from genshin_thumbnail_studio.renderer import (
     panel_background,
     panel_metrics,
     panel_origin,
+    panel_polygon,
     panel_target_size,
     render_image,
     render_preview,
     resized_art_size,
 )
+
+
+class CompactLayout(NamedTuple):
+    row_height: int
+    step: float
+    slant: int
+    gap: float
+    border: float
+    panel_width: int
+
+
+def compact_layout(scale: int = 1) -> CompactLayout:
+    """render_image()'s layout numbers for a compact (two-row abyss) canvas,
+    derived from the renderer's own constants so probes follow the layout.
+
+    The slant and the panel width are inline literals in render_image() rather
+    than module constants, so they are repeated here.
+    """
+    return CompactLayout(
+        row_height=BASE_H * scale // 2,
+        step=BASE_W * scale / 4,
+        slant=38 * scale,
+        gap=CARD_GAP * scale,
+        border=CARD_BORDER * scale,
+        panel_width=340 * scale,
+    )
 
 
 def create_assets(
@@ -497,6 +530,75 @@ def test_leftmost_slot_is_not_shifted_by_its_negative_panel_origin(tmp_path: Pat
         assert shifted != second, local_y
 
 
+def test_panel_mask_slanted_edge_is_antialiased() -> None:
+    """The panel mask itself is supersampled, so a panel's alpha fades across
+    its slanted edges instead of stepping straight from 0 to 255.
+
+    The rendered-preview probe below cannot cover this: the opaque border
+    stroke is centred on the mask boundary and hides the mask's own edge, so
+    aliasing only the mask would go unnoticed there.
+    """
+    clear_render_cache()  # the mask is cached across tests
+    row_height, step, slant, gap, border, panel_width = compact_layout()
+    index, row, num_rows, scale = 2, 0, 2, 1
+    panel = Image.new("RGBA", (panel_width + 2 * slant, row_height), (255, 255, 255, 255))
+
+    apply_panel_mask(panel, index, row, num_rows, BASE_W, row_height, step, slant, scale)
+
+    points = panel_polygon(index, row, num_rows, BASE_W, row_height, step, slant, gap, border)
+    origin_x, _ = panel_origin(index, row, row_height, step, slant)
+    alpha = panel.getchannel("A")
+    # Both slanted edges, at two heights each, so an edge that only happened to
+    # blend at one spot would not pass.
+    for top, bottom in ((points[0], points[3]), (points[1], points[2])):
+        for y in (60, 300):
+            edge_x = top[0] + (bottom[0] - top[0]) * (y - top[1]) / (bottom[1] - top[1]) - origin_x
+            window = [alpha.getpixel((x, y)) for x in range(round(edge_x) - 2, round(edge_x) + 3)]
+            assert any(0 < value < 255 for value in window), (top, y, window)
+
+
+def test_slanted_card_edge_is_antialiased(tmp_path: Path) -> None:
+    """The slanted card edges and their border strokes are supersampled, so
+    crossing one horizontally must show at least one blended pixel between the
+    canvas background and the fully opaque border colour. An aliased edge would
+    step straight from one to the other."""
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)  # no elements -> placement colours
+    preview = render_preview(project, assets)
+
+    # The left edge of the first row's slot 2, which slants across the shared
+    # boundary at x = 2 * step. Both the layout numbers and the polygon come
+    # from the renderer's own geometry, so the probe follows the layout rather
+    # than hard-coded pixels.
+    row_height, step, slant, gap, border, _ = compact_layout()
+    points = panel_polygon(2, 0, 2, BASE_W, row_height, step, slant, gap, border)
+    (top_x, top_y), (bottom_x, bottom_y) = points[0], points[3]
+    background = BACKGROUND_COLOR[:3]
+    border = hex_to_rgba(project.teams[0][2].color, 255)[:3]
+
+    # Two heights, so a horizontal edge that only happened to be antialiased at
+    # one of them would not pass.
+    for y in (60, 300):
+        edge_x = top_x + (bottom_x - top_x) * (y - top_y) / (bottom_y - top_y)
+        run = [(x, preview.getpixel((x, y))) for x in range(round(edge_x) - 8, round(edge_x) + 9)]
+        outside = [x for x, pixel in run if pixel == background]
+        inside = [x for x, pixel in run if pixel == border]
+        assert outside and inside, (y, run)
+        last_outside, first_inside = max(outside), min(inside)
+        assert last_outside < first_inside, (y, run)
+        blended = [preview.getpixel((x, y)) for x in range(last_outside + 1, first_inside)]
+        assert blended, (y, run)
+        for pixel in blended:
+            assert all(
+                min(background[channel], border[channel])
+                <= pixel[channel]
+                <= max(background[channel], border[channel])
+                for channel in range(3)
+            ), (y, pixel)
+
+
 def test_glow_shows_through_a_transparent_gap_in_the_character_art(tmp_path: Path) -> None:
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
@@ -704,7 +806,7 @@ def test_clear_render_cache_forces_full_recompute(tmp_path, monkeypatch) -> None
     assert sorted(path for path in opened if path in set(all_art_paths)) == sorted(all_art_paths)
 
 
-def test_clear_render_cache_empties_art_caches(tmp_path: Path) -> None:
+def test_clear_render_cache_empties_the_render_caches(tmp_path: Path) -> None:
     clear_render_cache()
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
@@ -714,10 +816,14 @@ def test_clear_render_cache_empties_art_caches(tmp_path: Path) -> None:
     render_preview(project, assets)
     assert renderer._art_cache
     assert renderer._work_cache  # 1200x900 art downscales for a preview panel
+    assert renderer._mask_cache
+    assert renderer._border_cache
 
     clear_render_cache()
     assert not renderer._art_cache
     assert not renderer._work_cache
+    assert not renderer._mask_cache
+    assert not renderer._border_cache
 
 
 def test_swapping_slots_with_warm_cache_matches_fresh_render(tmp_path: Path) -> None:

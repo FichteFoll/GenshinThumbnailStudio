@@ -62,6 +62,13 @@ MAX_PLACEMENT_ZOOM = 1.80
 # smaller radius) produces the same soft wash for a fraction of the work.
 GLOW_DOWNSCALE = 4
 
+# Pillow's ImageDraw has no antialiasing, so the near-vertical slanted card
+# edges come out stair-stepped. Drawing that geometry at 4x into a
+# single-channel coverage image and box-downsampling it yields proper edge
+# coverage; "L" rather than "RGBA" makes it ~6x cheaper for the same result,
+# and the outcome is cached anyway because it only depends on the layout.
+GEOMETRY_SUPERSAMPLE = 4
+
 
 def rarity_color(rarity: int | None) -> str:
     """The in-game rarity accent color, falling back to the 5-star gold
@@ -283,6 +290,26 @@ def panel_polygon(
     ]
 
 
+def supersampled_coverage(
+    size: tuple[int, int], points: list[tuple[int, int]], width: int | None = None
+) -> Image.Image:
+    """An antialiased "L" coverage map of `size` for the polygon `points`:
+    filled when `width` is None, otherwise a `width`-pixel outline stroke.
+
+    Points outside `size` are clipped by ImageDraw, which is what lets the
+    slanted card outlines overhang their own layer.
+    """
+    big_size = (size[0] * GEOMETRY_SUPERSAMPLE, size[1] * GEOMETRY_SUPERSAMPLE)
+    big_points = [(x * GEOMETRY_SUPERSAMPLE, y * GEOMETRY_SUPERSAMPLE) for x, y in points]
+    big = Image.new("L", big_size, 0)
+    draw = ImageDraw.Draw(big)
+    if width is None:
+        draw.polygon(big_points, fill=255)
+    else:
+        draw.polygon(big_points, outline=255, width=width * GEOMETRY_SUPERSAMPLE)
+    return big.resize(size, Image.Resampling.BOX)
+
+
 def panel_background(size: tuple[int, int], color: str, compact: bool) -> Image.Image:
     width, height = size
     background = Image.new("RGBA", size, (18, 18, 22, 255))
@@ -384,16 +411,19 @@ def apply_panel_mask(
     """Cut the slanted card shape out of `panel`, in place, and return it.
 
     The polygon is computed in canvas coordinates and then translated into
-    panel-local ones; points outside the panel's bounds are clipped by
-    ImageDraw, which is what keeps the overhanging slants correct.
+    panel-local ones, so the mask depends only on the layout geometry and is
+    shared by every placement that lands in the same slot.
     """
-    gap = CARD_GAP * scale
-    border = CARD_BORDER * scale
-    points = panel_polygon(index, row, num_rows, canvas_width, row_height, step, slant, gap, border)
-    origin_x, origin_y = panel_origin(index, row, row_height, step, slant)
-    local_points = [(x - origin_x, y - origin_y) for x, y in points]
-    mask = Image.new("L", panel.size, 0)
-    ImageDraw.Draw(mask).polygon(local_points, fill=255)
+    mask_key = (index, row, num_rows, canvas_width, row_height, step, slant, scale, panel.size)
+    mask = _cache_get(_mask_cache, mask_key)
+    if mask is None:
+        gap = CARD_GAP * scale
+        border = CARD_BORDER * scale
+        points = panel_polygon(index, row, num_rows, canvas_width, row_height, step, slant, gap, border)
+        origin_x, origin_y = panel_origin(index, row, row_height, step, slant)
+        local_points = [(x - origin_x, y - origin_y) for x, y in points]
+        mask = supersampled_coverage(panel.size, local_points)
+        _cache_put(_mask_cache, mask_key, mask, _MASK_CACHE_MAX)
     panel.putalpha(ImageChops.multiply(panel.getchannel("A"), mask))
     return panel
 
@@ -441,18 +471,30 @@ _art_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDic
 _WORK_CACHE_MAX = 12
 _work_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
 
+# The supersampled card mask and card-border overlay depend on the layout
+# geometry alone (and, for the border, its colour), never on the placement, so
+# after the first frame they are permanent hits even while a portrait is dragged.
+_MASK_CACHE_MAX = 16
+_mask_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
+
+_BORDER_CACHE_MAX = 16
+_border_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
+
 # Previews render on a background thread while export_project() renders on
 # the GUI thread, so all caches can be touched concurrently.
 _cache_lock = threading.Lock()
 
 
 def clear_render_cache() -> None:
-    """Empty the panel, weapon-icon, character-art and working-copy caches."""
+    """Empty the panel, weapon-icon, character-art, working-copy, card-mask
+    and card-border caches."""
     with _cache_lock:
         _panel_cache.clear()
         _weapon_icon_cache.clear()
         _art_cache.clear()
         _work_cache.clear()
+        _mask_cache.clear()
+        _border_cache.clear()
 
 
 def _cache_get(cache: collections.OrderedDict[tuple, Image.Image], key: tuple) -> Image.Image | None:
@@ -523,13 +565,30 @@ def add_card_borders(
     gap = CARD_GAP * scale
     border = CARD_BORDER * scale
     num_rows = len(teams)
-    draw = ImageDraw.Draw(image)
+    # A card outline never reaches further than one step plus the slant
+    # overhang on either side of its own origin, so the overlay only needs to
+    # be that wide rather than canvas-wide. The extra pixel absorbs the
+    # rounding of the fractional step and origin plus the half stroke width
+    # that the outline extends past the polygon on the right.
+    overlay_size = (math.ceil(step) + 2 * slant + 1, row_height)
     for row, team in enumerate(teams):
         for index, member in enumerate(team):
             asset = assets.get(member.name.casefold()) if member.name else None
             color = card_color(member, asset) if asset else member.color
-            points = panel_polygon(index, row, num_rows, width, row_height, step, slant, gap, border)
-            draw.polygon(points, outline=hex_to_rgba(color, 255), width=round(border))
+            origin_x, origin_y = panel_origin(index, row, row_height, step, slant)
+            # overlay_size is fully derived from step, slant and row_height.
+            overlay_key = (index, row, num_rows, width, row_height, step, slant, scale, color)
+            overlay = _cache_get(_border_cache, overlay_key)
+            if overlay is None:
+                points = panel_polygon(index, row, num_rows, width, row_height, step, slant, gap, border)
+                local_points = [(x - origin_x, y - origin_y) for x, y in points]
+                overlay = Image.new("RGBA", overlay_size, hex_to_rgba(color, 255))
+                overlay.putalpha(supersampled_coverage(overlay_size, local_points, width=round(border)))
+                _cache_put(_border_cache, overlay_key, overlay, _BORDER_CACHE_MAX)
+            # Same clipping as the panels: slot 0 overhangs the canvas on the
+            # left and needs a source offset, slot 3 overhangs on the right and
+            # is clipped by the in-place composite itself.
+            image.alpha_composite(overlay, (max(0, origin_x), origin_y), (max(0, -origin_x), 0))
 
 
 @dataclass(frozen=True)
