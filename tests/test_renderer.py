@@ -3,7 +3,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 from genshin_thumbnail_studio.models import Asset, Build, Project
-from genshin_thumbnail_studio.renderer import export_project, render_preview
+from genshin_thumbnail_studio.renderer import badge_geometry, export_project, find_font, render_preview
 
 
 def create_assets(directory: Path, names: list[str]) -> dict[str, Asset]:
@@ -71,3 +71,43 @@ def test_stygian_exports_three_files(tmp_path: Path) -> None:
     written = export_project(project, assets, tmp_path / "out")
     assert len(written) == 3
     assert all(path.exists() for path in written)
+
+
+def test_badge_render_and_geometry_for_long_constellation_string(tmp_path: Path) -> None:
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)
+    # Not a value the app would normally produce, but the box must not
+    # overflow the canvas even for an unusually long "CxRy" string.
+    long_string_asset = assets[names[0].casefold()]
+    long_string_asset.build.constellation = 10
+    long_string_asset.build.refinement = 5
+
+    preview = render_preview(project, assets)
+    assert preview.size == (1280, 720)
+
+    # Mirror add_badges' own geometry for the leftmost slot of the first
+    # (compact, two-row) abyss team, where a wide box is most likely to
+    # push past the canvas edge.
+    scale = 1
+    compact = True
+    row_height = 360
+    step = 320.0
+    font = find_font((38 if compact else 54) * scale)
+    canvas = Image.new("RGBA", (1280, 720), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+    center = int(round(0 * step + step / 2))
+    top_y = 0 * row_height + row_height - (68 if compact else 107) * scale
+    geometry = badge_geometry(draw, "C10R5", font, center_x=center, top_y=top_y, scale=scale, compact=compact)
+    short_geometry = badge_geometry(draw, "C0R1", font, center_x=center, top_y=top_y, scale=scale, compact=compact)
+
+    box_x0, box_y0, box_x1, box_y1 = geometry.box
+    circle_x0, circle_y0, circle_x1, circle_y1 = geometry.circle
+    assert geometry.group_w > short_geometry.group_w  # content-driven width grows for the longer string
+    assert 0 <= box_x0 <= box_x1 <= 1280
+    assert 0 <= box_y0 <= box_y1 <= 720
+    assert 0 <= circle_x0 <= circle_x1 <= 1280
+    assert 0 <= circle_y0 <= circle_y1 <= 720
+    assert box_y0 <= geometry.text_center[1] <= box_y1
+    assert box_x0 <= geometry.text_center[0] <= box_x1

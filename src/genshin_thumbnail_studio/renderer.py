@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont
@@ -175,6 +176,55 @@ def add_separators(image: Image.Image, teams: list[list[Placement]], row_height:
             )
 
 
+@dataclass(frozen=True)
+class BadgeGeometry:
+    """Computed layout for one C/R badge, in canvas pixels."""
+
+    box: tuple[int, int, int, int]  # (x0, y0, x1, y1)
+    text_center: tuple[int, int]
+    circle: tuple[int, int, int, int]  # (x0, y0, x1, y1)
+    group_x: int
+    group_w: int
+
+
+def badge_geometry(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    center_x: int,
+    top_y: int,
+    scale: int,
+    compact: bool,
+) -> BadgeGeometry:
+    padding = (12 if compact else 18) * scale
+    min_box_w = (126 if compact else 170) * scale
+    box_h = (58 if compact else 82) * scale
+    gap = (8 if compact else 12) * scale
+    circle_d = (62 if compact else 88) * scale
+    stroke_width = (3 if compact else 4) * scale
+
+    left, _top, right, _bottom = draw.textbbox((0, 0), text, font=font, stroke_width=stroke_width)
+    text_w = int(right - left)
+    box_w = max(min_box_w, text_w + 2 * padding)
+
+    group_w = box_w + gap + circle_d
+    group_x = center_x - group_w // 2
+
+    box_x0, box_y0 = group_x, top_y
+    box_x1, box_y1 = group_x + box_w, top_y + box_h
+
+    circle_x = group_x + box_w + gap
+    circle_y = top_y - (2 if compact else 3) * scale
+
+    return BadgeGeometry(
+        box=(box_x0, box_y0, box_x1, box_y1),
+        text_center=((box_x0 + box_x1) // 2, (box_y0 + box_y1) // 2),
+        circle=(circle_x, circle_y, circle_x + circle_d, circle_y + circle_d),
+        group_x=group_x,
+        group_w=group_w,
+    )
+
+
 def add_badges(
     image: Image.Image,
     teams: list[list[Placement]],
@@ -186,43 +236,41 @@ def add_badges(
 ) -> None:
     draw = ImageDraw.Draw(image)
     font = find_font((38 if compact else 54) * scale)
-    box_w = (126 if compact else 170) * scale
-    box_h = (58 if compact else 82) * scale
-    gap = (8 if compact else 12) * scale
-    circle_d = (62 if compact else 88) * scale
     icon_d = (48 if compact else 68) * scale
+    stroke_width = (3 if compact else 4) * scale
     for row, team in enumerate(teams):
         for index, member in enumerate(team):
             asset = assets[member.name.casefold()]
             center = int(round(index * step + step / 2))
-            group_w = box_w + gap + circle_d
-            group_x = center - group_w // 2
-            y = row * row_height + row_height - (68 if compact else 107) * scale
+            top_y = row * row_height + row_height - (68 if compact else 107) * scale
+            text = f"C{asset.build.constellation}R{asset.build.refinement}"
+            geometry = badge_geometry(draw, text, font, center, top_y, scale, compact)
             draw.rounded_rectangle(
-                (group_x, y, group_x + box_w, y + box_h),
+                geometry.box,
                 radius=(14 if compact else 18) * scale,
                 fill=(0, 0, 0, 178),
                 outline=hex_to_rgba(member.color, 245),
                 width=3 * scale,
             )
             draw.text(
-                (group_x + (12 if compact else 18) * scale, y + (8 if compact else 10) * scale),
-                f"C{asset.build.constellation}R{asset.build.refinement}",
+                geometry.text_center,
+                text,
                 font=font,
                 fill=(255, 227, 111, 255),
-                stroke_width=(3 if compact else 4) * scale,
+                stroke_width=stroke_width,
                 stroke_fill=(0, 0, 0, 255),
+                anchor="mm",
             )
-            circle_x = group_x + box_w + gap
-            circle_y = y - (2 if compact else 3) * scale
             draw.ellipse(
-                (circle_x, circle_y, circle_x + circle_d, circle_y + circle_d),
+                geometry.circle,
                 fill=(0, 0, 0, 170),
                 outline=(255, 255, 255, 240),
                 width=2 * scale,
             )
             icon = Image.open(asset.weapon_path).convert("RGBA")
             icon.thumbnail((icon_d, icon_d), Image.Resampling.LANCZOS)
+            circle_x, circle_y, circle_x1, _circle_y1 = geometry.circle
+            circle_d = circle_x1 - circle_x
             image.alpha_composite(icon, (circle_x + (circle_d - icon.width) // 2, circle_y + (circle_d - icon.height) // 2))
 
 
