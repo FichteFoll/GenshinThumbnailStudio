@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import collections
 import math
 import re
 from dataclasses import dataclass
@@ -273,6 +274,40 @@ def placeholder_panel(
     return paste_panel_on_canvas(canvas_size, panel, index, row, num_rows, row_height, step, slant, scale)
 
 
+# Bounded LRU caches for render output that would otherwise be recomputed
+# on every preview render regardless of what actually changed: one for
+# fully-composited panel layers (make_panel()/placeholder_panel() output),
+# one for decoded/resized weapon icons. Cleared via clear_render_cache(),
+# e.g. between tests that assert on cache hit/miss counts.
+_PANEL_CACHE_MAX = 32
+_panel_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
+
+_WEAPON_ICON_CACHE_MAX = 32
+_weapon_icon_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
+
+
+def clear_render_cache() -> None:
+    """Empty the panel and weapon-icon render caches."""
+    _panel_cache.clear()
+    _weapon_icon_cache.clear()
+
+
+def _cache_get(cache: collections.OrderedDict[tuple, Image.Image], key: tuple) -> Image.Image | None:
+    if key not in cache:
+        return None
+    cache.move_to_end(key)
+    return cache[key]
+
+
+def _cache_put(
+    cache: collections.OrderedDict[tuple, Image.Image], key: tuple, value: Image.Image, max_size: int
+) -> None:
+    cache[key] = value
+    cache.move_to_end(key)
+    while len(cache) > max_size:
+        cache.popitem(last=False)
+
+
 def add_card_borders(
     image: Image.Image,
     teams: list[list[Placement]],
@@ -415,8 +450,12 @@ def add_badges(
                 outline=hex_to_rgba(card_color(member, asset), 240),
                 width=2 * scale,
             )
-            icon = Image.open(asset.weapon_path).convert("RGBA")
-            icon.thumbnail((icon_d, icon_d), Image.Resampling.LANCZOS)
+            icon_key = (str(asset.weapon_path), icon_d)
+            icon = _cache_get(_weapon_icon_cache, icon_key)
+            if icon is None:
+                icon = Image.open(asset.weapon_path).convert("RGBA")
+                icon.thumbnail((icon_d, icon_d), Image.Resampling.LANCZOS)
+                _cache_put(_weapon_icon_cache, icon_key, icon, _WEAPON_ICON_CACHE_MAX)
             circle_x, circle_y, circle_x1, _circle_y1 = geometry.circle
             circle_d = circle_x1 - circle_x
             image.alpha_composite(icon, (circle_x + (circle_d - icon.width) // 2, circle_y + (circle_d - icon.height) // 2))
@@ -445,35 +484,56 @@ def render_image(
             has_asset = bool(member.name) and member.name.casefold() in assets
             if not has_asset and require_complete:
                 raise ValueError(f"No downloaded Akasha asset for slot {row + 1}-{index + 1}.")
-            if has_asset:
-                panel = make_panel(
-                    canvas.size,
-                    member,
-                    assets[member.name.casefold()],
-                    index,
-                    row,
-                    num_rows,
-                    row_height,
-                    panel_width,
-                    step,
-                    slant,
-                    scale,
-                    compact,
-                )
-            else:
-                panel = placeholder_panel(
-                    canvas.size,
-                    member,
-                    index,
-                    row,
-                    num_rows,
-                    row_height,
-                    panel_width,
-                    step,
-                    slant,
-                    scale,
-                    compact,
-                )
+            asset = assets[member.name.casefold()] if has_asset else None
+            cache_key = (
+                index,
+                row,
+                num_rows,
+                member.name.casefold(),
+                round(member.fx, 4),
+                round(member.fy, 4),
+                round(member.zoom, 4),
+                member.color,
+                str(asset.art_path) if asset else None,
+                row_height,
+                panel_width,
+                step,
+                slant,
+                scale,
+                compact,
+            )
+            panel = _cache_get(_panel_cache, cache_key)
+            if panel is None:
+                if asset is not None:
+                    panel = make_panel(
+                        canvas.size,
+                        member,
+                        asset,
+                        index,
+                        row,
+                        num_rows,
+                        row_height,
+                        panel_width,
+                        step,
+                        slant,
+                        scale,
+                        compact,
+                    )
+                else:
+                    panel = placeholder_panel(
+                        canvas.size,
+                        member,
+                        index,
+                        row,
+                        num_rows,
+                        row_height,
+                        panel_width,
+                        step,
+                        slant,
+                        scale,
+                        compact,
+                    )
+                _cache_put(_panel_cache, cache_key, panel, _PANEL_CACHE_MAX)
             canvas = Image.alpha_composite(canvas, panel)
     add_card_borders(canvas, teams, assets, row_height, step, slant, scale)
     add_badges(canvas, teams, assets, row_height, step, scale, compact)

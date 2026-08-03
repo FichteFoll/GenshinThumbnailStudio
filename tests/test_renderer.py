@@ -2,12 +2,14 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
+from genshin_thumbnail_studio import renderer
 from genshin_thumbnail_studio.models import Asset, Build, Project
 from genshin_thumbnail_studio.renderer import (
     BACKGROUND_COLOR,
     ELEMENT_COLORS,
     RARITY_COLORS,
     badge_geometry,
+    clear_render_cache,
     export_project,
     find_font,
     hex_to_rgba,
@@ -314,3 +316,98 @@ def test_weapon_circle_outline_uses_element_color(tmp_path: Path) -> None:
     # The outline was plain white before; make sure it no longer is, so this
     # test fails if the element color stops being applied.
     assert not _color_present_in_box(preview, ring, "#ffffff", tolerance=12)
+
+
+def _patch_counting_open(monkeypatch) -> list[str]:
+    """Wrap PIL's Image.open with a call-recording proxy, so a test can
+    assert on which paths were (re)opened without mocking away the actual
+    decoding (the returned image is still real, from the original open)."""
+    opened: list[str] = []
+    real_open = Image.open
+
+    def counting_open(fp, *args, **kwargs):
+        opened.append(str(fp))
+        return real_open(fp, *args, **kwargs)
+
+    monkeypatch.setattr(renderer.Image, "open", counting_open)
+    return opened
+
+
+def test_repeated_render_reuses_panel_cache(tmp_path, monkeypatch) -> None:
+    clear_render_cache()
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)
+
+    opened = _patch_counting_open(monkeypatch)
+    first = render_preview(project, assets)
+    assert opened  # sanity: the first render actually opened art/weapon files
+
+    opened.clear()
+    second = render_preview(project, assets)
+
+    assert opened == []  # nothing reopened: every panel/icon was cache hit
+    assert second.tobytes() == first.tobytes()
+
+
+def test_changing_one_placement_only_recomputes_that_slot(tmp_path, monkeypatch) -> None:
+    clear_render_cache()
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)
+
+    render_preview(project, assets)  # warm the cache for every slot
+
+    changed_member = project.teams[0][0]
+    changed_member.fx = 0.9  # differs from the Placement default of 0.50
+
+    opened = _patch_counting_open(monkeypatch)
+    render_preview(project, assets)
+
+    changed_art_path = str(assets[names[0].casefold()].art_path)
+    untouched_art_paths = {str(assets[name.casefold()].art_path) for name in names[1:]}
+    assert changed_art_path in opened
+    assert not (untouched_art_paths & set(opened))
+
+
+def test_clear_render_cache_forces_full_recompute(tmp_path, monkeypatch) -> None:
+    clear_render_cache()
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)
+
+    render_preview(project, assets)  # warm the cache
+
+    clear_render_cache()
+    opened = _patch_counting_open(monkeypatch)
+    render_preview(project, assets)
+
+    all_art_paths = {str(asset.art_path) for asset in assets.values()}
+    assert all_art_paths <= set(opened)
+
+
+def test_swapping_slots_with_warm_cache_matches_fresh_render(tmp_path: Path) -> None:
+    """Regression test: the panel cache key must include the slot's
+    position (index/row/num_rows), not just the placement's own fields.
+    Otherwise swapping two placements within a team (as the drag-and-drop
+    swap_slots GUI feature does) would reuse the other slot's stale,
+    already-positioned cached layer instead of re-rendering at the new
+    position."""
+    clear_render_cache()
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)
+
+    render_preview(project, assets)  # warm the cache for every slot
+
+    project.teams[0][0], project.teams[0][1] = project.teams[0][1], project.teams[0][0]
+    warm_cache_result = render_preview(project, assets)
+
+    clear_render_cache()
+    fresh_result = render_preview(project, assets)
+
+    assert warm_cache_result.tobytes() == fresh_result.tobytes()
