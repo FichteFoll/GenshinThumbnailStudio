@@ -11,6 +11,8 @@ from genshin_thumbnail_studio.renderer import (
     export_project,
     find_font,
     hex_to_rgba,
+    panel_background,
+    render_image,
     render_preview,
 )
 
@@ -224,6 +226,59 @@ def test_badge_constellation_and_refinement_use_distinct_rarity_colors(tmp_path:
 
     assert _color_present_in_box(preview, geometry.box, RARITY_COLORS[5])
     assert _color_present_in_box(preview, geometry.box, RARITY_COLORS[4])
+
+
+def test_preview_renders_placeholder_panel_for_missing_asset(tmp_path: Path) -> None:
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    # Leave the first slot's asset undownloaded; every other slot has one.
+    assets = create_assets(tmp_path, names[1:])
+
+    preview = render_preview(project, assets)
+    assert preview.size == (1280, 720)
+
+    # A point well inside the first (placeholder) slot, away from borders and
+    # the shared-edge gap, mapped from panel-local to canvas coordinates the
+    # same way make_panel()/placeholder_panel() paste onto the canvas
+    # (index * step - slant, row * row_height).
+    panel_width, slant, row_height = 340, 38, 360
+    target = (panel_width + slant * 2, row_height)
+    placeholder_color = project.teams[0][0].color
+    expected = panel_background(target, placeholder_color, compact=True)
+    local_point = (188, 180)
+    canvas_point = (local_point[0] - slant, local_point[1])
+
+    assert preview.getpixel(canvas_point) == expected.getpixel(local_point)[:3]
+
+    # A slot with a real asset still composites character art on top of its
+    # background gradient, so its pixel must differ from a plain
+    # panel_background-only render at the same local point.
+    real_color = project.teams[0][1].color
+    plain_background = panel_background(target, real_color, compact=True)
+    real_canvas_point = (1 * 320 - slant + local_point[0], local_point[1])
+    assert preview.getpixel(real_canvas_point) != plain_background.getpixel(local_point)[:3]
+
+
+def test_render_image_requires_complete_assets_by_default(tmp_path: Path) -> None:
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names[1:])  # missing the first slot's asset
+
+    try:
+        render_image(project.teams, assets, compact=True, scale=1)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Expected render_image() to raise for a missing asset by default")
+
+    try:
+        export_project(project, assets, tmp_path / "out")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Expected export_project() to raise for a missing asset")
 
 
 def test_weapon_circle_outline_uses_element_color(tmp_path: Path) -> None:
