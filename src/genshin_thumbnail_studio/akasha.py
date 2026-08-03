@@ -380,7 +380,7 @@ class AkashaWebClient:
         deadline = time.monotonic() + timeout_seconds
         while time.monotonic() < deadline:
             if progress:
-                progress("Akasha aktualisiert die Builds ...")
+                progress("Akasha is refreshing the builds ...")
             time.sleep(3)
             try:
                 payload = self.json(f"{API_ROOT}/user/{uid}")

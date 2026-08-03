@@ -134,7 +134,7 @@ class PreviewWidget(QFrame):
         rect = self._image_rect()
         if not self._pixmap or rect.isEmpty():
             painter.setPen(QColor("#8f96a3"))
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Profil laden und Vorschau erzeugen")
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Load a profile and generate a preview")
             return
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         painter.drawPixmap(rect, self._pixmap)
@@ -206,7 +206,7 @@ class _SlotDragHandle(QLabel):
         self.setFixedWidth(18)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
-        self.setToolTip("Ziehen, um Plätze zu vertauschen")
+        self.setToolTip("Drag to swap slots")
         self._drag_start: QPoint | None = None
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -346,18 +346,18 @@ class MainWindow(QMainWindow):
         self.uid_edit = QLineEdit()
         self.uid_edit.setPlaceholderText("Genshin UID")
         self.uid_edit.setMaxLength(12)
-        self.load_button = QPushButton("Profil laden")
+        self.load_button = QPushButton("Load profile")
         self.load_button.clicked.connect(self.load_profile)
         uid_row.addWidget(self.uid_edit, 1)
         uid_row.addWidget(self.load_button)
         controls_layout.addLayout(uid_row)
 
-        self.profile_status = QLabel("Kein Profil geladen")
+        self.profile_status = QLabel("No profile loaded")
         self.profile_status.setObjectName("secondary")
         self.profile_status.setWordWrap(True)
         controls_layout.addWidget(self.profile_status)
 
-        paste_button = QPushButton("Teamaufstellung einf\u00fcgen")
+        paste_button = QPushButton("Paste lineup")
         paste_button.clicked.connect(self.paste_teams)
         controls_layout.addWidget(paste_button)
 
@@ -374,26 +374,26 @@ class MainWindow(QMainWindow):
         output_form = QFormLayout()
         self.output_name = QLineEdit("genshin_thumbnail")
         self.output_name.textChanged.connect(lambda value: setattr(self.project, "output_name", value))
-        output_form.addRow("Dateiname", self.output_name)
+        output_form.addRow("File name", self.output_name)
         self.resolution_combo = QComboBox()
         for label, height in RESOLUTION_OPTIONS:
             self.resolution_combo.addItem(label, height)
         self.resolution_combo.currentIndexChanged.connect(self._resolution_changed)
-        output_form.addRow("Auflösung", self.resolution_combo)
+        output_form.addRow("Resolution", self.resolution_combo)
         controls_layout.addLayout(output_form)
 
         project_row = QHBoxLayout()
-        open_button = QPushButton(self._icon(QStyle.StandardPixmap.SP_DialogOpenButton), "Projekt \u00f6ffnen")
-        save_button = QPushButton(self._icon(QStyle.StandardPixmap.SP_DialogSaveButton), "Projekt speichern")
+        open_button = QPushButton(self._icon(QStyle.StandardPixmap.SP_DialogOpenButton), "Open project")
+        save_button = QPushButton(self._icon(QStyle.StandardPixmap.SP_DialogSaveButton), "Save project")
         open_button.clicked.connect(self.open_project)
         save_button.clicked.connect(self.save_project)
         project_row.addWidget(open_button)
         project_row.addWidget(save_button)
         controls_layout.addLayout(project_row)
 
-        self.preview_button = QPushButton("Vorschau erzeugen")
+        self.preview_button = QPushButton("Generate preview")
         self.preview_button.clicked.connect(self.prepare_preview)
-        self.export_button = QPushButton(self._icon(QStyle.StandardPixmap.SP_DialogSaveButton), "PNG exportieren")
+        self.export_button = QPushButton(self._icon(QStyle.StandardPixmap.SP_DialogSaveButton), "Export PNG")
         self.export_button.clicked.connect(self.export)
         controls_layout.addWidget(self.preview_button)
         controls_layout.addWidget(self.export_button)
@@ -404,7 +404,7 @@ class MainWindow(QMainWindow):
         right_layout.setSpacing(10)
 
         preview_toolbar = QHBoxLayout()
-        self.preview_team_label = QLabel("Vorschau")
+        self.preview_team_label = QLabel("Preview")
         self.boss_combo = QComboBox()
         self.boss_combo.addItems(["Boss 1", "Boss 2", "Boss 3"])
         self.boss_combo.setVisible(False)
@@ -421,7 +421,7 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self.preview, 1)
 
         placement_row = QHBoxLayout()
-        self.selected_label = QLabel("Team 1, Figur 1")
+        self.selected_label = QLabel("Team 1, character 1")
         self.x_slider = self._slider(0, 1000, 500)
         self.y_slider = self._slider(0, 1000, 520)
         self.zoom_slider = self._slider(70, 180, 106)
@@ -430,7 +430,7 @@ class MainWindow(QMainWindow):
         self.zoom_value = QLabel("106%")
         for slider in [self.x_slider, self.y_slider, self.zoom_slider]:
             slider.valueChanged.connect(self._placement_slider_changed)
-        reset_button = QPushButton("Zur\u00fccksetzen")
+        reset_button = QPushButton("Reset")
         reset_button.clicked.connect(self.reset_placement)
         placement_row.addWidget(self.selected_label)
         placement_row.addSpacing(12)
@@ -450,7 +450,7 @@ class MainWindow(QMainWindow):
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
-        self.statusBar().showMessage("Bereit")
+        self.statusBar().showMessage("Ready")
 
         self.setStyleSheet(
             """
@@ -499,7 +499,7 @@ class MainWindow(QMainWindow):
                 combo = QComboBox()
                 combo.setEditable(True)
                 combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-                combo.setPlaceholderText(f"Figur {slot_index + 1}")
+                combo.setPlaceholderText(f"Character {slot_index + 1}")
                 if member.name:
                     combo.setCurrentText(member.name)
                 combo.currentTextChanged.connect(
@@ -621,7 +621,7 @@ class MainWindow(QMainWindow):
         self.resolution_combo.setCurrentIndex(resolution_index if resolution_index >= 0 else 1)
         self._updating_controls = False
         label = "Team" if self.project.mode == "abyss" else "Boss"
-        self.selected_label.setText(f"{label} {team + 1}, Figur {slot + 1}")
+        self.selected_label.setText(f"{label} {team + 1}, character {slot + 1}")
         self.x_value.setText(f"{member.fx * 100:.0f}%")
         self.y_value.setText(f"{member.fy * 100:.0f}%")
         self.zoom_value.setText(f"{member.zoom * 100:.0f}%")
@@ -680,14 +680,14 @@ class MainWindow(QMainWindow):
                 builds, age, last = self.client.load_profile(uid)
             except StaleProfileError as stale:
                 dialog = QMessageBox(self)
-                dialog.setWindowTitle("Akasha-Profil ist \u00e4lter als eine Stunde")
-                dialog.setText(f"Letzte Aktualisierung vor {stale.age_minutes / 60:.1f} Stunden.")
-                refresh_button = dialog.addButton("Jetzt aktualisieren", QMessageBox.ButtonRole.AcceptRole)
-                stale_button = dialog.addButton("Trotzdem laden", QMessageBox.ButtonRole.ActionRole)
+                dialog.setWindowTitle("Akasha profile is older than one hour")
+                dialog.setText(f"Last updated {stale.age_minutes / 60:.1f} hours ago.")
+                refresh_button = dialog.addButton("Refresh now", QMessageBox.ButtonRole.AcceptRole)
+                stale_button = dialog.addButton("Load anyway", QMessageBox.ButtonRole.ActionRole)
                 dialog.addButton(QMessageBox.StandardButton.Cancel)
                 dialog.exec()
                 if dialog.clickedButton() == refresh_button:
-                    self.statusBar().showMessage("Akasha wird aktualisiert ...")
+                    self.statusBar().showMessage("Refreshing Akasha ...")
                     QApplication.restoreOverrideCursor()
                     if not self.client.refresh_profile(uid, progress=lambda text: self.statusBar().showMessage(text)):
                         raise AkashaError("Akasha refresh did not finish within 90 seconds.")
@@ -701,11 +701,11 @@ class MainWindow(QMainWindow):
             save_profile_cache(uid, builds, last)
             self.assets = {}
             self._populate_combo_items()
-            local = last.astimezone().strftime("%d.%m.%Y %H:%M")
-            self.profile_status.setText(f"{len(builds)} Builds \u00b7 zuletzt aktualisiert {local} \u00b7 vor {age:.0f} min")
-            self.statusBar().showMessage("Akasha-Profil geladen", 5000)
+            local = last.astimezone().strftime("%Y-%m-%d %H:%M")
+            self.profile_status.setText(f"{len(builds)} builds \u00b7 last updated {local} \u00b7 {age:.0f} min ago")
+            self.statusBar().showMessage("Akasha profile loaded", 5000)
         except Exception as error:
-            self._show_error("Profil konnte nicht geladen werden", error)
+            self._show_error("Could not load profile", error)
         finally:
             QApplication.restoreOverrideCursor()
             self.load_button.setEnabled(True)
@@ -714,15 +714,15 @@ class MainWindow(QMainWindow):
         expected = 8 if self.project.mode == "abyss" else 12
         text, ok = QInputDialog.getMultiLineText(
             self,
-            "Teamaufstellung",
-            f"{expected} Figurennamen in Reihenfolge, getrennt durch Komma, Semikolon, "
-            "senkrechten Strich (|) oder Zeilenumbruch:",
+            "Lineup",
+            f"{expected} character names in order, separated by comma, semicolon, "
+            "pipe (|), or newline:",
         )
         if not ok:
             return
         names = parse_lineup(text)
         if len(names) != expected:
-            self._show_error("Ung\u00fcltige Teamaufstellung", f"Erwartet: {expected} Namen. Gefunden: {len(names)}.")
+            self._show_error("Invalid lineup", f"Expected {expected} names, found {len(names)}.")
             return
         for index, name in enumerate(names):
             team, slot = divmod(index, 4)
@@ -737,11 +737,11 @@ class MainWindow(QMainWindow):
                 self.project.teams[team_index][slot_index].name = name
                 build = self.builds.get(name.casefold())
                 if build is None:
-                    missing.append(f"{team_index + 1}-{slot_index + 1}: {name or 'leer'}")
+                    missing.append(f"{team_index + 1}-{slot_index + 1}: {name or 'empty'}")
                 else:
                     selected.append(build)
         if missing:
-            raise ValueError("Build nicht im geladenen Profil: " + ", ".join(missing))
+            raise ValueError("Build not in the loaded profile: " + ", ".join(missing))
         unique = {build.name.casefold(): build for build in selected}
         return list(unique.values())
 
@@ -759,9 +759,9 @@ class MainWindow(QMainWindow):
             self.preview_button.setEnabled(False)
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
             self._generate_preview_from_builds(builds)
-            self.statusBar().showMessage("Vorschau bereit", 5000)
+            self.statusBar().showMessage("Preview ready", 5000)
         except Exception as error:
-            self._show_error("Vorschau konnte nicht erzeugt werden", error)
+            self._show_error("Could not generate preview", error)
         finally:
             QApplication.restoreOverrideCursor()
             self.preview_button.setEnabled(True)
@@ -772,7 +772,7 @@ class MainWindow(QMainWindow):
             builds,
             cache_dir() / "assets",
             progress=lambda current, total, name: (
-                self.statusBar().showMessage(f"Lade {name} ({current}/{total}) ..."),
+                self.statusBar().showMessage(f"Downloading {name} ({current}/{total}) ..."),
                 QApplication.processEvents(),
             ),
             on_asset=self._on_asset_ready,
@@ -819,21 +819,21 @@ class MainWindow(QMainWindow):
                 self.prepare_preview()
             if set(self._selected_name_keys()) - set(self.assets):
                 return
-            directory = QFileDialog.getExistingDirectory(self, "Ausgabeordner w\u00e4hlen")
+            directory = QFileDialog.getExistingDirectory(self, "Choose output folder")
             if not directory:
                 return
             self.project.output_name = self.output_name.text().strip() or "genshin_thumbnail"
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
             written = export_project(self.project, self.assets, Path(directory))
-            QMessageBox.information(self, "Export abgeschlossen", "\n".join(str(path) for path in written))
-            self.statusBar().showMessage(f"{len(written)} Thumbnail(s) exportiert", 7000)
+            QMessageBox.information(self, "Export finished", "\n".join(str(path) for path in written))
+            self.statusBar().showMessage(f"Exported {len(written)} thumbnail(s)", 7000)
         except Exception as error:
-            self._show_error("Export fehlgeschlagen", error)
+            self._show_error("Export failed", error)
         finally:
             QApplication.restoreOverrideCursor()
 
     def save_project(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, "Projekt speichern", "thumbnail-project.json", "JSON (*.json)")
+        path, _ = QFileDialog.getSaveFileName(self, "Save project", "thumbnail-project.json", "JSON (*.json)")
         if not path:
             return
         try:
@@ -843,10 +843,10 @@ class MainWindow(QMainWindow):
         self.project.uid = self.uid_edit.text().strip()
         self.project.output_name = self.output_name.text().strip() or "genshin_thumbnail"
         save_project(self.project, Path(path))
-        self.statusBar().showMessage("Projekt gespeichert", 5000)
+        self.statusBar().showMessage("Project saved", 5000)
 
     def open_project(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Projekt \u00f6ffnen", "", "JSON (*.json)")
+        path, _ = QFileDialog.getOpenFileName(self, "Open project", "", "JSON (*.json)")
         if not path:
             return
         try:
@@ -869,36 +869,36 @@ class MainWindow(QMainWindow):
             cached = load_profile_cache(project.uid)
             if cached is None:
                 self.statusBar().showMessage(
-                    "Projekt ge\u00f6ffnet \u00b7 kein zwischengespeichertes Profil f\u00fcr diese UID gefunden", 8000
+                    "Project opened \u00b7 no cached profile found for this UID", 8000
                 )
                 return
             builds, last_update = cached
             self.builds = {build.name.casefold(): build for build in builds}
             self._populate_combo_items()
             age_minutes = max(0.0, (datetime.now(timezone.utc) - last_update).total_seconds() / 60)
-            local = last_update.astimezone().strftime("%d.%m.%Y %H:%M")
+            local = last_update.astimezone().strftime("%Y-%m-%d %H:%M")
             self.profile_status.setText(
-                f"{len(builds)} Builds · aus Cache · zuletzt aktualisiert {local} · vor {age_minutes:.0f} min"
+                f"{len(builds)} builds · from cache · last updated {local} · {age_minutes:.0f} min ago"
             )
             self._auto_preview()
             if age_minutes > 60:
                 self._offer_cache_refresh(age_minutes)
-            self.statusBar().showMessage("Projekt ge\u00f6ffnet", 5000)
+            self.statusBar().showMessage("Project opened", 5000)
         except Exception as error:
-            self._show_error("Projekt konnte nicht ge\u00f6ffnet werden", error)
+            self._show_error("Could not open project", error)
 
     def _auto_preview(self) -> None:
         """Render a preview from already loaded builds, reporting failures without aborting the caller."""
         try:
             self._generate_preview_from_builds(self._validate_team())
         except Exception as error:
-            self._show_error("Vorschau konnte nicht erzeugt werden", error)
+            self._show_error("Could not generate preview", error)
 
     def _offer_cache_refresh(self, age_minutes: float) -> None:
         dialog = QMessageBox(self)
-        dialog.setWindowTitle("Zwischengespeichertes Profil ist \u00e4lter als eine Stunde")
-        dialog.setText(f"Zuletzt aktualisiert vor {age_minutes / 60:.1f} Stunden.")
-        refresh_button = dialog.addButton("Jetzt aktualisieren", QMessageBox.ButtonRole.AcceptRole)
+        dialog.setWindowTitle("Cached profile is older than one hour")
+        dialog.setText(f"Last updated {age_minutes / 60:.1f} hours ago.")
+        refresh_button = dialog.addButton("Refresh now", QMessageBox.ButtonRole.AcceptRole)
         dialog.addButton(QMessageBox.StandardButton.Cancel)
         dialog.exec()
         if dialog.clickedButton() != refresh_button:

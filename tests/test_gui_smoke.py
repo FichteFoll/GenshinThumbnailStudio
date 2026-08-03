@@ -141,7 +141,7 @@ def test_open_project_with_stale_cache_offers_refresh(tmp_path, monkeypatch) -> 
     wait_for_render(window, app)
 
     assert len(StubMessageBox.instances) == 1
-    assert "2.0 Stunden" in StubMessageBox.instances[0].text
+    assert "2.0 hours" in StubMessageBox.instances[0].text
     assert not refreshed
     assert sorted(window.builds) == sorted(name.casefold() for name in TEAM_NAMES)
     assert window.preview._pixmap is not None
@@ -164,7 +164,7 @@ def test_open_project_without_cache_shows_hint(tmp_path, monkeypatch) -> None:
     window.open_project()
 
     assert not window.builds
-    assert "kein zwischengespeichertes Profil" in window.statusBar().currentMessage()
+    assert "no cached profile" in window.statusBar().currentMessage()
 
     window.close()
     app.processEvents()
