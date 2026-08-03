@@ -97,6 +97,8 @@ class Project:
             raise ValueError("Project mode must be abyss or stygian.")
         schema_version = int(value.get("schemaVersion", 1))
         if schema_version <= 1:
+            # Version 1 files predate the setting and were rendered at the
+            # then-hardcoded 720p, so keep their output size unchanged.
             output_height = 720
         else:
             output_height = int(value.get("outputHeight", 1080))
