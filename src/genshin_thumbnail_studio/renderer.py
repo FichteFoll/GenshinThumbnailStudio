@@ -19,6 +19,16 @@ CARD_BORDER = LINE
 CARD_GAP = 2 * LINE
 BACKGROUND_COLOR = (14, 14, 18, 255)  # #0e0e12
 
+ELEMENT_COLORS = {
+    "anemo": "#74c2a8",
+    "geo": "#ffb84d",
+    "electro": "#b08fc9",
+    "dendro": "#a5c83b",
+    "hydro": "#4cc2f1",
+    "pyro": "#ff7b52",
+    "cryo": "#9fe7ef",
+}
+
 
 def safe_name(value: str) -> str:
     cleaned = re.sub(r'[<>:"/\\|?*]+', "_", value).strip(" ._")
@@ -30,6 +40,15 @@ def hex_to_rgba(value: str, alpha: int) -> tuple[int, int, int, int]:
     if not re.fullmatch(r"[0-9a-fA-F]{6}", raw):
         raise ValueError(f"Invalid color: {value}")
     return tuple(int(raw[index : index + 2], 16) for index in (0, 2, 4)) + (alpha,)
+
+
+def card_color(member: Placement, asset: Asset) -> str:
+    """The card's element-inspired accent color, falling back to the
+    placement's own color when the element is unknown or missing."""
+    element = asset.build.element
+    if element and element.casefold() in ELEMENT_COLORS:
+        return ELEMENT_COLORS[element.casefold()]
+    return member.color
 
 
 def find_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -160,7 +179,8 @@ def make_panel(
 ) -> Image.Image:
     art = Image.open(asset.art_path).convert("RGBA")
     target = (panel_width + slant * 2, row_height)
-    background = panel_background(target, member.color, compact)
+    color = card_color(member, asset)
+    background = panel_background(target, color, compact)
     glow = cover_resize_focal(art, target, member.fx, member.fy, member.zoom * 0.78)
     glow = glow.filter(ImageFilter.GaussianBlur((14 if compact else 18) * scale))
     glow = ImageEnhance.Color(glow).enhance(1.20 if compact else 1.25)
@@ -175,7 +195,7 @@ def make_panel(
     shadow.putalpha(shadow_blur.point(lambda value: int(value * (0.35 if compact else 0.38))))
     panel = Image.alpha_composite(background, shadow)
     panel = Image.alpha_composite(panel, crop)
-    panel = Image.alpha_composite(panel, Image.new("RGBA", panel.size, hex_to_rgba(member.color, 14 if compact else 18)))
+    panel = Image.alpha_composite(panel, Image.new("RGBA", panel.size, hex_to_rgba(color, 14 if compact else 18)))
 
     shade = Image.new("RGBA", panel.size, (0, 0, 0, 0))
     shade_draw = ImageDraw.Draw(shade)
@@ -203,7 +223,13 @@ def make_panel(
 
 
 def add_card_borders(
-    image: Image.Image, teams: list[list[Placement]], row_height: int, step: float, slant: int, scale: int
+    image: Image.Image,
+    teams: list[list[Placement]],
+    assets: dict[str, Asset],
+    row_height: int,
+    step: float,
+    slant: int,
+    scale: int,
 ) -> None:
     width, _ = image.size
     gap = CARD_GAP * scale
@@ -212,8 +238,9 @@ def add_card_borders(
     draw = ImageDraw.Draw(image)
     for row, team in enumerate(teams):
         for index, member in enumerate(team):
+            asset = assets[member.name.casefold()]
             points = panel_polygon(index, row, num_rows, width, row_height, step, slant, gap, border)
-            draw.polygon(points, outline=hex_to_rgba(member.color, 255), width=round(border))
+            draw.polygon(points, outline=hex_to_rgba(card_color(member, asset), 255), width=round(border))
 
 
 @dataclass(frozen=True)
@@ -289,7 +316,7 @@ def add_badges(
                 geometry.box,
                 radius=(14 if compact else 18) * scale,
                 fill=(0, 0, 0, 178),
-                outline=hex_to_rgba(member.color, 245),
+                outline=hex_to_rgba(card_color(member, asset), 245),
                 width=3 * scale,
             )
             draw.text(
@@ -350,7 +377,7 @@ def render_image(
                 compact,
             )
             canvas = Image.alpha_composite(canvas, panel)
-    add_card_borders(canvas, teams, row_height, step, slant, scale)
+    add_card_borders(canvas, teams, assets, row_height, step, slant, scale)
     add_badges(canvas, teams, assets, row_height, step, scale, compact)
     return canvas.convert("RGB").resize(output_size, Image.Resampling.LANCZOS)
 

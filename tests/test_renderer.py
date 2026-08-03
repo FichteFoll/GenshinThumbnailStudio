@@ -3,10 +3,20 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 from genshin_thumbnail_studio.models import Asset, Build, Project
-from genshin_thumbnail_studio.renderer import BACKGROUND_COLOR, badge_geometry, export_project, find_font, render_preview
+from genshin_thumbnail_studio.renderer import (
+    BACKGROUND_COLOR,
+    ELEMENT_COLORS,
+    badge_geometry,
+    export_project,
+    find_font,
+    hex_to_rgba,
+    render_preview,
+)
 
 
-def create_assets(directory: Path, names: list[str]) -> dict[str, Asset]:
+def create_assets(
+    directory: Path, names: list[str], elements: dict[str, str] | None = None
+) -> dict[str, Asset]:
     result = {}
     for index, name in enumerate(names):
         art_path = directory / f"art-{index}.png"
@@ -29,6 +39,7 @@ def create_assets(directory: Path, names: list[str]) -> dict[str, Asset]:
             last_build_update=None,
             art_url="https://example.invalid/art.png",
             weapon_url="https://example.invalid/weapon.png",
+            element=(elements or {}).get(name),
         )
         result[name.casefold()] = Asset(build, art_path, weapon_path)
     return result
@@ -77,6 +88,38 @@ def test_card_gap_shows_background_between_panels(tmp_path: Path) -> None:
     pixel = preview.getpixel((320, 180))
     assert isinstance(pixel, tuple)
     assert pixel[:3] == BACKGROUND_COLOR[:3]
+
+
+def test_element_color_used_for_card_border(tmp_path: Path) -> None:
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names, elements={names[0]: "Pyro"})
+    preview = render_preview(project, assets)
+
+    # The leftmost card's outer edge is inset by only half the border width
+    # (commit 4), so a pixel a couple of px in from the canvas edge, at a
+    # height clear of the top/bottom corner rounding, lands squarely on the
+    # border stroke.
+    pixel = preview.getpixel((3, 100))
+    assert isinstance(pixel, tuple)
+    assert pixel[:3] == hex_to_rgba(ELEMENT_COLORS["pyro"], 255)[:3]
+
+
+def test_unknown_element_falls_back_to_placement_color(tmp_path: Path) -> None:
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)  # no elements set -> Build.element is None
+    preview = render_preview(project, assets)
+
+    placement_color = project.teams[0][0].color
+    pixel = preview.getpixel((3, 100))
+    assert isinstance(pixel, tuple)
+    assert pixel[:3] == hex_to_rgba(placement_color, 255)[:3]
+    # Sanity check the fallback pixel is not coincidentally an element color,
+    # so this test would fail if card_color stopped falling back correctly.
+    assert pixel[:3] != hex_to_rgba(ELEMENT_COLORS["pyro"], 255)[:3]
 
 
 def test_stygian_exports_three_files(tmp_path: Path) -> None:
