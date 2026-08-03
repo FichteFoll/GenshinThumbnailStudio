@@ -1,4 +1,4 @@
-from genshin_thumbnail_studio.models import Build, Project
+from genshin_thumbnail_studio.models import Build, Placement, Project
 
 
 def test_build_round_trip() -> None:
@@ -44,15 +44,26 @@ def test_build_round_trip() -> None:
 def test_project_round_trip() -> None:
     project = Project.blank("stygian", "123456789")
     project.teams[1][2].name = "Test Character"
-    project.teams[1][2].fx = 0.42
+    project.teams[1][2].offset_x = 0.42
     project.output_height = 1440
+    assert project.to_dict()["schemaVersion"] == 3
     restored = Project.from_dict(project.to_dict())
     assert restored.mode == "stygian"
     assert len(restored.teams) == 3
     assert restored.teams[1][2].name == "Test Character"
-    assert restored.teams[1][2].fx == 0.42
+    assert restored.teams[1][2].offset_x == 0.42
     assert restored.output_height == 1440
     assert restored.output_size == (2560, 1440)
+
+
+def test_placement_from_dict_ignores_unknown_keys() -> None:
+    """A raw legacy payload must load with default framing rather than raise;
+    storage.load_project() is what converts the old focal point."""
+    placement = Placement.from_dict({"name": "Furina", "fx": 0.9, "fy": 0.1, "zoom": 1.2})
+    assert placement.name == "Furina"
+    assert placement.zoom == 1.2
+    assert placement.offset_x == Placement().offset_x
+    assert placement.offset_y == Placement().offset_y
 
 
 def test_project_output_height_defaults_to_1080p() -> None:

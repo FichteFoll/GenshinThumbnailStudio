@@ -8,11 +8,14 @@ from genshin_thumbnail_studio.renderer import (
     BACKGROUND_COLOR,
     ELEMENT_COLORS,
     RARITY_COLORS,
+    STANDARD_ART_SIZE,
     badge_geometry,
     clear_render_cache,
+    cover_resize_offset,
     export_project,
     find_font,
     hex_to_rgba,
+    max_offset,
     panel_background,
     panel_target_size,
     render_image,
@@ -67,6 +70,51 @@ def test_panel_target_size_scales_with_mode_and_scale() -> None:
     assert panel_target_size(compact=True, scale=2) == (832, 720)
     assert panel_target_size(compact=False) == (464, 720)
     assert panel_target_size(compact=False, scale=2) == (928, 1440)
+
+
+def _marker_center_x(image: Image.Image) -> float:
+    """Horizontal center of the red marker stripe in a crop's middle row."""
+    row = image.height // 2
+    columns = [x for x in range(image.width) if image.getpixel((x, row))[0] > 200]
+    assert columns, "marker stripe not visible in the crop"
+    return (columns[0] + columns[-1]) / 2
+
+
+def _marked_source() -> Image.Image:
+    source = Image.new("RGBA", STANDARD_ART_SIZE, (0, 0, 40, 255))
+    center_x = STANDARD_ART_SIZE[0] // 2
+    ImageDraw.Draw(source).rectangle(
+        (center_x - 20, 0, center_x + 19, STANDARD_ART_SIZE[1] - 1), fill=(255, 0, 0, 255)
+    )
+    return source
+
+
+def test_cover_resize_offset_centers_and_pans() -> None:
+    source = _marked_source()
+    target = panel_target_size(compact=True)
+
+    centered = cover_resize_offset(source, target, 0.0, 0.0, 1.0)
+    assert abs(_marker_center_x(centered) - target[0] / 2) <= 1
+
+    # A positive offset moves the visible content right by offset * panel width.
+    shifted = cover_resize_offset(source, target, 0.1, 0.0, 1.0)
+    assert abs(_marker_center_x(shifted) - _marker_center_x(centered) - 0.1 * target[0]) <= 1
+
+    mirrored = cover_resize_offset(source, target, -0.1, 0.0, 1.0)
+    assert abs(_marker_center_x(mirrored) - _marker_center_x(centered) + 0.1 * target[0]) <= 1
+
+
+def test_max_offset_matches_the_cover_fit_slack() -> None:
+    max_x, max_y = max_offset(STANDARD_ART_SIZE, compact=True, zoom=1.06)
+    assert abs(max_x - 0.417) < 0.001
+    assert abs(max_y - 0.030) < 0.001
+
+    # The crop cannot be panned past the reachable range.
+    source = _marked_source()
+    target = panel_target_size(compact=True)
+    at_limit = cover_resize_offset(source, target, max_x, 0.0, 1.06)
+    beyond_limit = cover_resize_offset(source, target, max_x + 0.5, 0.0, 1.06)
+    assert at_limit.tobytes() == beyond_limit.tobytes()
 
 
 def test_abyss_render_and_export(tmp_path: Path) -> None:
@@ -369,7 +417,7 @@ def test_changing_one_placement_only_recomputes_that_slot(tmp_path, monkeypatch)
     render_preview(project, assets)  # warm the cache for every slot
 
     changed_member = project.teams[0][0]
-    changed_member.fx = 0.9  # differs from the Placement default of 0.50
+    changed_member.offset_x = 0.4  # differs from the Placement default of 0.0
 
     opened = _patch_counting_open(monkeypatch)
     render_preview(project, assets)

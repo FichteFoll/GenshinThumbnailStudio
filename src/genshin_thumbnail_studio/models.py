@@ -48,11 +48,30 @@ class Asset:
 
 @dataclass
 class Placement:
+    """One character's framing inside its panel.
+
+    `offset_x`/`offset_y` are signed fractions of the panel size, measured from
+    the centered position: positive values move the portrait right/down.
+    """
+
     name: str = ""
-    fx: float = 0.50
-    fy: float = 0.52
+    offset_x: float = 0.0
+    offset_y: float = -0.02
     zoom: float = 1.06
     color: str = "#78d7ff"
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "Placement":
+        """Read the known keys, ignoring unknown ones, so that a legacy payload
+        loads with default framing instead of raising."""
+        defaults = cls()
+        return cls(
+            name=str(value.get("name", defaults.name)),
+            offset_x=float(value.get("offset_x", defaults.offset_x)),
+            offset_y=float(value.get("offset_y", defaults.offset_y)),
+            zoom=float(value.get("zoom", defaults.zoom)),
+            color=str(value.get("color", defaults.color)),
+        )
 
 
 @dataclass
@@ -88,7 +107,7 @@ class Project:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "schemaVersion": 2,
+            "schemaVersion": 3,
             "mode": self.mode,
             "uid": self.uid,
             "outputName": self.output_name,
@@ -116,7 +135,7 @@ class Project:
             output_height=output_height,
             active_team=int(value.get("activeTeam", 0)),
             teams=[
-                [Placement(**member) for member in team]
+                [Placement.from_dict(member) for member in team]
                 for team in value.get("teams", [])
             ],
         )

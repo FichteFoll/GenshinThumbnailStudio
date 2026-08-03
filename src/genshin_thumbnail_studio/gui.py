@@ -55,7 +55,14 @@ from PySide6.QtWidgets import (
 
 from .akasha import AkashaError, AkashaWebClient, Build, StaleProfileError, download_assets
 from .models import Asset, Placement, Project
-from .renderer import export_project, render_preview, safe_name
+from .renderer import (
+    STANDARD_ART_SIZE,
+    art_pixel_size,
+    export_project,
+    max_offset,
+    render_preview,
+    safe_name,
+)
 from .storage import (
     cache_dir,
     load_presets,
@@ -180,7 +187,7 @@ class PreviewWidget(QFrame):
         self._drag_last = current
         image_dx = delta.x() * 1280 / rect.width()
         image_dy = delta.y() * 720 / rect.height()
-        self.placement_dragged.emit(-image_dx / 900.0, -image_dy / 700.0)
+        self.placement_dragged.emit(image_dx / 900.0, image_dy / 700.0)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -423,11 +430,12 @@ class MainWindow(QMainWindow):
 
         placement_row = QHBoxLayout()
         self.selected_label = QLabel("Team 1, character 1")
-        self.x_slider = self._slider(0, 1000, 500)
-        self.y_slider = self._slider(0, 1000, 520)
+        # Placeholder offset ranges; _sync_controls() sets the reachable ones.
+        self.x_slider = self._slider(-500, 500, 0)
+        self.y_slider = self._slider(-500, 500, -20)
         self.zoom_slider = self._slider(70, 180, 106)
-        self.x_value = QLabel("50%")
-        self.y_value = QLabel("52%")
+        self.x_value = QLabel("+0%")
+        self.y_value = QLabel("-2%")
         self.zoom_value = QLabel("106%")
         for slider in [self.x_slider, self.y_slider, self.zoom_slider]:
             slider.valueChanged.connect(self._placement_slider_changed)
@@ -590,15 +598,19 @@ class MainWindow(QMainWindow):
     def _apply_preset(self, member: Placement) -> None:
         preset = self.presets.get(self._preset_key(member))
         if preset:
-            member.fx = float(preset.get("fx", member.fx))
-            member.fy = float(preset.get("fy", member.fy))
+            member.offset_x = float(preset.get("offset_x", member.offset_x))
+            member.offset_y = float(preset.get("offset_y", member.offset_y))
             member.zoom = float(preset.get("zoom", member.zoom))
 
     def _save_current_preset(self) -> None:
         member = self.current_member()
         if not member.name:
             return
-        self.presets[self._preset_key(member)] = {"fx": member.fx, "fy": member.fy, "zoom": member.zoom}
+        self.presets[self._preset_key(member)] = {
+            "offset_x": member.offset_x,
+            "offset_y": member.offset_y,
+            "zoom": member.zoom,
+        }
         save_presets(self.presets)
 
     def current_member(self) -> Placement:
@@ -609,6 +621,12 @@ class MainWindow(QMainWindow):
         self.selected = (team, slot)
         self._sync_controls()
 
+    def _offset_bounds(self, member: Placement) -> tuple[float, float]:
+        """Reachable +/- offset per axis for the member's art and zoom."""
+        asset = self.assets.get(member.name.casefold()) if member.name else None
+        art_size = art_pixel_size(str(asset.art_path)) if asset else STANDARD_ART_SIZE
+        return max_offset(art_size, self.project.mode == "abyss", member.zoom)
+
     def _sync_controls(self) -> None:
         team, slot = self.selected
         team = min(team, len(self.project.teams) - 1)
@@ -616,16 +634,23 @@ class MainWindow(QMainWindow):
         self.selected = (team, slot)
         member = self.current_member()
         self._updating_controls = True
-        self.x_slider.setValue(int(round(member.fx * 1000)))
-        self.y_slider.setValue(int(round(member.fy * 1000)))
+        max_x, max_y = self._offset_bounds(member)
+        self.x_slider.setRange(-round(max_x * 1000), round(max_x * 1000))
+        self.y_slider.setRange(-round(max_y * 1000), round(max_y * 1000))
+        self.x_slider.setValue(round(member.offset_x * 1000))
+        self.y_slider.setValue(round(member.offset_y * 1000))
+        # The sliders clamp to their range, so read the values back to keep the
+        # model from holding an offset the renderer could not reach anyway.
+        member.offset_x = self.x_slider.value() / 1000
+        member.offset_y = self.y_slider.value() / 1000
         self.zoom_slider.setValue(int(round(member.zoom * 100)))
         resolution_index = self.resolution_combo.findData(self.project.output_height)
         self.resolution_combo.setCurrentIndex(resolution_index if resolution_index >= 0 else 1)
         self._updating_controls = False
         label = "Team" if self.project.mode == "abyss" else "Boss"
         self.selected_label.setText(f"{label} {team + 1}, character {slot + 1}")
-        self.x_value.setText(f"{member.fx * 100:.0f}%")
-        self.y_value.setText(f"{member.fy * 100:.0f}%")
+        self.x_value.setText(f"{member.offset_x * 100:+.0f}%")
+        self.y_value.setText(f"{member.offset_y * 100:+.0f}%")
         self.zoom_value.setText(f"{member.zoom * 100:.0f}%")
         self.preview.set_context(self.project.mode, self.project.active_team, self.selected)
 
@@ -633,8 +658,8 @@ class MainWindow(QMainWindow):
         if self._updating_controls:
             return
         member = self.current_member()
-        member.fx = self.x_slider.value() / 1000
-        member.fy = self.y_slider.value() / 1000
+        member.offset_x = self.x_slider.value() / 1000
+        member.offset_y = self.y_slider.value() / 1000
         member.zoom = self.zoom_slider.value() / 100
         self._save_current_preset()
         self._sync_controls()
@@ -642,8 +667,9 @@ class MainWindow(QMainWindow):
 
     def drag_placement(self, dx: float, dy: float) -> None:
         member = self.current_member()
-        member.fx = min(1.0, max(0.0, member.fx + dx))
-        member.fy = min(1.0, max(0.0, member.fy + dy))
+        max_x, max_y = self._offset_bounds(member)
+        member.offset_x = min(max_x, max(-max_x, member.offset_x + dx))
+        member.offset_y = min(max_y, max(-max_y, member.offset_y + dy))
         self._save_current_preset()
         self._sync_controls()
         self.schedule_render()
@@ -657,8 +683,9 @@ class MainWindow(QMainWindow):
 
     def reset_placement(self) -> None:
         member = self.current_member()
-        member.fx = 0.50
-        member.fy = 0.52
+        defaults = Placement()
+        member.offset_x = defaults.offset_x
+        member.offset_y = defaults.offset_y
         member.zoom = 1.06 if self.project.mode == "abyss" else 1.18
         self._save_current_preset()
         self._sync_controls()
