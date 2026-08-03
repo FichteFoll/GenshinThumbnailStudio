@@ -45,6 +45,16 @@ RESOLUTION_OPTIONS = [
 ]
 
 
+def parse_lineup(text: str) -> list[str]:
+    """Split pasted lineup text into character names.
+
+    Accepts comma, semicolon, pipe, and newline as separators (and any
+    mix/repetition thereof), stripping whitespace and dropping empty
+    fragments (e.g. from trailing or doubled separators).
+    """
+    return [value.strip() for value in re.split(r"[,;|\n]+", text) if value.strip()]
+
+
 class PreviewWidget(QFrame):
     slot_selected = Signal(int, int)
     placement_dragged = Signal(float, float)
@@ -554,11 +564,12 @@ class MainWindow(QMainWindow):
         text, ok = QInputDialog.getMultiLineText(
             self,
             "Teamaufstellung",
-            f"{expected} Figurennamen in Reihenfolge, getrennt durch Komma oder Zeilenumbruch:",
+            f"{expected} Figurennamen in Reihenfolge, getrennt durch Komma, Semikolon, "
+            "senkrechten Strich (|) oder Zeilenumbruch:",
         )
         if not ok:
             return
-        names = [value.strip() for value in re.split(r"[,;\n]+", text) if value.strip()]
+        names = parse_lineup(text)
         if len(names) != expected:
             self._show_error("Ung\u00fcltige Teamaufstellung", f"Erwartet: {expected} Namen. Gefunden: {len(names)}.")
             return
