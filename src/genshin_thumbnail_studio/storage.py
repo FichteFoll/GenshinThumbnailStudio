@@ -7,7 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .models import Build, Project
+from . import renderer
+from .models import Build, Placement, Project
 
 
 def app_data_dir() -> Path:
@@ -38,10 +39,62 @@ def save_project(project: Project, path: Path) -> None:
     path.write_text(json.dumps(project.to_dict(), indent=2), encoding="utf-8")
 
 
+def _clamp_to_cover_fit(offset: float, resized: int, target: int) -> float:
+    """Clamp a migrated offset to the range the focal point could reach.
+
+    Focal points were clamped to the cover-fit slack, so a saturated `fy` of
+    1.0 meant "the bottom edge of the art". Converting it verbatim would yield
+    an offset far outside that slack, which the renderer would then clamp to
+    its own, wider limit, shifting the portrait. Clamping here keeps a migrated
+    file framed the way it was saved.
+    """
+    limit = (resized - target) / (2 * target)
+    return max(-limit, min(limit, offset))
+
+
+def _migrate_focal_point(placement: dict[str, Any], compact: bool) -> dict[str, Any]:
+    """Convert a pre-v3 `fx`/`fy` focal point into panel-relative offsets.
+
+    The old focal point was a position in *source-art* space, so the conversion
+    depends on the art's aspect ratio. The art is not available when a file is
+    read, so the standard Enka splash art is assumed; placements using off-spec
+    art shift slightly on first load and can simply be re-dragged.
+    """
+    if "fx" not in placement and "fy" not in placement:
+        return placement
+    migrated = {key: value for key, value in placement.items() if key not in {"fx", "fy"}}
+    try:
+        zoom = float(placement.get("zoom", Placement().zoom))
+        target_w, target_h = renderer.panel_target_size(compact)
+        resized_w, resized_h = renderer.resized_art_size(renderer.STANDARD_ART_SIZE, compact, zoom)
+        if "fx" in placement:
+            offset_x = (0.5 - float(placement["fx"])) * resized_w / target_w
+            migrated["offset_x"] = _clamp_to_cover_fit(offset_x, resized_w, target_w)
+        if "fy" in placement:
+            offset_y = (0.5 - float(placement["fy"])) * resized_h / target_h
+            migrated["offset_y"] = _clamp_to_cover_fit(offset_y, resized_h, target_h)
+    except (TypeError, ValueError):
+        return migrated
+    return migrated
+
+
 def load_project(path: Path) -> Project:
     value: Any = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(value, dict):
         raise ValueError("Project file must contain a JSON object.")
+    compact = str(value.get("mode", "abyss")).casefold() == "abyss"
+    teams = value.get("teams")
+    if isinstance(teams, list):
+        value = dict(value)
+        value["teams"] = [
+            [
+                _migrate_focal_point(member, compact) if isinstance(member, dict) else member
+                for member in team
+            ]
+            if isinstance(team, list)
+            else team
+            for team in teams
+        ]
     return Project.from_dict(value)
 
 
@@ -80,9 +133,18 @@ def load_presets() -> dict[str, dict[str, float]]:
         return {}
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
-        return value if isinstance(value, dict) else {}
     except (OSError, json.JSONDecodeError):
         return {}
+    if not isinstance(value, dict):
+        return {}
+    # Presets carry no mode of their own; it is the first half of their key
+    # (see gui._preset_key), and the geometry the conversion needs depends on it.
+    return {
+        key: _migrate_focal_point(preset, str(key).split("|", 1)[0] != "stygian")
+        if isinstance(preset, dict)
+        else preset
+        for key, preset in value.items()
+    }
 
 
 def save_presets(value: dict[str, dict[str, float]]) -> None:

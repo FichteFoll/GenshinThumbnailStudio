@@ -7,15 +7,21 @@ from genshin_thumbnail_studio.models import Asset, Build, Project
 from genshin_thumbnail_studio.renderer import (
     BACKGROUND_COLOR,
     ELEMENT_COLORS,
+    PAN_OVERSCAN,
     RARITY_COLORS,
+    STANDARD_ART_SIZE,
     badge_geometry,
     clear_render_cache,
+    cover_resize_offset,
     export_project,
     find_font,
     hex_to_rgba,
+    max_offset,
     panel_background,
+    panel_target_size,
     render_image,
     render_preview,
+    resized_art_size,
 )
 
 
@@ -59,6 +65,120 @@ def create_assets(
 def fill_project(project: Project, names: list[str]) -> None:
     for index, member in enumerate(member for team in project.teams for member in team):
         member.name = names[index]
+
+
+def test_panel_target_size_scales_with_mode_and_scale() -> None:
+    assert panel_target_size(compact=True) == (416, 360)
+    assert panel_target_size(compact=True, scale=2) == (832, 720)
+    assert panel_target_size(compact=False) == (464, 720)
+    assert panel_target_size(compact=False, scale=2) == (928, 1440)
+
+
+def _marker_center_x(image: Image.Image) -> float:
+    """Horizontal center of the red marker stripe in a crop's middle row."""
+    row = image.height // 2
+    columns = [x for x in range(image.width) if image.getpixel((x, row))[0] > 200]
+    assert columns, "marker stripe not visible in the crop"
+    return (columns[0] + columns[-1]) / 2
+
+
+def _marked_source() -> Image.Image:
+    source = Image.new("RGBA", STANDARD_ART_SIZE, (0, 0, 40, 255))
+    center_x = STANDARD_ART_SIZE[0] // 2
+    ImageDraw.Draw(source).rectangle(
+        (center_x - 20, 0, center_x + 19, STANDARD_ART_SIZE[1] - 1), fill=(255, 0, 0, 255)
+    )
+    return source
+
+
+def test_cover_resize_offset_centers_and_pans() -> None:
+    source = _marked_source()
+    target = panel_target_size(compact=True)
+
+    centered = cover_resize_offset(source, target, 0.0, 0.0, 1.0)
+    assert abs(_marker_center_x(centered) - target[0] / 2) <= 1
+
+    # A positive offset moves the visible content right by offset * panel width.
+    shifted = cover_resize_offset(source, target, 0.1, 0.0, 1.0)
+    assert abs(_marker_center_x(shifted) - _marker_center_x(centered) - 0.1 * target[0]) <= 1
+
+    mirrored = cover_resize_offset(source, target, -0.1, 0.0, 1.0)
+    assert abs(_marker_center_x(mirrored) - _marker_center_x(centered) + 0.1 * target[0]) <= 1
+
+
+def test_max_offset_matches_the_cover_fit_slack_plus_the_overscan() -> None:
+    max_x, max_y = max_offset(STANDARD_ART_SIZE, compact=True, zoom=1.06)
+    assert abs(max_x - 0.517) < 0.001
+    assert abs(max_y - 0.130) < 0.001
+
+    # The crop cannot be panned past the reachable range.
+    source = _marked_source()
+    target = panel_target_size(compact=True)
+    at_limit = cover_resize_offset(source, target, max_x, 0.0, 1.06)
+    beyond_limit = cover_resize_offset(source, target, max_x + 0.5, 0.0, 1.06)
+    assert at_limit.tobytes() == beyond_limit.tobytes()
+
+
+def test_vertical_max_offset_is_the_overscan_plus_half_the_zoom() -> None:
+    # The 2:1 splash art is wider than every panel, so it always fits the panel
+    # height exactly at zoom 1 and the only vertical slack comes from the zoom.
+    for compact in (True, False):
+        for zoom in (1.06, 1.18, 1.80):
+            _, max_y = max_offset(STANDARD_ART_SIZE, compact=compact, zoom=zoom)
+            assert abs(max_y - (PAN_OVERSCAN + (zoom - 1) / 2)) < 0.001
+
+
+def _marker_center_y(image: Image.Image) -> float:
+    """Vertical center of the red marker stripe in a crop's middle column."""
+    column = image.width // 2
+    rows = [y for y in range(image.height) if image.getpixel((column, y))[0] > 200]
+    assert rows, "marker stripe not visible in the crop"
+    return (rows[0] + rows[-1]) / 2
+
+
+def _horizontally_marked_source() -> Image.Image:
+    source = Image.new("RGBA", STANDARD_ART_SIZE, (0, 0, 40, 255))
+    center_y = STANDARD_ART_SIZE[1] // 2
+    ImageDraw.Draw(source).rectangle(
+        (0, center_y - 20, STANDARD_ART_SIZE[0] - 1, center_y + 19), fill=(255, 0, 0, 255)
+    )
+    return source
+
+
+def _row_alpha(image: Image.Image, y: int) -> set[int]:
+    return {image.getpixel((x, y))[3] for x in range(image.width)}
+
+
+def test_vertical_overscan_pans_past_the_art_edge() -> None:
+    zoom = 1.06
+    source = _horizontally_marked_source()
+    target = panel_target_size(compact=True)
+    _, max_y = max_offset(STANDARD_ART_SIZE, compact=True, zoom=zoom)
+    resized_h = resized_art_size(STANDARD_ART_SIZE, compact=True, zoom=zoom)[1]
+    cover_fit_slack = (resized_h - target[1]) / (2 * target[1])
+
+    centered = cover_resize_offset(source, target, 0.0, 0.0, zoom)
+    assert _row_alpha(centered, 0) == {255}
+    assert _row_alpha(centered, target[1] - 1) == {255}
+
+    # Panning up runs the crop window off the bottom of the art, panning down
+    # off the top; the exposed strip is transparent so the glow shows through.
+    panned_up = cover_resize_offset(source, target, 0.0, -max_y, zoom)
+    assert _row_alpha(panned_up, target[1] - 1) == {0}
+    panned_down = cover_resize_offset(source, target, 0.0, max_y, zoom)
+    assert _row_alpha(panned_down, 0) == {0}
+
+    # The travel is well beyond what the bare cover-fit slack allowed.
+    travel = _marker_center_y(centered) - _marker_center_y(panned_up)
+    assert travel > cover_fit_slack * target[1] + 1
+    assert abs(travel - max_y * target[1]) <= 1
+
+
+def test_default_offsets_still_center_the_crop() -> None:
+    source = _marked_source()
+    target = panel_target_size(compact=True)
+    centered = cover_resize_offset(source, target, 0.0, 0.0, 1.06)
+    assert abs(_marker_center_x(centered) - target[0] / 2) <= 1
 
 
 def test_abyss_render_and_export(tmp_path: Path) -> None:
@@ -361,7 +481,7 @@ def test_changing_one_placement_only_recomputes_that_slot(tmp_path, monkeypatch)
     render_preview(project, assets)  # warm the cache for every slot
 
     changed_member = project.teams[0][0]
-    changed_member.fx = 0.9  # differs from the Placement default of 0.50
+    changed_member.offset_x = 0.4  # differs from the Placement default of 0.0
 
     opened = _patch_counting_open(monkeypatch)
     render_preview(project, assets)

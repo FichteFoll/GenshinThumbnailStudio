@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import collections
+import functools
 import math
 import re
 import threading
@@ -20,6 +21,17 @@ LINE = 3
 CARD_BORDER = LINE
 CARD_GAP = 2 * LINE
 BACKGROUND_COLOR = (14, 14, 18, 255)  # #0e0e12
+
+# Size of an Enka splash art. Used as a fallback wherever the real art is not
+# available (a placement whose asset has not been downloaded yet, or a legacy
+# project file, which stores no art dimensions).
+STANDARD_ART_SIZE = (2048, 1024)
+
+# The crop window may leave the art by this fraction of the panel size on
+# every side. Cover-fit alone leaves almost no vertical slack for 2:1 splash
+# art (only target_h * (zoom - 1)), which made vertical panning useless;
+# overscanning exposes a bounded strip of the glow/background layer instead.
+PAN_OVERSCAN = 0.10
 
 ELEMENT_COLORS = {
     "anemo": "#74c2a8",
@@ -86,26 +98,102 @@ def find_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
         return ImageFont.load_default()
 
 
-def cover_resize_focal(
+def panel_metrics(compact: bool, scale: int = 1) -> tuple[int, int, int]:
+    """Row height, panel width and slant overhang of one character panel."""
+    height = BASE_H * scale
+    row_height = height // 2 if compact else height
+    panel_width = (340 if compact else 360) * scale
+    slant = (38 if compact else 52) * scale
+    return row_height, panel_width, slant
+
+
+def panel_target_size(compact: bool, scale: int = 1) -> tuple[int, int]:
+    """Pixel size of the art crop for one panel, slant overhang included."""
+    row_height, panel_width, slant = panel_metrics(compact, scale)
+    return panel_width + slant * 2, row_height
+
+
+def cover_scale(source_size: tuple[int, int], target: tuple[int, int], zoom: float) -> float:
+    """Factor that scales the source art to cover the target box, times the zoom."""
+    source_w, source_h = source_size
+    target_w, target_h = target
+    return max(target_w / source_w, target_h / source_h) * zoom
+
+
+def _scaled_size(source_size: tuple[int, int], target: tuple[int, int], image_scale: float) -> tuple[int, int]:
+    source_w, source_h = source_size
+    return (
+        max(target[0], int(source_w * image_scale + 0.5)),
+        max(target[1], int(source_h * image_scale + 0.5)),
+    )
+
+
+def resized_art_size(
+    art_size: tuple[int, int], compact: bool, zoom: float, scale: int = 1
+) -> tuple[int, int]:
+    """Pixel size the art is resized to before it is cropped into one panel."""
+    target = panel_target_size(compact, scale)
+    return _scaled_size(art_size, target, cover_scale(art_size, target, zoom))
+
+
+def _offset_limits(resized: tuple[int, int], target: tuple[int, int]) -> tuple[float, float]:
+    """Largest panel-relative offset per axis that still moves the crop."""
+    return (
+        (resized[0] - target[0]) / (2 * target[0]) + PAN_OVERSCAN,
+        (resized[1] - target[1]) / (2 * target[1]) + PAN_OVERSCAN,
+    )
+
+
+def max_offset(
+    art_size: tuple[int, int], compact: bool, zoom: float, scale: int = 1
+) -> tuple[float, float]:
+    """Reachable +/- offset per axis, in fractions of the panel size.
+
+    Shares its formula with the clamp in `cover_resize_offset()`, so the GUI
+    slider bounds and the renderer can never disagree about the reachable range.
+    """
+    return _offset_limits(
+        resized_art_size(art_size, compact, zoom, scale), panel_target_size(compact, scale)
+    )
+
+
+def cover_resize_offset(
     image: Image.Image,
     size: tuple[int, int],
-    focal_x: float,
-    focal_y: float,
+    offset_x: float,
+    offset_y: float,
     zoom: float,
 ) -> Image.Image:
-    source_w, source_h = image.size
+    """Cover-fit `image` into `size`, panned by signed offsets.
+
+    The offsets are fractions of the target size, positive meaning the visible
+    content moves right/down. They are clamped to the reachable range first,
+    which includes `PAN_OVERSCAN`, so the crop box may extend past the resized
+    art by that margin. `Image.crop` pads such a box with zeroed (and hence,
+    for RGBA art, transparent) pixels, letting the panel background and glow
+    show through the overscanned strip without any extra compositing.
+    """
     target_w, target_h = size
-    source_x = source_w * min(1.0, max(0.0, focal_x))
-    source_y = source_h * min(1.0, max(0.0, focal_y))
-    image_scale = max(target_w / source_w, target_h / source_h) * zoom
-    resized_w = max(target_w, int(source_w * image_scale + 0.5))
-    resized_h = max(target_h, int(source_h * image_scale + 0.5))
+    image_scale = cover_scale(image.size, size, zoom)
+    resized_w, resized_h = _scaled_size(image.size, size, image_scale)
+    limit_x, limit_y = _offset_limits((resized_w, resized_h), size)
+    offset_x = min(limit_x, max(-limit_x, offset_x))
+    offset_y = min(limit_y, max(-limit_y, offset_y))
     resized = image.resize((resized_w, resized_h), Image.Resampling.LANCZOS)
-    left = int(round(source_x * image_scale - target_w / 2))
-    top = int(round(source_y * image_scale - target_h / 2))
-    left = max(0, min(left, resized_w - target_w))
-    top = max(0, min(top, resized_h - target_h))
+    left = int(round((resized_w - target_w) / 2 - offset_x * target_w))
+    top = int(round((resized_h - target_h) / 2 - offset_y * target_h))
     return resized.crop((left, top, left + target_w, top + target_h))
+
+
+@functools.lru_cache(maxsize=64)
+def art_pixel_size(path: str) -> tuple[int, int]:
+    """The art file's dimensions, read from its header without decoding it.
+
+    Kept out of the render caches on purpose: those hold images and are emptied
+    by `clear_render_cache()`, while a given file's dimensions never change.
+    """
+    with Image.open(path) as image:
+        return image.size
 
 
 def panel_polygon(
@@ -189,22 +277,21 @@ def make_panel(
     row: int,
     num_rows: int,
     row_height: int,
-    panel_width: int,
     step: float,
     slant: int,
     scale: int,
     compact: bool,
 ) -> Image.Image:
     art = Image.open(asset.art_path).convert("RGBA")
-    target = (panel_width + slant * 2, row_height)
+    target = panel_target_size(compact, scale)
     color = card_color(member, asset)
     background = panel_background(target, color, compact)
-    glow = cover_resize_focal(art, target, member.fx, member.fy, member.zoom * 0.78)
+    glow = cover_resize_offset(art, target, member.offset_x, member.offset_y, member.zoom * 0.78)
     glow = glow.filter(ImageFilter.GaussianBlur((14 if compact else 18) * scale))
     glow = ImageEnhance.Color(glow).enhance(1.20 if compact else 1.25)
     background = Image.alpha_composite(background, glow)
 
-    crop = cover_resize_focal(art, target, member.fx, member.fy, member.zoom)
+    crop = cover_resize_offset(art, target, member.offset_x, member.offset_y, member.zoom)
     crop = ImageEnhance.Color(crop).enhance(1.09 if compact else 1.10)
     crop = ImageEnhance.Contrast(crop).enhance(1.06 if compact else 1.07)
     alpha = crop.getchannel("A")
@@ -261,7 +348,6 @@ def placeholder_panel(
     row: int,
     num_rows: int,
     row_height: int,
-    panel_width: int,
     step: float,
     slant: int,
     scale: int,
@@ -270,7 +356,7 @@ def placeholder_panel(
     """A panel for a slot with no downloaded asset yet: same size/shape and
     mask/paste logic as make_panel(), but without character art, glow,
     shadow, or shade, since there is no Asset to read art from."""
-    target = (panel_width + slant * 2, row_height)
+    target = panel_target_size(compact, scale)
     panel = panel_background(target, member.color, compact)
     return paste_panel_on_canvas(canvas_size, panel, index, row, num_rows, row_height, step, slant, scale)
 
@@ -481,10 +567,8 @@ def render_image(
         raise ValueError("Scale must be between 1 and 4.")
     width = BASE_W * scale
     height = BASE_H * scale
-    row_height = height // 2 if compact else height
+    row_height, _, slant = panel_metrics(compact, scale)
     step = width / 4
-    slant = (38 if compact else 52) * scale
-    panel_width = (340 if compact else 360) * scale
     canvas = Image.new("RGBA", (width, height), BACKGROUND_COLOR)
     num_rows = len(teams)
     for row, team in enumerate(teams):
@@ -498,13 +582,12 @@ def render_image(
                 row,
                 num_rows,
                 member.name.casefold(),
-                round(member.fx, 4),
-                round(member.fy, 4),
+                round(member.offset_x, 4),
+                round(member.offset_y, 4),
                 round(member.zoom, 4),
                 member.color,
                 str(asset.art_path) if asset else None,
                 row_height,
-                panel_width,
                 step,
                 slant,
                 scale,
@@ -521,7 +604,6 @@ def render_image(
                         row,
                         num_rows,
                         row_height,
-                        panel_width,
                         step,
                         slant,
                         scale,
@@ -535,7 +617,6 @@ def render_image(
                         row,
                         num_rows,
                         row_height,
-                        panel_width,
                         step,
                         slant,
                         scale,
