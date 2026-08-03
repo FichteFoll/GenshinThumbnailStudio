@@ -56,7 +56,7 @@ from PySide6.QtWidgets import (
 from .akasha import AkashaError, AkashaWebClient, Build, StaleProfileError, download_assets
 from .models import Asset, Placement, Project
 from .renderer import export_project, render_preview
-from .storage import cache_dir, load_presets, load_project, save_presets, save_project
+from .storage import cache_dir, load_presets, load_project, save_presets, save_profile_cache, save_project
 
 
 RESOLUTION_OPTIONS = [
@@ -690,6 +690,7 @@ class MainWindow(QMainWindow):
                 else:
                     return
             self.builds = {build.name.casefold(): build for build in builds}
+            save_profile_cache(uid, builds, last)
             self.assets = {}
             self._populate_combo_items()
             local = last.astimezone().strftime("%d.%m.%Y %H:%M")

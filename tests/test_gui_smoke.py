@@ -3,6 +3,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--no-sandbox")
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -10,6 +11,26 @@ from PySide6.QtWidgets import QApplication
 
 from genshin_thumbnail_studio.gui import MainWindow
 from genshin_thumbnail_studio.models import Asset, Build
+from genshin_thumbnail_studio.storage import load_profile_cache
+
+
+def make_build(name: str) -> Build:
+    return Build(
+        name=name,
+        constellation=1,
+        refinement=2,
+        weapon_name="Splendor of Tranquil Waters",
+        costume_id=None,
+        build_id=f"{name}-build",
+        build_md5="0123456789abcdef",
+        last_build_update="2026-08-01T12:00:00+00:00",
+        art_url=f"https://enka.network/ui/{name}.png",
+        weapon_url="https://enka.network/ui/weapon.png",
+        element="Hydro",
+        rarity=5,
+        weapon_rarity=5,
+        raw={"name": name},
+    )
 
 
 def test_main_window_starts(tmp_path, monkeypatch) -> None:
@@ -176,6 +197,29 @@ def test_swap_slots_exchanges_placements(tmp_path, monkeypatch) -> None:
     assert swapped_second.name == "Furina"
     assert swapped_second.fx == 0.42
     assert swapped_second.zoom == 1.20
+
+    window.close()
+    app.processEvents()
+
+
+def test_load_profile_persists_profile_cache(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+
+    uid = "700000042"
+    builds = [make_build("Furina"), make_build("Nahida")]
+    last_update = datetime(2026, 8, 3, 10, 30, 15, tzinfo=timezone.utc)
+    monkeypatch.setattr(window.client, "load_profile", lambda *args, **kwargs: (builds, 5.0, last_update))
+    window.uid_edit.setText(uid)
+
+    window.load_profile()
+
+    cached = load_profile_cache(uid)
+    assert cached is not None
+    cached_builds, cached_last_update = cached
+    assert cached_builds == builds
+    assert cached_last_update == last_update
 
     window.close()
     app.processEvents()
