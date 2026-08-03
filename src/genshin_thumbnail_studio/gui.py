@@ -55,7 +55,7 @@ from PySide6.QtWidgets import (
 
 from .akasha import AkashaError, AkashaWebClient, Build, StaleProfileError, download_assets
 from .models import Asset, Placement, Project
-from .renderer import export_project, render_preview
+from .renderer import export_project, render_preview, safe_name
 from .storage import (
     cache_dir,
     load_presets,
@@ -298,6 +298,7 @@ class MainWindow(QMainWindow):
         self.resize(1380, 860)
         self.setMinimumSize(1020, 680)
         self.project = Project.blank("abyss")
+        self.project_path: Path | None = None
         self.builds: dict[str, Build] = {}
         self.assets: dict[str, Asset] = {}
         self.presets = load_presets()
@@ -547,6 +548,7 @@ class MainWindow(QMainWindow):
             return
         uid = self.uid_edit.text().strip()
         self.project = Project.blank(mode, uid)
+        self.project_path = None
         self.assets = {}
         self.selected = (0, 0)
         self.boss_combo.setVisible(mode == "stygian")
@@ -819,12 +821,26 @@ class MainWindow(QMainWindow):
                 self.prepare_preview()
             if set(self._selected_name_keys()) - set(self.assets):
                 return
-            directory = QFileDialog.getExistingDirectory(self, "Choose output folder")
-            if not directory:
-                return
-            self.project.output_name = self.output_name.text().strip() or "genshin_thumbnail"
+            stem = safe_name(self.output_name.text().strip() or "genshin_thumbnail")
+            default_dir = self.project_path.parent if self.project_path else Path.cwd()
+            if self.project.mode == "abyss":
+                default_path = str(default_dir / f"{stem}.png")
+                path, _ = QFileDialog.getSaveFileName(self, "Export PNG", default_path, "PNG (*.png)")
+                if not path:
+                    return
+                target = Path(path)
+                directory = target.parent
+                stem = safe_name(target.stem)
+            else:
+                # Stygian writes three files at once, so only the folder can be chosen.
+                directory_str = QFileDialog.getExistingDirectory(self, "Choose output folder", str(default_dir))
+                if not directory_str:
+                    return
+                directory = Path(directory_str)
+            self.output_name.setText(stem)
+            self.project.output_name = stem
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            written = export_project(self.project, self.assets, Path(directory))
+            written = export_project(self.project, self.assets, directory)
             QMessageBox.information(self, "Export finished", "\n".join(str(path) for path in written))
             self.statusBar().showMessage(f"Exported {len(written)} thumbnail(s)", 7000)
         except Exception as error:
@@ -843,6 +859,7 @@ class MainWindow(QMainWindow):
         self.project.uid = self.uid_edit.text().strip()
         self.project.output_name = self.output_name.text().strip() or "genshin_thumbnail"
         save_project(self.project, Path(path))
+        self.project_path = Path(path)
         self.statusBar().showMessage("Project saved", 5000)
 
     def open_project(self) -> None:
@@ -852,6 +869,7 @@ class MainWindow(QMainWindow):
         try:
             project = load_project(Path(path))
             self.project = project
+            self.project_path = Path(path)
             self.selected = (project.active_team if project.mode == "stygian" else 0, 0)
             self.assets = {}
             self.abyss_radio.blockSignals(True)
