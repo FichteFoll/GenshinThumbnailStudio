@@ -168,26 +168,52 @@ def cover_resize_offset(
     offset_x: float,
     offset_y: float,
     zoom: float,
+    resample: Image.Resampling = Image.Resampling.LANCZOS,
 ) -> Image.Image:
     """Cover-fit `image` into `size`, panned by signed offsets.
 
     The offsets are fractions of the target size, positive meaning the visible
     content moves right/down. They are clamped to the reachable range first,
-    which includes `PAN_OVERSCAN`, so the crop box may extend past the resized
-    art by that margin. `Image.crop` pads such a box with zeroed (and hence,
-    for RGBA art, transparent) pixels, letting the panel background and glow
-    show through the overscanned strip without any extra compositing.
+    which includes `PAN_OVERSCAN`, so the crop window may extend past the
+    resized art by that margin. That overscanned strip is left transparent,
+    letting the panel background and glow show through without any extra
+    compositing.
     """
+    source_w, source_h = image.size
     target_w, target_h = size
     image_scale = cover_scale(image.size, size, zoom)
     resized_w, resized_h = _scaled_size(image.size, size, image_scale)
     limit_x, limit_y = _offset_limits((resized_w, resized_h), size)
     offset_x = min(limit_x, max(-limit_x, offset_x))
     offset_y = min(limit_y, max(-limit_y, offset_y))
-    resized = image.resize((resized_w, resized_h), Image.Resampling.LANCZOS)
     left = int(round((resized_w - target_w) / 2 - offset_x * target_w))
     top = int(round((resized_h - target_h) / 2 - offset_y * target_h))
-    return resized.crop((left, top, left + target_w, top + target_h))
+
+    # Resampling only the crop window's source region is far cheaper than
+    # scaling the whole image and throwing most of it away. The window is
+    # mapped back with source_w / resized_w rather than 1 / image_scale
+    # because resized_w/resized_h are rounded integers, and dividing by them
+    # keeps the mapping exact at the right and bottom edges.
+    # It is clipped to the art first, since Image.resize() rejects a box that
+    # leaves the source, which the overscan margin makes possible.
+    visible_left = max(0, left)
+    visible_top = max(0, top)
+    visible_right = min(resized_w, left + target_w)
+    visible_bottom = min(resized_h, top + target_h)
+    box = (
+        visible_left * source_w / resized_w,
+        visible_top * source_h / resized_h,
+        visible_right * source_w / resized_w,
+        visible_bottom * source_h / resized_h,
+    )
+    visible_size = (visible_right - visible_left, visible_bottom - visible_top)
+    visible = image.resize(visible_size, resample, box=box)
+    if visible_size == size:
+        return visible
+
+    panned = Image.new("RGBA", size, (0, 0, 0, 0))
+    panned.paste(visible, (visible_left - left, visible_top - top))
+    return panned
 
 
 @functools.lru_cache(maxsize=64)

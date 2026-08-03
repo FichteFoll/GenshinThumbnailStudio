@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
 
 from genshin_thumbnail_studio import renderer
 from genshin_thumbnail_studio.models import Asset, Build, Project
@@ -179,6 +179,74 @@ def test_default_offsets_still_center_the_crop() -> None:
     target = panel_target_size(compact=True)
     centered = cover_resize_offset(source, target, 0.0, 0.0, 1.06)
     assert abs(_marker_center_x(centered) - target[0] / 2) <= 1
+
+
+def gradient_image(width: int, height: int) -> Image.Image:
+    # Smooth and different along both axes, so a swapped or inverted axis in
+    # the crop mapping changes the output. Deliberately not noise: LANCZOS
+    # ringing around isolated pixels makes noise sources differ by ~40/255
+    # between an upfront resize and a box resize even when both are correct.
+    image = Image.new("RGBA", (width, height))
+    pixels = image.load()
+    assert pixels is not None
+    for y in range(height):
+        for x in range(width):
+            pixels[x, y] = (
+                10 + int(200 * x / max(1, width - 1)),
+                10 + int(200 * y / max(1, height - 1)),
+                10 + int(100 * (x + y) / max(1, width + height - 2)),
+                255,
+            )
+    return image
+
+
+def reference_cover_resize_offset(
+    image: Image.Image,
+    size: tuple[int, int],
+    offset_x: float,
+    offset_y: float,
+    zoom: float,
+) -> Image.Image:
+    """The pre-optimisation implementation: resize the whole image, then crop.
+
+    Image.crop() zero-pads a window that leaves the art, which is what the
+    optimised version has to reproduce for the overscanned strip.
+    """
+    source_w, source_h = image.size
+    target_w, target_h = size
+    image_scale = max(target_w / source_w, target_h / source_h) * zoom
+    resized_w = max(target_w, int(source_w * image_scale + 0.5))
+    resized_h = max(target_h, int(source_h * image_scale + 0.5))
+    limit_x = (resized_w - target_w) / (2 * target_w) + PAN_OVERSCAN
+    limit_y = (resized_h - target_h) / (2 * target_h) + PAN_OVERSCAN
+    offset_x = min(limit_x, max(-limit_x, offset_x))
+    offset_y = min(limit_y, max(-limit_y, offset_y))
+    resized = image.resize((resized_w, resized_h), Image.Resampling.LANCZOS)
+    left = int(round((resized_w - target_w) / 2 - offset_x * target_w))
+    top = int(round((resized_h - target_h) / 2 - offset_y * target_h))
+    return resized.crop((left, top, left + target_w, top + target_h))
+
+
+def test_cover_resize_offset_matches_resize_then_crop() -> None:
+    # The compact abyss panel size, against a source both larger and smaller
+    # than it, so both the downscale and the upscale branch of the cover
+    # scaling are covered.
+    target = (416, 360)
+    for source in (gradient_image(1200, 900), gradient_image(120, 90)):
+        for zoom in (0.70, 1.00, 1.80):
+            # The outer values are past the reachable range, so the clamp
+            # decides the window and it overscans the art by PAN_OVERSCAN.
+            for offset_x in (-2.0, -0.3, 0.0, 0.3, 2.0):
+                for offset_y in (-2.0, -0.3, 0.0, 0.3, 2.0):
+                    case = (source.size, zoom, offset_x, offset_y)
+                    result = cover_resize_offset(source, target, offset_x, offset_y, zoom)
+                    assert result.size == target, case
+                    expected = reference_cover_resize_offset(source, target, offset_x, offset_y, zoom)
+                    difference = ImageChops.difference(result, expected)
+                    # Resampling the source region directly is not bit-exact
+                    # against resizing everything up front, but on smooth
+                    # content the two stay within a couple of levels.
+                    assert max(band.getextrema()[1] for band in difference.split()) <= 4, case
 
 
 def test_abyss_render_and_export(tmp_path: Path) -> None:
