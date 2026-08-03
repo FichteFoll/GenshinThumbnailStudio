@@ -31,6 +31,13 @@ class Build:
     weapon_rarity: int | None = None
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "Build":
+        return cls(**value)
+
 
 @dataclass
 class Asset:
