@@ -7,6 +7,7 @@ from genshin_thumbnail_studio.models import Asset, Build, Project
 from genshin_thumbnail_studio.renderer import (
     BACKGROUND_COLOR,
     ELEMENT_COLORS,
+    PAN_OVERSCAN,
     RARITY_COLORS,
     STANDARD_ART_SIZE,
     badge_geometry,
@@ -20,6 +21,7 @@ from genshin_thumbnail_studio.renderer import (
     panel_target_size,
     render_image,
     render_preview,
+    resized_art_size,
 )
 
 
@@ -104,10 +106,10 @@ def test_cover_resize_offset_centers_and_pans() -> None:
     assert abs(_marker_center_x(mirrored) - _marker_center_x(centered) + 0.1 * target[0]) <= 1
 
 
-def test_max_offset_matches_the_cover_fit_slack() -> None:
+def test_max_offset_matches_the_cover_fit_slack_plus_the_overscan() -> None:
     max_x, max_y = max_offset(STANDARD_ART_SIZE, compact=True, zoom=1.06)
-    assert abs(max_x - 0.417) < 0.001
-    assert abs(max_y - 0.030) < 0.001
+    assert abs(max_x - 0.517) < 0.001
+    assert abs(max_y - 0.130) < 0.001
 
     # The crop cannot be panned past the reachable range.
     source = _marked_source()
@@ -115,6 +117,68 @@ def test_max_offset_matches_the_cover_fit_slack() -> None:
     at_limit = cover_resize_offset(source, target, max_x, 0.0, 1.06)
     beyond_limit = cover_resize_offset(source, target, max_x + 0.5, 0.0, 1.06)
     assert at_limit.tobytes() == beyond_limit.tobytes()
+
+
+def test_vertical_max_offset_is_the_overscan_plus_half_the_zoom() -> None:
+    # The 2:1 splash art is wider than every panel, so it always fits the panel
+    # height exactly at zoom 1 and the only vertical slack comes from the zoom.
+    for compact in (True, False):
+        for zoom in (1.06, 1.18, 1.80):
+            _, max_y = max_offset(STANDARD_ART_SIZE, compact=compact, zoom=zoom)
+            assert abs(max_y - (PAN_OVERSCAN + (zoom - 1) / 2)) < 0.001
+
+
+def _marker_center_y(image: Image.Image) -> float:
+    """Vertical center of the red marker stripe in a crop's middle column."""
+    column = image.width // 2
+    rows = [y for y in range(image.height) if image.getpixel((column, y))[0] > 200]
+    assert rows, "marker stripe not visible in the crop"
+    return (rows[0] + rows[-1]) / 2
+
+
+def _horizontally_marked_source() -> Image.Image:
+    source = Image.new("RGBA", STANDARD_ART_SIZE, (0, 0, 40, 255))
+    center_y = STANDARD_ART_SIZE[1] // 2
+    ImageDraw.Draw(source).rectangle(
+        (0, center_y - 20, STANDARD_ART_SIZE[0] - 1, center_y + 19), fill=(255, 0, 0, 255)
+    )
+    return source
+
+
+def _row_alpha(image: Image.Image, y: int) -> set[int]:
+    return {image.getpixel((x, y))[3] for x in range(image.width)}
+
+
+def test_vertical_overscan_pans_past_the_art_edge() -> None:
+    zoom = 1.06
+    source = _horizontally_marked_source()
+    target = panel_target_size(compact=True)
+    _, max_y = max_offset(STANDARD_ART_SIZE, compact=True, zoom=zoom)
+    resized_h = resized_art_size(STANDARD_ART_SIZE, compact=True, zoom=zoom)[1]
+    cover_fit_slack = (resized_h - target[1]) / (2 * target[1])
+
+    centered = cover_resize_offset(source, target, 0.0, 0.0, zoom)
+    assert _row_alpha(centered, 0) == {255}
+    assert _row_alpha(centered, target[1] - 1) == {255}
+
+    # Panning up runs the crop window off the bottom of the art, panning down
+    # off the top; the exposed strip is transparent so the glow shows through.
+    panned_up = cover_resize_offset(source, target, 0.0, -max_y, zoom)
+    assert _row_alpha(panned_up, target[1] - 1) == {0}
+    panned_down = cover_resize_offset(source, target, 0.0, max_y, zoom)
+    assert _row_alpha(panned_down, 0) == {0}
+
+    # The travel is well beyond what the bare cover-fit slack allowed.
+    travel = _marker_center_y(centered) - _marker_center_y(panned_up)
+    assert travel > cover_fit_slack * target[1] + 1
+    assert abs(travel - max_y * target[1]) <= 1
+
+
+def test_default_offsets_still_center_the_crop() -> None:
+    source = _marked_source()
+    target = panel_target_size(compact=True)
+    centered = cover_resize_offset(source, target, 0.0, 0.0, 1.06)
+    assert abs(_marker_center_x(centered) - target[0] / 2) <= 1
 
 
 def test_abyss_render_and_export(tmp_path: Path) -> None:

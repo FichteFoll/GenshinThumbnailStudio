@@ -27,6 +27,12 @@ BACKGROUND_COLOR = (14, 14, 18, 255)  # #0e0e12
 # project file, which stores no art dimensions).
 STANDARD_ART_SIZE = (2048, 1024)
 
+# The crop window may leave the art by this fraction of the panel size on
+# every side. Cover-fit alone leaves almost no vertical slack for 2:1 splash
+# art (only target_h * (zoom - 1)), which made vertical panning useless;
+# overscanning exposes a bounded strip of the glow/background layer instead.
+PAN_OVERSCAN = 0.10
+
 ELEMENT_COLORS = {
     "anemo": "#74c2a8",
     "geo": "#ffb84d",
@@ -133,8 +139,8 @@ def resized_art_size(
 def _offset_limits(resized: tuple[int, int], target: tuple[int, int]) -> tuple[float, float]:
     """Largest panel-relative offset per axis that still moves the crop."""
     return (
-        (resized[0] - target[0]) / (2 * target[0]),
-        (resized[1] - target[1]) / (2 * target[1]),
+        (resized[0] - target[0]) / (2 * target[0]) + PAN_OVERSCAN,
+        (resized[1] - target[1]) / (2 * target[1]) + PAN_OVERSCAN,
     )
 
 
@@ -161,8 +167,11 @@ def cover_resize_offset(
     """Cover-fit `image` into `size`, panned by signed offsets.
 
     The offsets are fractions of the target size, positive meaning the visible
-    content moves right/down. They are clamped to the reachable range first, so
-    the crop box is in bounds by construction.
+    content moves right/down. They are clamped to the reachable range first,
+    which includes `PAN_OVERSCAN`, so the crop box may extend past the resized
+    art by that margin. `Image.crop` pads such a box with zeroed (and hence,
+    for RGBA art, transparent) pixels, letting the panel background and glow
+    show through the overscanned strip without any extra compositing.
     """
     target_w, target_h = size
     image_scale = cover_scale(image.size, size, zoom)
