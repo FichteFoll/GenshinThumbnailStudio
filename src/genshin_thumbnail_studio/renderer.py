@@ -108,6 +108,21 @@ def cover_resize_focal(
     return resized.crop((left, top, left + target_w, top + target_h))
 
 
+def panel_metrics(compact: bool, scale: int = 1) -> tuple[int, int, int]:
+    """Row height, panel width and slant overhang of one character panel."""
+    height = BASE_H * scale
+    row_height = height // 2 if compact else height
+    panel_width = (340 if compact else 360) * scale
+    slant = (38 if compact else 52) * scale
+    return row_height, panel_width, slant
+
+
+def panel_target_size(compact: bool, scale: int = 1) -> tuple[int, int]:
+    """Pixel size of the art crop for one panel, slant overhang included."""
+    row_height, panel_width, slant = panel_metrics(compact, scale)
+    return panel_width + slant * 2, row_height
+
+
 def panel_polygon(
     index: int,
     row: int,
@@ -196,7 +211,7 @@ def make_panel(
     compact: bool,
 ) -> Image.Image:
     art = Image.open(asset.art_path).convert("RGBA")
-    target = (panel_width + slant * 2, row_height)
+    target = panel_target_size(compact, scale)
     color = card_color(member, asset)
     background = panel_background(target, color, compact)
     glow = cover_resize_focal(art, target, member.fx, member.fy, member.zoom * 0.78)
@@ -270,7 +285,7 @@ def placeholder_panel(
     """A panel for a slot with no downloaded asset yet: same size/shape and
     mask/paste logic as make_panel(), but without character art, glow,
     shadow, or shade, since there is no Asset to read art from."""
-    target = (panel_width + slant * 2, row_height)
+    target = panel_target_size(compact, scale)
     panel = panel_background(target, member.color, compact)
     return paste_panel_on_canvas(canvas_size, panel, index, row, num_rows, row_height, step, slant, scale)
 
@@ -481,10 +496,8 @@ def render_image(
         raise ValueError("Scale must be between 1 and 4.")
     width = BASE_W * scale
     height = BASE_H * scale
-    row_height = height // 2 if compact else height
+    row_height, panel_width, slant = panel_metrics(compact, scale)
     step = width / 4
-    slant = (38 if compact else 52) * scale
-    panel_width = (340 if compact else 360) * scale
     canvas = Image.new("RGBA", (width, height), BACKGROUND_COLOR)
     num_rows = len(teams)
     for row, team in enumerate(teams):

@@ -14,6 +14,7 @@ from genshin_thumbnail_studio.renderer import (
     find_font,
     hex_to_rgba,
     panel_background,
+    panel_target_size,
     render_image,
     render_preview,
 )
@@ -59,6 +60,13 @@ def create_assets(
 def fill_project(project: Project, names: list[str]) -> None:
     for index, member in enumerate(member for team in project.teams for member in team):
         member.name = names[index]
+
+
+def test_panel_target_size_scales_with_mode_and_scale() -> None:
+    assert panel_target_size(compact=True) == (416, 360)
+    assert panel_target_size(compact=True, scale=2) == (832, 720)
+    assert panel_target_size(compact=False) == (464, 720)
+    assert panel_target_size(compact=False, scale=2) == (928, 1440)
 
 
 def test_abyss_render_and_export(tmp_path: Path) -> None:
