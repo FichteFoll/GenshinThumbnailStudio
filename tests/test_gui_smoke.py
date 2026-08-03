@@ -486,10 +486,13 @@ def test_offset_sliders_are_signed_and_span_the_reachable_range(tmp_path, monkey
     art_size = art_pixel_size(str(window.assets[member.name.casefold()].art_path))
     max_x, max_y = max_offset(art_size, True, member.zoom)
 
-    assert window.x_slider.maximum() == round(max_x * 1000)
+    # Truncated, so the slider end never exceeds what the renderer can reach.
+    assert window.x_slider.maximum() == int(max_x * 1000)
+    assert window.x_slider.maximum() / 1000 <= max_x
     assert window.x_slider.minimum() == -window.x_slider.maximum()
     assert window.x_slider.maximum() > 0
-    assert window.y_slider.maximum() == round(max_y * 1000)
+    assert window.y_slider.maximum() == int(max_y * 1000)
+    assert window.y_slider.maximum() / 1000 <= max_y
     assert window.y_slider.minimum() == -window.y_slider.maximum()
 
     window.x_slider.setValue(window.x_slider.minimum())

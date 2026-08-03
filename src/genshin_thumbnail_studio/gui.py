@@ -638,8 +638,11 @@ class MainWindow(QMainWindow):
         member = self.current_member()
         self._updating_controls = True
         max_x, max_y = self._offset_bounds(member)
-        self.x_slider.setRange(-round(max_x * 1000), round(max_x * 1000))
-        self.y_slider.setRange(-round(max_y * 1000), round(max_y * 1000))
+        # Truncate rather than round, so the slider end stays inside the range
+        # the renderer can reach and no travel is left dead at the ends.
+        limit_x, limit_y = int(max_x * 1000), int(max_y * 1000)
+        self.x_slider.setRange(-limit_x, limit_x)
+        self.y_slider.setRange(-limit_y, limit_y)
         self.x_slider.setValue(round(member.offset_x * 1000))
         self.y_slider.setValue(round(member.offset_y * 1000))
         # The sliders clamp to their range, so read the values back to keep the
