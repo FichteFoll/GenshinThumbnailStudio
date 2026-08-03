@@ -52,6 +52,11 @@ RARITY_COLORS = {
 }
 
 
+# The GUI clamps a placement's zoom to 0.70..1.80, so a preview working copy
+# scaled for 1.80 is never upsampled by an edit made through the GUI.
+MAX_PLACEMENT_ZOOM = 1.80
+
+
 def rarity_color(rarity: int | None) -> str:
     """The in-game rarity accent color, falling back to the 5-star gold
     when the rarity is unknown so the current look stays the default."""
@@ -282,8 +287,8 @@ def make_panel(
     scale: int,
     compact: bool,
 ) -> Image.Image:
-    art = Image.open(asset.art_path).convert("RGBA")
     target = panel_target_size(compact, scale)
+    art = source_art(asset, target, member.zoom, scale)
     color = card_color(member, asset)
     background = panel_background(target, color, compact)
     glow = cover_resize_offset(art, target, member.offset_x, member.offset_y, member.zoom * 0.78)
@@ -364,24 +369,33 @@ def placeholder_panel(
 # Bounded LRU caches for render output that would otherwise be recomputed
 # on every preview render regardless of what actually changed: one for
 # fully-composited panel layers (make_panel()/placeholder_panel() output),
-# one for decoded/resized weapon icons. Cleared via clear_render_cache(),
-# e.g. between tests that assert on cache hit/miss counts.
+# one for decoded/resized weapon icons, one for decoded character art, and
+# one for preview-sized working copies of that art. Cleared via
+# clear_render_cache(), e.g. between tests that assert on cache hit/miss counts.
 _PANEL_CACHE_MAX = 32
 _panel_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
 
 _WEAPON_ICON_CACHE_MAX = 32
 _weapon_icon_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
 
+_ART_CACHE_MAX = 12
+_art_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
+
+_WORK_CACHE_MAX = 12
+_work_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
+
 # Previews render on a background thread while export_project() renders on
-# the GUI thread, so both caches can be touched concurrently.
+# the GUI thread, so all caches can be touched concurrently.
 _cache_lock = threading.Lock()
 
 
 def clear_render_cache() -> None:
-    """Empty the panel and weapon-icon render caches."""
+    """Empty the panel, weapon-icon, character-art and working-copy caches."""
     with _cache_lock:
         _panel_cache.clear()
         _weapon_icon_cache.clear()
+        _art_cache.clear()
+        _work_cache.clear()
 
 
 def _cache_get(cache: collections.OrderedDict[tuple, Image.Image], key: tuple) -> Image.Image | None:
@@ -400,6 +414,43 @@ def _cache_put(
         cache.move_to_end(key)
         while len(cache) > max_size:
             cache.popitem(last=False)
+
+
+def source_art(asset: Asset, target: tuple[int, int], zoom: float, scale: int) -> Image.Image:
+    """The image make_panel() should resample its panel art from.
+
+    For a preview render this is a working copy pre-downscaled to what the
+    largest GUI-reachable zoom needs, so a drag resamples a few megapixels
+    less per frame. Exports (and zooms beyond the GUI's clamp, which can only
+    come from a hand-edited project file) resample the full-resolution source
+    so they never lose detail.
+
+    The cached images are shared between the preview render thread and the
+    GUI thread, so they must be treated as read-only. Every consumer produces
+    a new image via resize()/crop(), so no copy is made here.
+    """
+    art_key = (str(asset.art_path),)
+    art = _cache_get(_art_cache, art_key)
+    if art is None:
+        art = Image.open(asset.art_path).convert("RGBA")
+        _cache_put(_art_cache, art_key, art, _ART_CACHE_MAX)
+    if scale != 1 or zoom > MAX_PLACEMENT_ZOOM:
+        return art
+
+    source_w, source_h = art.size
+    # Same cover scale cover_resize_offset() computes, but at the maximum zoom
+    # rather than this placement's, so one working copy serves every zoom.
+    work_scale = cover_scale(art.size, target, MAX_PLACEMENT_ZOOM)
+    work = (round(source_w * work_scale), round(source_h * work_scale))
+    if work[0] >= source_w or work[1] >= source_h:
+        return art
+
+    work_key = (str(asset.art_path), *work)
+    working = _cache_get(_work_cache, work_key)
+    if working is None:
+        working = art.resize(work, Image.Resampling.LANCZOS)
+        _cache_put(_work_cache, work_key, working, _WORK_CACHE_MAX)
+    return working
 
 
 def add_card_borders(

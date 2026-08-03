@@ -453,6 +453,31 @@ def _patch_counting_open(monkeypatch) -> list[str]:
     return opened
 
 
+def _patch_counting_panels(monkeypatch) -> list[str]:
+    """Wrap the panel builders with call-recording proxies, so a test can
+    assert how many panels were actually composited rather than served from
+    the panel cache. Image.open counts cannot show this, since the art and
+    weapon-icon caches absorb every decode after the first render.
+
+    render_image() resolves both builders as module globals at call time, so
+    patching them on the module takes effect for renders already in flight."""
+    built: list[str] = []
+    real_make_panel = renderer.make_panel
+    real_placeholder_panel = renderer.placeholder_panel
+
+    def counting_make_panel(*args, **kwargs):
+        built.append("make_panel")
+        return real_make_panel(*args, **kwargs)
+
+    def counting_placeholder_panel(*args, **kwargs):
+        built.append("placeholder_panel")
+        return real_placeholder_panel(*args, **kwargs)
+
+    monkeypatch.setattr(renderer, "make_panel", counting_make_panel)
+    monkeypatch.setattr(renderer, "placeholder_panel", counting_placeholder_panel)
+    return built
+
+
 def test_repeated_render_reuses_panel_cache(tmp_path, monkeypatch) -> None:
     clear_render_cache()
     names = [f"Character {index}" for index in range(8)]
@@ -461,13 +486,17 @@ def test_repeated_render_reuses_panel_cache(tmp_path, monkeypatch) -> None:
     assets = create_assets(tmp_path, names)
 
     opened = _patch_counting_open(monkeypatch)
+    built = _patch_counting_panels(monkeypatch)
     first = render_preview(project, assets)
     assert opened  # sanity: the first render actually opened art/weapon files
+    assert len(built) == 8  # cold cache: every slot is composited from scratch
 
     opened.clear()
+    built.clear()
     second = render_preview(project, assets)
 
-    assert opened == []  # nothing reopened: every panel/icon was cache hit
+    assert opened == []  # nothing reopened: every icon decode was a cache hit
+    assert built == []  # nothing recomposited: every panel was a cache hit
     assert second.tobytes() == first.tobytes()
 
 
@@ -484,12 +513,15 @@ def test_changing_one_placement_only_recomputes_that_slot(tmp_path, monkeypatch)
     changed_member.offset_x = 0.4  # differs from the Placement default of 0.0
 
     opened = _patch_counting_open(monkeypatch)
+    built = _patch_counting_panels(monkeypatch)
     render_preview(project, assets)
 
-    changed_art_path = str(assets[names[0].casefold()].art_path)
-    untouched_art_paths = {str(assets[name.casefold()].art_path) for name in names[1:]}
-    assert changed_art_path in opened
-    assert not (untouched_art_paths & set(opened))
+    # The decoded art is cached independently of the placement state, so the
+    # recomputed slot resamples from the cache instead of reopening the PNG.
+    assert opened == []
+    # Exactly one of the eight slots was composited again: the one whose fx
+    # changed. The other seven were served from the panel cache.
+    assert built == ["make_panel"]
 
 
 def test_clear_render_cache_forces_full_recompute(tmp_path, monkeypatch) -> None:
@@ -505,8 +537,24 @@ def test_clear_render_cache_forces_full_recompute(tmp_path, monkeypatch) -> None
     opened = _patch_counting_open(monkeypatch)
     render_preview(project, assets)
 
-    all_art_paths = {str(asset.art_path) for asset in assets.values()}
-    assert all_art_paths <= set(opened)
+    all_art_paths = [str(asset.art_path) for asset in assets.values()]
+    assert sorted(path for path in opened if path in set(all_art_paths)) == sorted(all_art_paths)
+
+
+def test_clear_render_cache_empties_art_caches(tmp_path: Path) -> None:
+    clear_render_cache()
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)
+
+    render_preview(project, assets)
+    assert renderer._art_cache
+    assert renderer._work_cache  # 1200x900 art downscales for a preview panel
+
+    clear_render_cache()
+    assert not renderer._art_cache
+    assert not renderer._work_cache
 
 
 def test_swapping_slots_with_warm_cache_matches_fresh_render(tmp_path: Path) -> None:
