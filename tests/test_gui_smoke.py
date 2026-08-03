@@ -3,15 +3,17 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--no-sandbox")
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
 from PIL import Image, ImageDraw
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
+from genshin_thumbnail_studio import gui
 from genshin_thumbnail_studio.gui import MainWindow
-from genshin_thumbnail_studio.models import Asset, Build
-from genshin_thumbnail_studio.storage import load_profile_cache
+from genshin_thumbnail_studio.models import Asset, Build, Project
+from genshin_thumbnail_studio.storage import load_profile_cache, save_profile_cache, save_project
 
 
 def make_build(name: str) -> Build:
@@ -31,6 +33,141 @@ def make_build(name: str) -> Build:
         weapon_rarity=5,
         raw={"name": name},
     )
+
+
+TEAM_NAMES = ["Furina", "Nahida", "Xilonen", "Neuvillette", "Kazuha", "Bennett", "Xiangling", "Zhongli"]
+
+
+def write_project(path: Path, uid: str) -> None:
+    project = Project.blank("abyss", uid)
+    for index, member in enumerate(member for team in project.teams for member in team):
+        member.name = TEAM_NAMES[index]
+    save_project(project, path)
+
+
+class StubMessageBox:
+    """Records dialogs instead of showing them; ``clickedButton`` always simulates Cancel."""
+
+    ButtonRole = QMessageBox.ButtonRole
+    StandardButton = QMessageBox.StandardButton
+    instances: list["StubMessageBox"] = []
+
+    def __init__(self, parent=None) -> None:  # noqa: ANN001 - Qt parent
+        self.title = ""
+        self.text = ""
+        self.executed = False
+        type(self).instances.append(self)
+
+    def setWindowTitle(self, title: str) -> None:
+        self.title = title
+
+    def setText(self, text: str) -> None:
+        self.text = text
+
+    def addButton(self, *args) -> object:
+        return object()
+
+    def exec(self) -> None:
+        self.executed = True
+
+    def clickedButton(self) -> object | None:
+        return None
+
+    @staticmethod
+    def critical(parent, title, text) -> None:  # noqa: ANN001 - Qt parent
+        raise AssertionError(f"unexpected error dialog: {title}: {text}")
+
+
+class ForbiddenMessageBox(StubMessageBox):
+    def __init__(self, parent=None) -> None:  # noqa: ANN001 - Qt parent
+        raise AssertionError("unexpected message box")
+
+
+def prepare_cached_open(tmp_path, monkeypatch, last_update: datetime) -> tuple[MainWindow, str]:
+    uid = "700000042"
+    builds = [make_build(name) for name in TEAM_NAMES]
+    save_profile_cache(uid, builds, last_update)
+    project_path = tmp_path / "project.json"
+    write_project(project_path, uid)
+    window = MainWindow()
+    assets = _create_test_assets(tmp_path / "assets", TEAM_NAMES)
+    monkeypatch.setattr(gui, "download_assets", lambda *args, **kwargs: assets)
+    monkeypatch.setattr(
+        gui.QFileDialog, "getOpenFileName", staticmethod(lambda *args, **kwargs: (str(project_path), ""))
+    )
+    return window, uid
+
+
+def wait_for_render(window: MainWindow, app: QApplication) -> None:
+    """Block until the background render job dispatched by the window has finished."""
+    for _ in range(200):
+        if not window._render_job_running:
+            return
+        window._thread_pool.waitForDone(50)
+        app.processEvents()
+    raise AssertionError("render job did not finish in time")
+
+
+def test_open_project_loads_cached_profile_and_previews(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui, "QMessageBox", ForbiddenMessageBox)
+    window, uid = prepare_cached_open(tmp_path, monkeypatch, datetime.now(timezone.utc) - timedelta(minutes=5))
+
+    window.open_project()
+    wait_for_render(window, app)
+
+    assert window.project.uid == uid
+    assert sorted(window.builds) == sorted(name.casefold() for name in TEAM_NAMES)
+    assert window.preview._pixmap is not None
+
+    window.close()
+    app.processEvents()
+
+
+def test_open_project_with_stale_cache_offers_refresh(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = QApplication.instance() or QApplication([])
+    StubMessageBox.instances = []
+    monkeypatch.setattr(gui, "QMessageBox", StubMessageBox)
+    window, _ = prepare_cached_open(tmp_path, monkeypatch, datetime.now(timezone.utc) - timedelta(hours=2))
+    refreshed = []
+    monkeypatch.setattr(window.client, "refresh_profile", lambda *args, **kwargs: refreshed.append(True))
+    monkeypatch.setattr(
+        window.client, "load_profile", lambda *args, **kwargs: pytest.fail("live profile load must not happen")
+    )
+
+    window.open_project()
+    wait_for_render(window, app)
+
+    assert len(StubMessageBox.instances) == 1
+    assert "2.0 Stunden" in StubMessageBox.instances[0].text
+    assert not refreshed
+    assert sorted(window.builds) == sorted(name.casefold() for name in TEAM_NAMES)
+    assert window.preview._pixmap is not None
+
+    window.close()
+    app.processEvents()
+
+
+def test_open_project_without_cache_shows_hint(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setattr(gui, "QMessageBox", ForbiddenMessageBox)
+    project_path = tmp_path / "project.json"
+    write_project(project_path, "900000099")
+    monkeypatch.setattr(
+        gui.QFileDialog, "getOpenFileName", staticmethod(lambda *args, **kwargs: (str(project_path), ""))
+    )
+    window = MainWindow()
+
+    window.open_project()
+
+    assert not window.builds
+    assert "kein zwischengespeichertes Profil" in window.statusBar().currentMessage()
+
+    window.close()
+    app.processEvents()
 
 
 def test_main_window_starts(tmp_path, monkeypatch) -> None:
@@ -134,14 +271,7 @@ def test_dispatch_render_end_to_end_sets_preview_pixmap(tmp_path, monkeypatch) -
     window.assets = _create_test_assets(tmp_path / "assets", names)
 
     window._dispatch_render()
-
-    for _ in range(200):
-        if not window._render_job_running:
-            break
-        window._thread_pool.waitForDone(50)
-        app.processEvents()
-    else:
-        raise AssertionError("render job did not finish in time")
+    wait_for_render(window, app)
 
     assert window.preview._pixmap is not None
     assert not window.preview._pixmap.isNull()

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 import re
-from datetime import timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 from PIL import Image
@@ -56,7 +56,15 @@ from PySide6.QtWidgets import (
 from .akasha import AkashaError, AkashaWebClient, Build, StaleProfileError, download_assets
 from .models import Asset, Placement, Project
 from .renderer import export_project, render_preview
-from .storage import cache_dir, load_presets, load_project, save_presets, save_profile_cache, save_project
+from .storage import (
+    cache_dir,
+    load_presets,
+    load_profile_cache,
+    load_project,
+    save_presets,
+    save_profile_cache,
+    save_project,
+)
 
 
 RESOLUTION_OPTIONS = [
@@ -858,9 +866,46 @@ class MainWindow(QMainWindow):
             self.boss_combo.setCurrentIndex(project.active_team)
             self._rebuild_team_fields()
             self._sync_controls()
+            cached = load_profile_cache(project.uid)
+            if cached is None:
+                self.statusBar().showMessage(
+                    "Projekt ge\u00f6ffnet \u00b7 kein zwischengespeichertes Profil f\u00fcr diese UID gefunden", 8000
+                )
+                return
+            builds, last_update = cached
+            self.builds = {build.name.casefold(): build for build in builds}
+            self._populate_combo_items()
+            age_minutes = max(0.0, (datetime.now(timezone.utc) - last_update).total_seconds() / 60)
+            local = last_update.astimezone().strftime("%d.%m.%Y %H:%M")
+            self.profile_status.setText(
+                f"{len(builds)} Builds · aus Cache · zuletzt aktualisiert {local} · vor {age_minutes:.0f} min"
+            )
+            self._auto_preview()
+            if age_minutes > 60:
+                self._offer_cache_refresh(age_minutes)
             self.statusBar().showMessage("Projekt ge\u00f6ffnet", 5000)
         except Exception as error:
             self._show_error("Projekt konnte nicht ge\u00f6ffnet werden", error)
+
+    def _auto_preview(self) -> None:
+        """Render a preview from already loaded builds, reporting failures without aborting the caller."""
+        try:
+            self._generate_preview_from_builds(self._validate_team())
+        except Exception as error:
+            self._show_error("Vorschau konnte nicht erzeugt werden", error)
+
+    def _offer_cache_refresh(self, age_minutes: float) -> None:
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Zwischengespeichertes Profil ist \u00e4lter als eine Stunde")
+        dialog.setText(f"Zuletzt aktualisiert vor {age_minutes / 60:.1f} Stunden.")
+        refresh_button = dialog.addButton("Jetzt aktualisieren", QMessageBox.ButtonRole.AcceptRole)
+        dialog.addButton(QMessageBox.StandardButton.Cancel)
+        dialog.exec()
+        if dialog.clickedButton() != refresh_button:
+            return
+        self.load_profile()
+        if self.builds:
+            self._auto_preview()
 
 
 def run() -> int:
