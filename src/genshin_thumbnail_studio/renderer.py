@@ -56,6 +56,12 @@ RARITY_COLORS = {
 # scaled for 1.80 is never upsampled by an edit made through the GUI.
 MAX_PLACEMENT_ZOOM = 1.80
 
+# The panel glow is immediately Gaussian-blurred at a radius far wider than a
+# few pixels, so any detail resampled into it is destroyed anyway. Building it
+# at a quarter of the panel resolution (and blurring at a correspondingly
+# smaller radius) produces the same soft wash for a fraction of the work.
+GLOW_DOWNSCALE = 4
+
 
 def rarity_color(rarity: int | None) -> str:
     """The in-game rarity accent color, falling back to the 5-star gold
@@ -317,9 +323,18 @@ def make_panel(
     art = source_art(asset, target, member.zoom, scale)
     color = card_color(member, asset)
     background = panel_background(target, color, compact)
-    glow = cover_resize_offset(art, target, member.offset_x, member.offset_y, member.zoom * 0.78)
-    glow = glow.filter(ImageFilter.GaussianBlur((14 if compact else 18) * scale))
+    glow_size = (max(1, target[0] // GLOW_DOWNSCALE), max(1, target[1] // GLOW_DOWNSCALE))
+    glow = cover_resize_offset(
+        art,
+        glow_size,
+        member.offset_x,
+        member.offset_y,
+        member.zoom * 0.78,
+        resample=Image.Resampling.BILINEAR,
+    )
+    glow = glow.filter(ImageFilter.GaussianBlur((14 if compact else 18) * scale / GLOW_DOWNSCALE))
     glow = ImageEnhance.Color(glow).enhance(1.20 if compact else 1.25)
+    glow = glow.resize(target, Image.Resampling.BILINEAR)
     background = Image.alpha_composite(background, glow)
 
     crop = cover_resize_offset(art, target, member.offset_x, member.offset_y, member.zoom)

@@ -18,6 +18,7 @@ from genshin_thumbnail_studio.renderer import (
     hex_to_rgba,
     max_offset,
     panel_background,
+    panel_metrics,
     panel_target_size,
     render_image,
     render_preview,
@@ -448,6 +449,54 @@ def test_preview_renders_placeholder_panel_for_missing_asset(tmp_path: Path) -> 
     plain_background = panel_background(target, real_color, compact=True)
     real_canvas_point = (1 * 320 - slant + local_point[0], local_point[1])
     assert preview.getpixel(real_canvas_point) != plain_background.getpixel(local_point)[:3]
+
+
+def test_glow_shows_through_a_transparent_gap_in_the_character_art(tmp_path: Path) -> None:
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)
+    # The glow is only ever visible where the character art is transparent, so
+    # give every asset opaque red art with a transparent hole punched into it.
+    for asset in assets.values():
+        art = Image.new("RGBA", (1200, 900), (255, 40, 40, 255))
+        ImageDraw.Draw(art).ellipse((500, 350, 700, 550), fill=(0, 0, 0, 0))
+        art.save(asset.art_path)
+
+    preview = render_preview(project, assets)
+
+    # The glow is framed slightly wider than the crop (zoom * 0.78), so its
+    # hole is smaller. Probe where the character art is transparent but the
+    # glow is not, derived from the renderer's own framing rather than from
+    # hard-coded pixels, which would depend on the default offsets.
+    member = project.teams[0][1]
+    target = panel_target_size(compact=True)
+    art = Image.open(assets[member.name.casefold()].art_path).convert("RGBA")
+    crop = cover_resize_offset(art, target, member.offset_x, member.offset_y, member.zoom)
+    glow = cover_resize_offset(art, target, member.offset_x, member.offset_y, member.zoom * 0.78)
+    row = target[1] // 2
+    uncovered = [
+        x
+        for x in range(target[0])
+        if crop.getpixel((x, row))[3] == 0 and glow.getpixel((x, row))[3] == 255
+    ]
+    assert uncovered, "no pixel where the art is transparent but the glow is not"
+    local_point = (uncovered[len(uncovered) // 2], row)
+
+    # Mapped to canvas coordinates the same way the panel is pasted
+    # (index * step - slant, row * row_height).
+    slant = panel_metrics(compact=True)[2]
+    canvas_point = (1 * 320 - slant + local_point[0], local_point[1])
+    plain_background = panel_background(target, member.color, compact=True)
+
+    pixel = preview.getpixel(canvas_point)
+    background_pixel = plain_background.getpixel(local_point)
+    assert isinstance(pixel, tuple)
+    assert isinstance(background_pixel, tuple)
+    assert pixel != background_pixel[:3]
+    # The art's red is the only red in this panel, so it can only have reached
+    # a pixel the character art does not cover via the blurred glow layer.
+    assert pixel[0] > background_pixel[0] + 10
 
 
 def test_render_image_requires_complete_assets_by_default(tmp_path: Path) -> None:
