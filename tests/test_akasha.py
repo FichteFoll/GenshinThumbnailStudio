@@ -3,15 +3,20 @@ import time
 import urllib.error
 from pathlib import Path
 
+from PIL import Image
+
+import genshin_thumbnail_studio.akasha as akasha_module
 from genshin_thumbnail_studio.akasha import (
     character_element,
     character_rarity,
+    download_assets,
     exact_art_url,
     load_enka_rarities,
     parse_builds,
     refinement,
     weapon_rarity,
 )
+from genshin_thumbnail_studio.models import Build
 
 
 def raw_build(name: str, icon: str, costume_id=None, element=None, character_id=None, weapon_id=None) -> dict:
@@ -190,3 +195,43 @@ def test_load_enka_rarities_falls_back_to_empty_maps_without_cache(tmp_path: Pat
     characters, weapons = load_enka_rarities(cache_path, fetch=failing_fetch)
     assert characters == {}
     assert weapons == {}
+
+
+def make_build(name: str) -> Build:
+    return Build(
+        name=name,
+        constellation=0,
+        refinement=1,
+        weapon_name="Weapon",
+        costume_id=None,
+        build_id=name,
+        build_md5=name,
+        last_build_update=None,
+        art_url=f"https://example.invalid/{name}-art.png",
+        weapon_url=f"https://example.invalid/{name}-weapon.png",
+    )
+
+
+def test_download_assets_calls_on_asset_per_build(tmp_path: Path, monkeypatch) -> None:
+    def fake_download(url: str, destination: Path) -> None:
+        if "weapon" in url:
+            image = Image.new("RGBA", (32, 32), (0, 0, 0, 0))
+        else:
+            image = Image.new("RGBA", (800, 600), (10, 20, 30, 255))
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        image.save(destination)
+
+    monkeypatch.setattr(akasha_module, "_download", fake_download)
+
+    builds = [make_build("Alpha"), make_build("Beta")]
+    received: list[tuple[str, str]] = []
+
+    def on_asset(key, asset) -> None:
+        received.append((key, asset.build.name))
+
+    assets = download_assets(builds, tmp_path, on_asset=on_asset)
+
+    assert received == [("alpha", "Alpha"), ("beta", "Beta")]
+    assert set(assets) == {"alpha", "beta"}
+    assert assets["alpha"].build.name == "Alpha"
+    assert assets["beta"].build.name == "Beta"

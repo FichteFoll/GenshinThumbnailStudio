@@ -129,6 +129,29 @@ def test_dispatch_render_end_to_end_sets_preview_pixmap(tmp_path, monkeypatch) -
     app.processEvents()
 
 
+def test_on_asset_ready_populates_incrementally_and_schedules_render(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+
+    names = ["Furina", "Nahida"]
+    _fill_window_teams(window, names)
+    window.assets = {}
+    all_assets = _create_test_assets(tmp_path / "assets", names)
+
+    assert not window._render_timer.isActive()
+
+    window._on_asset_ready("furina", all_assets["furina"])
+
+    # Only the first of several builds' assets has arrived, but the GUI is
+    # already render-able: it does not wait for the whole batch.
+    assert set(window.assets) == {"furina"}
+    assert window._render_timer.isActive()
+
+    window.close()
+    app.processEvents()
+
+
 def test_swap_slots_exchanges_placements(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = QApplication.instance() or QApplication([])

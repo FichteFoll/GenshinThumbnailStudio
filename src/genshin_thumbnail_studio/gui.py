@@ -736,11 +736,20 @@ class MainWindow(QMainWindow):
         unique = {build.name.casefold(): build for build in selected}
         return list(unique.values())
 
+    def _on_asset_ready(self, key: str, asset: Asset) -> None:
+        self.assets[key] = asset
+        for team in self.project.teams:
+            for member in team:
+                if member.name.casefold() == key:
+                    self._apply_preset(member)
+        self.schedule_render()
+
     def prepare_preview(self) -> None:
         try:
             builds = self._validate_team()
             self.preview_button.setEnabled(False)
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            self.assets = {}
             self.assets = download_assets(
                 builds,
                 cache_dir() / "assets",
@@ -748,6 +757,7 @@ class MainWindow(QMainWindow):
                     self.statusBar().showMessage(f"Lade {name} ({current}/{total}) ..."),
                     QApplication.processEvents(),
                 ),
+                on_asset=self._on_asset_ready,
             )
             for team in self.project.teams:
                 for member in team:
