@@ -19,6 +19,7 @@ from genshin_thumbnail_studio.renderer import (
     max_offset,
     panel_background,
     panel_metrics,
+    panel_origin,
     panel_target_size,
     render_image,
     render_preview,
@@ -449,6 +450,51 @@ def test_preview_renders_placeholder_panel_for_missing_asset(tmp_path: Path) -> 
     plain_background = panel_background(target, real_color, compact=True)
     real_canvas_point = (1 * 320 - slant + local_point[0], local_point[1])
     assert preview.getpixel(real_canvas_point) != plain_background.getpixel(local_point)[:3]
+
+
+def test_leftmost_slot_is_not_shifted_by_its_negative_panel_origin(tmp_path: Path) -> None:
+    """Slot 0's panel origin (index * step - slant) is negative, so its
+    panel-sized layer is composited with a source offset instead of a plain
+    destination offset. A panel's content depends only on its size, colour,
+    placement and art, never on its slot, so giving slot 1 the same asset lets
+    its (non-negative origin) rendering pin down slot 0's alignment.
+
+    The art carries a horizontal gradient, without which every probed row
+    would be constant and a horizontal shift invisible."""
+    clear_render_cache()
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)
+    art = Image.new("RGBA", (1200, 900), (0, 0, 0, 255))
+    art_draw = ImageDraw.Draw(art)
+    for x in range(art.width):
+        art_draw.line((x, 0, x, art.height), fill=(x * 255 // art.width, 40, 200, 255))
+    art.save(assets[names[0].casefold()].art_path)
+    project.teams[0][1].name = project.teams[0][0].name
+    project.teams[0][1].color = project.teams[0][0].color
+
+    preview = render_preview(project, assets)
+
+    # Preview geometry for a compact (two-row) abyss team, mirroring
+    # render_image()'s own layout constants at scale 1.
+    row_height, step, slant, panel_width = 360, 320.0, 38, 340
+    first_origin_x, _ = panel_origin(0, row=0, row_height=row_height, step=step, slant=slant)
+    second_origin_x, _ = panel_origin(1, row=0, row_height=row_height, step=step, slant=slant)
+    # Horizontal centre of the panel: well inside both cards, clear of the
+    # borders and of the slanted shared edges at every probed height.
+    local_x = (panel_width + slant * 2) // 2
+
+    for local_y in (row_height // 4, row_height // 2, 3 * row_height // 4):
+        first = preview.getpixel((first_origin_x + local_x, local_y))
+        second = preview.getpixel((second_origin_x + local_x, local_y))
+        assert first == second, local_y
+        # Guard against this becoming vacuous: with `source` dropped, slot 0's
+        # panel would be shifted right by `slant`, so the pixel `slant` to the
+        # right is exactly what a broken composite would put at `first`. It
+        # must therefore differ from the correctly aligned value.
+        shifted = preview.getpixel((first_origin_x + local_x + slant, local_y))
+        assert shifted != second, local_y
 
 
 def test_glow_shows_through_a_transparent_gap_in_the_character_art(tmp_path: Path) -> None:

@@ -307,7 +307,7 @@ def panel_background(size: tuple[int, int], color: str, compact: bool) -> Image.
 
 
 def make_panel(
-    canvas_size: tuple[int, int],
+    canvas_width: int,
     member: Placement,
     asset: Asset,
     index: int,
@@ -360,35 +360,46 @@ def make_panel(
             shade_draw.line((0, y, panel.width, y), fill=(0, 0, 0, min(255, alpha_value)))
     panel = Image.alpha_composite(panel, shade)
 
-    return paste_panel_on_canvas(canvas_size, panel, index, row, num_rows, row_height, step, slant, scale)
+    return apply_panel_mask(panel, index, row, num_rows, canvas_width, row_height, step, slant, scale)
 
 
-def paste_panel_on_canvas(
-    canvas_size: tuple[int, int],
+def panel_origin(index: int, row: int, row_height: int, step: float, slant: int) -> tuple[int, int]:
+    """Where a panel-sized layer sits on the canvas. Slot 0's x is negative,
+    because the slant makes the panel overhang the canvas on the left (and
+    slot 3's makes it overhang on the right)."""
+    return int(round(index * step - slant)), row * row_height
+
+
+def apply_panel_mask(
     panel: Image.Image,
     index: int,
     row: int,
     num_rows: int,
+    canvas_width: int,
     row_height: int,
     step: float,
     slant: int,
     scale: int,
 ) -> Image.Image:
-    width, _ = canvas_size
+    """Cut the slanted card shape out of `panel`, in place, and return it.
+
+    The polygon is computed in canvas coordinates and then translated into
+    panel-local ones; points outside the panel's bounds are clipped by
+    ImageDraw, which is what keeps the overhanging slants correct.
+    """
     gap = CARD_GAP * scale
     border = CARD_BORDER * scale
-    layer = Image.new("RGBA", canvas_size, (0, 0, 0, 0))
-    layer.paste(panel, (int(round(index * step - slant)), row * row_height), panel)
-    mask = Image.new("L", canvas_size, 0)
-    ImageDraw.Draw(mask).polygon(
-        panel_polygon(index, row, num_rows, width, row_height, step, slant, gap, border), fill=255
-    )
-    layer.putalpha(ImageChops.multiply(layer.getchannel("A"), mask))
-    return layer
+    points = panel_polygon(index, row, num_rows, canvas_width, row_height, step, slant, gap, border)
+    origin_x, origin_y = panel_origin(index, row, row_height, step, slant)
+    local_points = [(x - origin_x, y - origin_y) for x, y in points]
+    mask = Image.new("L", panel.size, 0)
+    ImageDraw.Draw(mask).polygon(local_points, fill=255)
+    panel.putalpha(ImageChops.multiply(panel.getchannel("A"), mask))
+    return panel
 
 
 def placeholder_panel(
-    canvas_size: tuple[int, int],
+    canvas_width: int,
     member: Placement,
     index: int,
     row: int,
@@ -399,12 +410,12 @@ def placeholder_panel(
     scale: int,
     compact: bool,
 ) -> Image.Image:
-    """A panel for a slot with no downloaded asset yet: same size/shape and
-    mask/paste logic as make_panel(), but without character art, glow,
-    shadow, or shade, since there is no Asset to read art from."""
+    """A panel for a slot with no downloaded asset yet: same size and mask
+    logic as make_panel(), but without character art, glow, shadow, or shade,
+    since there is no Asset to read art from."""
     target = panel_target_size(compact, scale)
     panel = panel_background(target, member.color, compact)
-    return paste_panel_on_canvas(canvas_size, panel, index, row, num_rows, row_height, step, slant, scale)
+    return apply_panel_mask(panel, index, row, num_rows, canvas_width, row_height, step, slant, scale)
 
 
 # Bounded LRU caches for render output that would otherwise be recomputed
@@ -413,6 +424,11 @@ def placeholder_panel(
 # one for decoded/resized weapon icons, one for decoded character art, and
 # one for preview-sized working copies of that art. Cleared via
 # clear_render_cache(), e.g. between tests that assert on cache hit/miss counts.
+#
+# Cached panels are panel-sized (~0.6 MB each at preview scale, so the bound is
+# ~19 MB) and are composited *into* the canvas rather than being the composite
+# operand, so they must never be mutated once cached; canvas.alpha_composite()
+# only reads them.
 _PANEL_CACHE_MAX = 32
 _panel_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
 
@@ -689,7 +705,7 @@ def render_image(
             if panel is None:
                 if asset is not None:
                     panel = make_panel(
-                        canvas.size,
+                        width,
                         member,
                         asset,
                         index,
@@ -703,7 +719,7 @@ def render_image(
                     )
                 else:
                     panel = placeholder_panel(
-                        canvas.size,
+                        width,
                         member,
                         index,
                         row,
@@ -715,7 +731,11 @@ def render_image(
                         compact,
                     )
                 _cache_put(_panel_cache, cache_key, panel, _PANEL_CACHE_MAX)
-            canvas = Image.alpha_composite(canvas, panel)
+            # The panel overhangs the canvas on the left for slot 0 and on the
+            # right for slot 3; clipping the left overhang needs a source
+            # offset, while the in-place composite clips the right one itself.
+            origin_x, origin_y = panel_origin(index, row, row_height, step, slant)
+            canvas.alpha_composite(panel, (max(0, origin_x), origin_y), (max(0, -origin_x), 0))
     add_card_borders(canvas, teams, assets, row_height, step, slant, scale)
     add_badges(canvas, teams, assets, row_height, step, scale, compact)
     return canvas.convert("RGB").resize(output_size, Image.Resampling.LANCZOS)
