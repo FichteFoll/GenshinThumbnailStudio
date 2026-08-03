@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 from genshin_thumbnail_studio import gui
 from genshin_thumbnail_studio.gui import MainWindow
 from genshin_thumbnail_studio.models import Asset, Build, Project
-from genshin_thumbnail_studio.renderer import art_pixel_size, max_offset
+from genshin_thumbnail_studio.renderer import art_pixel_size, max_offset, panel_target_size
 from genshin_thumbnail_studio.storage import load_profile_cache, save_profile_cache, save_project
 
 
@@ -499,6 +499,85 @@ def test_offset_sliders_are_signed_and_span_the_reachable_range(tmp_path, monkey
     window.x_slider.setValue(0)
     assert window.current_member().offset_x == 0.0
     assert window.x_value.text() == "+0%"
+
+    window.close()
+    app.processEvents()
+
+
+def _window_with_assets(tmp_path, names: list[str]) -> MainWindow:
+    window = MainWindow()
+    _fill_window_teams(window, names)
+    window.assets = _create_test_assets(tmp_path / "assets", names)
+    window.select_slot(0, 0)
+    return window
+
+
+# ``_sync_controls`` writes the integer slider values back onto the member, so
+# every offset is quantized to per-mille of the panel, a step of at most 0.5
+# canvas pixels and hence a rounding error of at most half that.
+OFFSET_TOLERANCE = 0.001
+
+
+def test_drag_moves_the_offsets_by_one_canvas_pixel_per_mouse_pixel(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = QApplication.instance() or QApplication([])
+    window = _window_with_assets(tmp_path, TEAM_NAMES)
+
+    target_w, target_h = panel_target_size(True)
+    member = window.current_member()
+    before_x, before_y = member.offset_x, member.offset_y
+
+    window.drag_placement(30, 30)
+
+    member = window.current_member()
+    assert member.offset_x - before_x == pytest.approx(30 / target_w, abs=OFFSET_TOLERANCE)
+    assert member.offset_y - before_y == pytest.approx(30 / target_h, abs=OFFSET_TOLERANCE)
+
+    window.close()
+    app.processEvents()
+
+
+def test_drag_displaces_the_portrait_equally_on_both_axes(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = QApplication.instance() or QApplication([])
+    window = _window_with_assets(tmp_path, TEAM_NAMES)
+
+    target_w, target_h = panel_target_size(True)
+    member = window.current_member()
+    before_x, before_y = member.offset_x, member.offset_y
+
+    window.drag_placement(30, 30)
+
+    member = window.current_member()
+    pixels_x = (member.offset_x - before_x) * target_w
+    pixels_y = (member.offset_y - before_y) * target_h
+    # A per-mille of the panel bounds the slider quantization on either axis.
+    tolerance = OFFSET_TOLERANCE * max(target_w, target_h)
+    assert pixels_x == pytest.approx(pixels_y, abs=tolerance)
+    assert pixels_x == pytest.approx(30, abs=tolerance)
+
+    window.close()
+    app.processEvents()
+
+
+def test_drag_past_the_reachable_range_stops_at_the_bounds(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = QApplication.instance() or QApplication([])
+    window = _window_with_assets(tmp_path, TEAM_NAMES)
+
+    max_x, max_y = window._offset_bounds(window.current_member())
+
+    window.drag_placement(10_000, 10_000)
+
+    member = window.current_member()
+    assert member.offset_x == pytest.approx(max_x, abs=OFFSET_TOLERANCE)
+    assert member.offset_y == pytest.approx(max_y, abs=OFFSET_TOLERANCE)
+
+    window.drag_placement(-20_000, -20_000)
+
+    member = window.current_member()
+    assert member.offset_x == pytest.approx(-max_x, abs=OFFSET_TOLERANCE)
+    assert member.offset_y == pytest.approx(-max_y, abs=OFFSET_TOLERANCE)
 
     window.close()
     app.processEvents()

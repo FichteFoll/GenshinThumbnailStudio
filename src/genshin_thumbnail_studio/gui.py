@@ -60,6 +60,7 @@ from .renderer import (
     art_pixel_size,
     export_project,
     max_offset,
+    panel_target_size,
     render_preview,
     safe_name,
 )
@@ -94,6 +95,8 @@ def parse_lineup(text: str) -> list[str]:
 
 class PreviewWidget(QFrame):
     slot_selected = Signal(int, int)
+    # Carries the drag delta in canvas pixels (not placement offsets); the
+    # receiver converts it against the panel size it is placing into.
     placement_dragged = Signal(float, float)
     zoom_requested = Signal(float)
 
@@ -187,7 +190,7 @@ class PreviewWidget(QFrame):
         self._drag_last = current
         image_dx = delta.x() * 1280 / rect.width()
         image_dy = delta.y() * 720 / rect.height()
-        self.placement_dragged.emit(image_dx / 900.0, image_dy / 700.0)
+        self.placement_dragged.emit(image_dx, image_dy)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -666,10 +669,15 @@ class MainWindow(QMainWindow):
         self.schedule_render()
 
     def drag_placement(self, dx: float, dy: float) -> None:
+        """Pan the selected portrait by a drag delta given in canvas pixels."""
         member = self.current_member()
+        # Offsets are fractions of the panel, and panels are pasted 1:1 onto the
+        # canvas, so dividing by the panel size pans one canvas pixel per mouse
+        # pixel on both axes.
+        target_w, target_h = panel_target_size(self.project.mode == "abyss")
         max_x, max_y = self._offset_bounds(member)
-        member.offset_x = min(max_x, max(-max_x, member.offset_x + dx))
-        member.offset_y = min(max_y, max(-max_y, member.offset_y + dy))
+        member.offset_x = min(max_x, max(-max_x, member.offset_x + dx / target_w))
+        member.offset_y = min(max_y, max(-max_y, member.offset_y + dy / target_h))
         self._save_current_preset()
         self._sync_controls()
         self.schedule_render()
