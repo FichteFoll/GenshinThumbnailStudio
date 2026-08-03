@@ -11,3 +11,4 @@ GenshinThumbnailStudio.spec
 plans/
 *.jpg
 *.png
+/*.json
