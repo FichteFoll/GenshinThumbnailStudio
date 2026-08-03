@@ -53,8 +53,13 @@ class Project:
     mode: Mode = "abyss"
     uid: str = ""
     output_name: str = "genshin_thumbnail"
+    output_height: int = 1080
     teams: list[list[Placement]] = field(default_factory=list)
     active_team: int = 0
+
+    @property
+    def output_size(self) -> tuple[int, int]:
+        return (self.output_height * 16 // 9, self.output_height)
 
     @classmethod
     def blank(cls, mode: Mode = "abyss", uid: str = "") -> "Project":
@@ -76,10 +81,11 @@ class Project:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "mode": self.mode,
             "uid": self.uid,
             "outputName": self.output_name,
+            "outputHeight": self.output_height,
             "activeTeam": self.active_team,
             "teams": [[asdict(member) for member in team] for team in self.teams],
         }
@@ -89,10 +95,16 @@ class Project:
         mode = str(value.get("mode", "abyss")).casefold()
         if mode not in {"abyss", "stygian"}:
             raise ValueError("Project mode must be abyss or stygian.")
+        schema_version = int(value.get("schemaVersion", 1))
+        if schema_version <= 1:
+            output_height = 720
+        else:
+            output_height = int(value.get("outputHeight", 1080))
         project = cls(
             mode=mode,
             uid=str(value.get("uid", "")),
             output_name=str(value.get("outputName", "genshin_thumbnail")),
+            output_height=output_height,
             active_team=int(value.get("activeTeam", 0)),
             teams=[
                 [Placement(**member) for member in team]

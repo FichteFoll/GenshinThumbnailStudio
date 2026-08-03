@@ -51,6 +51,18 @@ def test_abyss_render_and_export(tmp_path: Path) -> None:
     assert written[0].exists()
 
 
+def test_export_uses_configured_output_resolution(tmp_path: Path) -> None:
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    project.output_height = 1440
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)
+    written = export_project(project, assets, tmp_path / "out")
+    assert len(written) == 1
+    with Image.open(written[0]) as image:
+        assert image.size == (2560, 1440)
+
+
 def test_stygian_exports_three_files(tmp_path: Path) -> None:
     names = [f"Character {index}" for index in range(12)]
     project = Project.blank("stygian")

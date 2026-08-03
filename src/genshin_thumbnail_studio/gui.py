@@ -37,6 +37,14 @@ from .renderer import export_project, render_preview
 from .storage import cache_dir, load_presets, load_project, save_presets, save_project
 
 
+RESOLUTION_OPTIONS = [
+    ("720p", 720),
+    ("1080p", 1080),
+    ("1440p", 1440),
+    ("2160p", 2160),
+]
+
+
 class PreviewWidget(QFrame):
     slot_selected = Signal(int, int)
     placement_dragged = Signal(float, float)
@@ -226,6 +234,11 @@ class MainWindow(QMainWindow):
         self.output_name = QLineEdit("genshin_thumbnail")
         self.output_name.textChanged.connect(lambda value: setattr(self.project, "output_name", value))
         output_form.addRow("Dateiname", self.output_name)
+        self.resolution_combo = QComboBox()
+        for label, height in RESOLUTION_OPTIONS:
+            self.resolution_combo.addItem(label, height)
+        self.resolution_combo.currentIndexChanged.connect(self._resolution_changed)
+        output_form.addRow("Auflösung", self.resolution_combo)
         controls_layout.addLayout(output_form)
 
         project_row = QHBoxLayout()
@@ -381,6 +394,11 @@ class MainWindow(QMainWindow):
         self._sync_controls()
         self.preview.set_preview(QPixmap())
 
+    def _resolution_changed(self, index: int) -> None:
+        if self._updating_controls or index < 0:
+            return
+        self.project.output_height = self.resolution_combo.itemData(index)
+
     def _active_team_changed(self, index: int) -> None:
         if self.project.mode != "stygian":
             return
@@ -439,6 +457,8 @@ class MainWindow(QMainWindow):
         self.x_slider.setValue(int(round(member.fx * 1000)))
         self.y_slider.setValue(int(round(member.fy * 1000)))
         self.zoom_slider.setValue(int(round(member.zoom * 100)))
+        resolution_index = self.resolution_combo.findData(self.project.output_height)
+        self.resolution_combo.setCurrentIndex(resolution_index if resolution_index >= 0 else 1)
         self._updating_controls = False
         label = "Team" if self.project.mode == "abyss" else "Boss"
         self.selected_label.setText(f"{label} {team + 1}, Figur {slot + 1}")

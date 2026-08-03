@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 from pathlib import Path
 
@@ -225,7 +226,13 @@ def add_badges(
             image.alpha_composite(icon, (circle_x + (circle_d - icon.width) // 2, circle_y + (circle_d - icon.height) // 2))
 
 
-def render_image(teams: list[list[Placement]], assets: dict[str, Asset], compact: bool, scale: int = 1) -> Image.Image:
+def render_image(
+    teams: list[list[Placement]],
+    assets: dict[str, Asset],
+    compact: bool,
+    scale: int = 1,
+    output_size: tuple[int, int] = (BASE_W, BASE_H),
+) -> Image.Image:
     if scale < 1 or scale > 4:
         raise ValueError("Scale must be between 1 and 4.")
     width = BASE_W * scale
@@ -255,7 +262,7 @@ def render_image(teams: list[list[Placement]], assets: dict[str, Asset], compact
             canvas = Image.alpha_composite(canvas, panel)
     add_separators(canvas, teams, row_height, step, slant, scale, compact)
     add_badges(canvas, teams, assets, row_height, step, scale, compact)
-    return canvas.convert("RGB").resize((BASE_W, BASE_H), Image.Resampling.LANCZOS)
+    return canvas.convert("RGB").resize(output_size, Image.Resampling.LANCZOS)
 
 
 def render_preview(project: Project, assets: dict[str, Asset]) -> Image.Image:
@@ -268,14 +275,20 @@ def render_preview(project: Project, assets: dict[str, Asset]) -> Image.Image:
 def export_project(project: Project, assets: dict[str, Asset], directory: Path, quality: int = 94) -> list[Path]:
     project.ensure_shape()
     directory.mkdir(parents=True, exist_ok=True)
+    scale = min(4, max(2, math.ceil(2 * project.output_height / BASE_H)))
+    output_size = project.output_size
     written = []
     if project.mode == "abyss":
         target = directory / f"{safe_name(project.output_name)}.jpg"
-        render_image(project.teams, assets, compact=True, scale=2).save(target, quality=quality, optimize=True)
+        render_image(project.teams, assets, compact=True, scale=scale, output_size=output_size).save(
+            target, quality=quality, optimize=True
+        )
         written.append(target)
     else:
         for index, team in enumerate(project.teams, start=1):
             target = directory / f"{safe_name(project.output_name)}_boss{index}.jpg"
-            render_image([team], assets, compact=False, scale=2).save(target, quality=quality, optimize=True)
+            render_image([team], assets, compact=False, scale=scale, output_size=output_size).save(
+                target, quality=quality, optimize=True
+            )
             written.append(target)
     return written
