@@ -26,6 +26,9 @@ class Build:
     last_build_update: str | None
     art_url: str
     weapon_url: str
+    element: str | None = None
+    rarity: int | None = None
+    weapon_rarity: int | None = None
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
 

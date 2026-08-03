@@ -25,6 +25,21 @@ USER_AGENT = (
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36"
 )
 
+ENKA_AVATARS_URL = "https://raw.githubusercontent.com/EnkaNetwork/API-docs/master/store/gi/avatars.json"
+ENKA_WEAPONS_URL = "https://raw.githubusercontent.com/EnkaNetwork/API-docs/master/store/gi/weapons.json"
+ENKA_RARITY_CACHE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
+
+KNOWN_ELEMENTS = frozenset({"Anemo", "Geo", "Electro", "Dendro", "Hydro", "Pyro", "Cryo"})
+
+QUALITY_TYPE_RARITY = {
+    "QUALITY_ORANGE": 5,
+    "QUALITY_ORANGE_SP": 5,
+    "QUALITY_PURPLE": 4,
+    "QUALITY_BLUE": 3,
+    "QUALITY_GREEN": 2,
+    "QUALITY_WHITE": 1,
+}
+
 
 class AkashaError(RuntimeError):
     pass
@@ -87,7 +102,118 @@ def weapon_url(build: dict[str, Any]) -> str:
     return str(url)
 
 
-def parse_builds(payload: dict[str, Any]) -> list[Build]:
+def character_element(raw: dict[str, Any]) -> str | None:
+    if not isinstance(raw, dict):
+        return None
+    metadata = raw.get("characterMetadata")
+    if not isinstance(metadata, dict):
+        return None
+    element = metadata.get("element")
+    return element if element in KNOWN_ELEMENTS else None
+
+
+def weapon_rarity(raw: dict[str, Any], rarity_map: dict[str, int] | None = None) -> int | None:
+    if not isinstance(raw, dict):
+        return None
+    weapon = raw.get("weapon")
+    if not isinstance(weapon, dict):
+        return None
+    weapon_id = weapon.get("weaponId")
+    if weapon_id is None:
+        return None
+    weapon_id_str = str(weapon_id)
+    if not re.fullmatch(r"\d{5}", weapon_id_str):
+        return None
+    if rarity_map:
+        found = rarity_map.get(weapon_id_str)
+        if isinstance(found, int) and 1 <= found <= 5:
+            return found
+    # Offline fallback: the third digit of a 5-digit weaponId also encodes
+    # rarity, verified to agree with Enka's store on every known weapon.
+    digit = int(weapon_id_str[2])
+    return digit if 1 <= digit <= 5 else None
+
+
+def character_rarity(raw: dict[str, Any], quality_map: dict[str, int] | None = None) -> int | None:
+    if not quality_map or not isinstance(raw, dict):
+        return None
+    character_id = raw.get("characterId")
+    if character_id is None:
+        return None
+    found = quality_map.get(str(character_id))
+    return found if isinstance(found, int) and 1 <= found <= 5 else None
+
+
+def _fetch_enka_json(url: str) -> Any:
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _distill_avatar_rarities(payload: Any) -> dict[str, int]:
+    result: dict[str, int] = {}
+    if not isinstance(payload, dict):
+        return result
+    for character_id, entry in payload.items():
+        if isinstance(entry, dict):
+            rarity = QUALITY_TYPE_RARITY.get(entry.get("QualityType"))
+            if rarity is not None:
+                result[str(character_id)] = rarity
+    return result
+
+
+def _distill_weapon_rarities(payload: Any) -> dict[str, int]:
+    result: dict[str, int] = {}
+    if not isinstance(payload, dict):
+        return result
+    for weapon_id, entry in payload.items():
+        if isinstance(entry, dict):
+            rarity = entry.get("Rarity")
+            if isinstance(rarity, int) and 1 <= rarity <= 5:
+                result[str(weapon_id)] = rarity
+    return result
+
+
+def load_enka_rarities(
+    cache_path: Path, fetch: Callable[[str], Any] = _fetch_enka_json
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Return `(character_rarity_map, weapon_rarity_map)`, both `id (str) -> rarity (int)`.
+
+    Fetches and distills Enka's `store/gi/avatars.json` and `store/gi/weapons.json`,
+    caching only the distilled maps at `cache_path`. Reuses the cache while it is
+    younger than `ENKA_RARITY_CACHE_MAX_AGE_SECONDS`; on any fetch/parse error falls
+    back to a stale cache if one exists, otherwise to two empty maps.
+    """
+    cached: tuple[dict[str, int], dict[str, int]] | None = None
+    if cache_path.exists():
+        try:
+            stored = json.loads(cache_path.read_text(encoding="utf-8"))
+            cached = (stored.get("characters", {}), stored.get("weapons", {}))
+            age_seconds = time.time() - cache_path.stat().st_mtime
+            if age_seconds < ENKA_RARITY_CACHE_MAX_AGE_SECONDS:
+                return cached
+        except (OSError, ValueError, AttributeError):
+            cached = None
+
+    try:
+        characters = _distill_avatar_rarities(fetch(ENKA_AVATARS_URL))
+        weapons = _distill_weapon_rarities(fetch(ENKA_WEAPONS_URL))
+    except (urllib.error.URLError, OSError, ValueError, TimeoutError):
+        return cached if cached is not None else ({}, {})
+
+    try:
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps({"characters": characters, "weapons": weapons}), encoding="utf-8")
+    except OSError:
+        pass
+    return characters, weapons
+
+
+def parse_builds(
+    payload: dict[str, Any],
+    character_rarity_map: dict[str, int] | None = None,
+    weapon_rarity_map: dict[str, int] | None = None,
+) -> list[Build]:
     raw_builds = payload.get("data")
     if not isinstance(raw_builds, list):
         raise AkashaError("Akasha did not return a build list.")
@@ -117,6 +243,9 @@ def parse_builds(payload: dict[str, Any]) -> list[Build]:
                 last_build_update=str(raw.get("lastBuildUpdate") or "") or None,
                 art_url=exact_art_url(raw),
                 weapon_url=weapon_url(raw),
+                element=character_element(raw),
+                rarity=character_rarity(raw, character_rarity_map),
+                weapon_rarity=weapon_rarity(raw, weapon_rarity_map),
                 raw=raw,
             )
         )
@@ -125,6 +254,7 @@ def parse_builds(payload: dict[str, Any]) -> list[Build]:
 
 class AkashaWebClient:
     def __init__(self, cache_path: Path) -> None:
+        self.cache_path = cache_path
         self.profile = QWebEngineProfile("GenshinThumbnailStudio")
         self.profile.setCachePath(str(cache_path / "web-cache"))
         self.profile.setPersistentStoragePath(str(cache_path / "web-profile"))
@@ -225,7 +355,9 @@ class AkashaWebClient:
                 "uid": uid,
             }
         )
-        return parse_builds(self.json(f"{API_ROOT}/builds/?{query}")), age, last
+        character_rarity_map, weapon_rarity_map = load_enka_rarities(self.cache_path / "enka-rarities.json")
+        builds = parse_builds(self.json(f"{API_ROOT}/builds/?{query}"), character_rarity_map, weapon_rarity_map)
+        return builds, age, last
 
     def refresh_profile(self, uid: str, timeout_seconds: int = 90, progress: Callable[[str], None] | None = None) -> bool:
         before = self.json(f"{API_ROOT}/user/{uid}")
