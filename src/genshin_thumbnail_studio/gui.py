@@ -55,7 +55,7 @@ from PySide6.QtWidgets import (
 
 from .akasha import AkashaError, AkashaWebClient, Build, StaleProfileError, download_assets
 from .models import Asset, Placement, Project
-from .renderer import export_project, render_preview
+from .renderer import export_project, render_preview, safe_name
 from .storage import (
     cache_dir,
     load_presets,
@@ -819,12 +819,24 @@ class MainWindow(QMainWindow):
                 self.prepare_preview()
             if set(self._selected_name_keys()) - set(self.assets):
                 return
-            directory = QFileDialog.getExistingDirectory(self, "Choose output folder")
-            if not directory:
-                return
-            self.project.output_name = self.output_name.text().strip() or "genshin_thumbnail"
+            stem = safe_name(self.output_name.text().strip() or "genshin_thumbnail")
+            if self.project.mode == "abyss":
+                path, _ = QFileDialog.getSaveFileName(self, "Export PNG", f"{stem}.png", "PNG (*.png)")
+                if not path:
+                    return
+                target = Path(path)
+                directory = target.parent
+                stem = safe_name(target.stem)
+            else:
+                # Stygian writes three files at once, so only the folder can be chosen.
+                directory_str = QFileDialog.getExistingDirectory(self, "Choose output folder")
+                if not directory_str:
+                    return
+                directory = Path(directory_str)
+            self.output_name.setText(stem)
+            self.project.output_name = stem
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            written = export_project(self.project, self.assets, Path(directory))
+            written = export_project(self.project, self.assets, directory)
             QMessageBox.information(self, "Export finished", "\n".join(str(path) for path in written))
             self.statusBar().showMessage(f"Exported {len(written)} thumbnail(s)", 7000)
         except Exception as error:

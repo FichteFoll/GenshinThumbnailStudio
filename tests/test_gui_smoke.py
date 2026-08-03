@@ -77,10 +77,18 @@ class StubMessageBox:
     def critical(parent, title, text) -> None:  # noqa: ANN001 - Qt parent
         raise AssertionError(f"unexpected error dialog: {title}: {text}")
 
+    @staticmethod
+    def information(parent, title, text) -> None:  # noqa: ANN001 - Qt parent
+        return None
+
 
 class ForbiddenMessageBox(StubMessageBox):
     def __init__(self, parent=None) -> None:  # noqa: ANN001 - Qt parent
         raise AssertionError("unexpected message box")
+
+    @staticmethod
+    def information(parent, title, text) -> None:  # noqa: ANN001 - Qt parent
+        raise AssertionError(f"unexpected info dialog: {title}: {text}")
 
 
 def prepare_cached_open(tmp_path, monkeypatch, last_update: datetime) -> tuple[MainWindow, str]:
@@ -327,6 +335,76 @@ def test_swap_slots_exchanges_placements(tmp_path, monkeypatch) -> None:
     assert swapped_second.name == "Furina"
     assert swapped_second.fx == 0.42
     assert swapped_second.zoom == 1.20
+
+    window.close()
+    app.processEvents()
+
+
+def _prepare_export_window(window: MainWindow, tmp_path: Path, names: list[str]) -> None:
+    assets = _create_test_assets(tmp_path / "assets", names)
+    window.builds = {key: asset.build for key, asset in assets.items()}
+    _fill_window_teams(window, names)
+    window._rebuild_team_fields()
+    window.assets = assets
+
+
+def test_export_abyss_writes_the_file_chosen_in_the_save_dialog(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    _prepare_export_window(window, tmp_path, TEAM_NAMES)
+    window.output_name.setText("prefilled")
+
+    monkeypatch.setattr(gui, "QMessageBox", StubMessageBox)
+    monkeypatch.setattr(
+        gui.QFileDialog,
+        "getExistingDirectory",
+        staticmethod(lambda *args, **kwargs: pytest.fail("abyss export must not ask for a folder")),
+    )
+    chosen = tmp_path / "out" / "chosen.png"
+    default_names = []
+
+    def fake_save_dialog(parent, title, default_name, name_filter):  # noqa: ANN001 - Qt parent
+        default_names.append(default_name)
+        return str(chosen), "PNG (*.png)"
+
+    monkeypatch.setattr(gui.QFileDialog, "getSaveFileName", staticmethod(fake_save_dialog))
+
+    window.export()
+
+    assert default_names == ["prefilled.png"]
+    assert chosen.exists()
+    assert list(chosen.parent.glob("*.png")) == [chosen]
+    assert window.output_name.text() == "chosen"
+    assert window.project.output_name == "chosen"
+
+    window.close()
+    app.processEvents()
+
+
+def test_export_stygian_still_asks_for_a_folder(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    # Switching the mode replaces window.project, so fill the teams afterwards.
+    window.stygian_radio.setChecked(True)
+    names = TEAM_NAMES + ["Xingqiu", "Ganyu", "Raiden Shogun", "Yelan"]
+    _prepare_export_window(window, tmp_path, names)
+    window.output_name.setText("bosses")
+
+    monkeypatch.setattr(gui, "QMessageBox", StubMessageBox)
+    monkeypatch.setattr(
+        gui.QFileDialog,
+        "getSaveFileName",
+        staticmethod(lambda *args, **kwargs: pytest.fail("stygian export must not ask for a file name")),
+    )
+    directory = tmp_path / "out"
+    monkeypatch.setattr(gui.QFileDialog, "getExistingDirectory", staticmethod(lambda *args, **kwargs: str(directory)))
+
+    window.export()
+
+    for index in (1, 2, 3):
+        assert (directory / f"bosses_boss{index}.png").exists()
 
     window.close()
     app.processEvents()
