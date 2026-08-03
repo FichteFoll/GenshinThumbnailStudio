@@ -859,6 +859,7 @@ class MainWindow(QMainWindow):
         self.project.uid = self.uid_edit.text().strip()
         self.project.output_name = self.output_name.text().strip() or "genshin_thumbnail"
         save_project(self.project, Path(path))
+        self.project_path = Path(path)
         self.statusBar().showMessage("Project saved", 5000)
 
     def open_project(self) -> None:
