@@ -298,6 +298,7 @@ class MainWindow(QMainWindow):
         self.resize(1380, 860)
         self.setMinimumSize(1020, 680)
         self.project = Project.blank("abyss")
+        self.project_path: Path | None = None
         self.builds: dict[str, Build] = {}
         self.assets: dict[str, Asset] = {}
         self.presets = load_presets()
@@ -547,6 +548,7 @@ class MainWindow(QMainWindow):
             return
         uid = self.uid_edit.text().strip()
         self.project = Project.blank(mode, uid)
+        self.project_path = None
         self.assets = {}
         self.selected = (0, 0)
         self.boss_combo.setVisible(mode == "stygian")
@@ -820,8 +822,10 @@ class MainWindow(QMainWindow):
             if set(self._selected_name_keys()) - set(self.assets):
                 return
             stem = safe_name(self.output_name.text().strip() or "genshin_thumbnail")
+            default_dir = self.project_path.parent if self.project_path else Path.cwd()
             if self.project.mode == "abyss":
-                path, _ = QFileDialog.getSaveFileName(self, "Export PNG", f"{stem}.png", "PNG (*.png)")
+                default_path = str(default_dir / f"{stem}.png")
+                path, _ = QFileDialog.getSaveFileName(self, "Export PNG", default_path, "PNG (*.png)")
                 if not path:
                     return
                 target = Path(path)
@@ -829,7 +833,7 @@ class MainWindow(QMainWindow):
                 stem = safe_name(target.stem)
             else:
                 # Stygian writes three files at once, so only the folder can be chosen.
-                directory_str = QFileDialog.getExistingDirectory(self, "Choose output folder")
+                directory_str = QFileDialog.getExistingDirectory(self, "Choose output folder", str(default_dir))
                 if not directory_str:
                     return
                 directory = Path(directory_str)
@@ -864,6 +868,7 @@ class MainWindow(QMainWindow):
         try:
             project = load_project(Path(path))
             self.project = project
+            self.project_path = Path(path)
             self.selected = (project.active_team if project.mode == "stygian" else 0, 0)
             self.assets = {}
             self.abyss_radio.blockSignals(True)

@@ -372,7 +372,7 @@ def test_export_abyss_writes_the_file_chosen_in_the_save_dialog(tmp_path, monkey
 
     window.export()
 
-    assert default_names == ["prefilled.png"]
+    assert [Path(name).name for name in default_names] == ["prefilled.png"]
     assert chosen.exists()
     assert list(chosen.parent.glob("*.png")) == [chosen]
     assert window.output_name.text() == "chosen"
@@ -405,6 +405,37 @@ def test_export_stygian_still_asks_for_a_folder(tmp_path, monkeypatch) -> None:
 
     for index in (1, 2, 3):
         assert (directory / f"bosses_boss{index}.png").exists()
+
+    window.close()
+    app.processEvents()
+
+
+def test_export_defaults_to_the_opened_project_folder(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = QApplication.instance() or QApplication([])
+    project_dir = tmp_path / "projects"
+    project_dir.mkdir()
+    project_file = project_dir / "thumbnail-project.json"
+    write_project(project_file, "700000042")
+
+    window = MainWindow()
+    monkeypatch.setattr(gui, "QMessageBox", StubMessageBox)
+    monkeypatch.setattr(gui.QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(project_file), "")))
+    window.open_project()
+
+    _prepare_export_window(window, tmp_path, TEAM_NAMES)
+    window.output_name.setText("prefilled")
+    default_paths = []
+
+    def fake_save_dialog(parent, title, default_path, name_filter):  # noqa: ANN001 - Qt parent
+        default_paths.append(default_path)
+        return str(tmp_path / "out" / "chosen.png"), "PNG (*.png)"
+
+    monkeypatch.setattr(gui.QFileDialog, "getSaveFileName", staticmethod(fake_save_dialog))
+
+    window.export()
+
+    assert default_paths == [str(project_dir / "prefilled.png")]
 
     window.close()
     app.processEvents()
