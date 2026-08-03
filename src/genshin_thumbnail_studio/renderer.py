@@ -3,6 +3,7 @@ from __future__ import annotations
 import collections
 import math
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -285,27 +286,34 @@ _panel_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedD
 _WEAPON_ICON_CACHE_MAX = 32
 _weapon_icon_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
 
+# Previews render on a background thread while export_project() renders on
+# the GUI thread, so both caches can be touched concurrently.
+_cache_lock = threading.Lock()
+
 
 def clear_render_cache() -> None:
     """Empty the panel and weapon-icon render caches."""
-    _panel_cache.clear()
-    _weapon_icon_cache.clear()
+    with _cache_lock:
+        _panel_cache.clear()
+        _weapon_icon_cache.clear()
 
 
 def _cache_get(cache: collections.OrderedDict[tuple, Image.Image], key: tuple) -> Image.Image | None:
-    if key not in cache:
-        return None
-    cache.move_to_end(key)
-    return cache[key]
+    with _cache_lock:
+        if key not in cache:
+            return None
+        cache.move_to_end(key)
+        return cache[key]
 
 
 def _cache_put(
     cache: collections.OrderedDict[tuple, Image.Image], key: tuple, value: Image.Image, max_size: int
 ) -> None:
-    cache[key] = value
-    cache.move_to_end(key)
-    while len(cache) > max_size:
-        cache.popitem(last=False)
+    with _cache_lock:
+        cache[key] = value
+        cache.move_to_end(key)
+        while len(cache) > max_size:
+            cache.popitem(last=False)
 
 
 def add_card_borders(
