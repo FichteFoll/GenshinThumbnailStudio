@@ -1,4 +1,44 @@
-from genshin_thumbnail_studio.models import Project
+from genshin_thumbnail_studio.models import Build, Project
+
+
+def test_build_round_trip() -> None:
+    build = Build(
+        name="Furina",
+        constellation=2,
+        refinement=3,
+        weapon_name="Splendor of Tranquil Waters",
+        costume_id="costume-42",
+        build_id="build-123",
+        build_md5="abcdef0123456789",
+        last_build_update="2026-08-01T12:00:00+00:00",
+        art_url="https://example.com/furina.png",
+        weapon_url="https://example.com/weapon.png",
+        element="Hydro",
+        rarity=5,
+        weapon_rarity=4,
+        raw={"nested": {"value": 1}, "list": [1, 2, 3]},
+    )
+    restored = Build.from_dict(build.to_dict())
+    assert restored == build
+
+    build_with_nones = Build(
+        name="Navia",
+        constellation=0,
+        refinement=1,
+        weapon_name="Crimson Moon's Semblance",
+        costume_id=None,
+        build_id="build-456",
+        build_md5="0123456789abcdef",
+        last_build_update=None,
+        art_url="https://example.com/navia.png",
+        weapon_url="https://example.com/weapon2.png",
+        element=None,
+        rarity=None,
+        weapon_rarity=None,
+        raw={},
+    )
+    restored_with_nones = Build.from_dict(build_with_nones.to_dict())
+    assert restored_with_nones == build_with_nones
 
 
 def test_project_round_trip() -> None:
