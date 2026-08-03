@@ -1,11 +1,24 @@
 from __future__ import annotations
 
+import copy
 import re
 from datetime import timezone
 from pathlib import Path
 
+from PIL import Image
 from PIL.ImageQt import ImageQt
-from PySide6.QtCore import QMimeData, QPoint, QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import (
+    QMimeData,
+    QObject,
+    QPoint,
+    QRect,
+    QRunnable,
+    QSize,
+    Qt,
+    QThreadPool,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import (
     QColor,
     QDrag,
@@ -247,6 +260,29 @@ class TeamSlotWidget(QWidget):
         self.swap_requested.emit(int(team_str), int(slot_str), self.team, self.slot)
 
 
+class RenderJobSignals(QObject):
+    finished = Signal(int, object, object)
+
+
+class RenderJob(QRunnable):
+    """Renders a `Project` snapshot on a worker thread via `QThreadPool`."""
+
+    def __init__(self, token: int, project_snapshot: Project, assets_snapshot: dict[str, Asset]) -> None:
+        super().__init__()
+        self.token = token
+        self._project_snapshot = project_snapshot
+        self._assets_snapshot = assets_snapshot
+        self.signals = RenderJobSignals()
+
+    def run(self) -> None:  # type: ignore[no-untyped-def]
+        try:
+            image: Image.Image | None = render_preview(self._project_snapshot, self._assets_snapshot)
+        except Exception as error:  # noqa: BLE001 - reported back to the GUI thread
+            self.signals.finished.emit(self.token, None, error)
+            return
+        self.signals.finished.emit(self.token, image, None)
+
+
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -261,7 +297,11 @@ class MainWindow(QMainWindow):
         self._updating_controls = False
         self._render_timer = QTimer(self)
         self._render_timer.setSingleShot(True)
-        self._render_timer.timeout.connect(self.render_preview)
+        self._render_timer.timeout.connect(self._dispatch_render)
+        self._thread_pool = QThreadPool(self)
+        self._render_token = 0
+        self._render_job_running = False
+        self._render_stale = False
         self.client = AkashaWebClient(cache_dir())
         self.team_combos: list[list[QComboBox]] = []
         self._build_ui()
@@ -712,7 +752,7 @@ class MainWindow(QMainWindow):
             for team in self.project.teams:
                 for member in team:
                     self._apply_preset(member)
-            self.render_preview()
+            self._dispatch_render()
             self.statusBar().showMessage("Vorschau bereit", 5000)
         except Exception as error:
             self._show_error("Vorschau konnte nicht erzeugt werden", error)
@@ -720,12 +760,35 @@ class MainWindow(QMainWindow):
             QApplication.restoreOverrideCursor()
             self.preview_button.setEnabled(True)
 
-    def render_preview(self) -> None:
-        try:
-            image = render_preview(self.project, self.assets)
-            self.preview.set_preview(QPixmap.fromImage(ImageQt(image)))
-        except Exception as error:
-            self.statusBar().showMessage(str(error), 8000)
+    def _dispatch_render(self) -> None:
+        self._render_token += 1
+        if self._render_job_running:
+            self._render_stale = True
+            return
+        snapshot = Project(
+            mode=self.project.mode,
+            uid=self.project.uid,
+            output_name=self.project.output_name,
+            output_height=self.project.output_height,
+            teams=copy.deepcopy(self.project.teams),
+            active_team=self.project.active_team,
+        )
+        assets_snapshot = dict(self.assets)
+        self._render_job_running = True
+        job = RenderJob(self._render_token, snapshot, assets_snapshot)
+        job.signals.finished.connect(self._on_render_finished)
+        self._thread_pool.start(job)
+
+    def _on_render_finished(self, token: int, image: Image.Image | None, error: Exception | None) -> None:
+        self._render_job_running = False
+        if token == self._render_token:
+            if error is None:
+                self.preview.set_preview(QPixmap.fromImage(ImageQt(image)))
+            else:
+                self.statusBar().showMessage(str(error), 8000)
+        if self._render_stale:
+            self._render_stale = False
+            self._dispatch_render()
 
     def export(self) -> None:
         try:
