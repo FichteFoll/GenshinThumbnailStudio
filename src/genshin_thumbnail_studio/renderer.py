@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import collections
 import math
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -225,6 +227,20 @@ def make_panel(
             shade_draw.line((0, y, panel.width, y), fill=(0, 0, 0, min(255, alpha_value)))
     panel = Image.alpha_composite(panel, shade)
 
+    return paste_panel_on_canvas(canvas_size, panel, index, row, num_rows, row_height, step, slant, scale)
+
+
+def paste_panel_on_canvas(
+    canvas_size: tuple[int, int],
+    panel: Image.Image,
+    index: int,
+    row: int,
+    num_rows: int,
+    row_height: int,
+    step: float,
+    slant: int,
+    scale: int,
+) -> Image.Image:
     width, _ = canvas_size
     gap = CARD_GAP * scale
     border = CARD_BORDER * scale
@@ -236,6 +252,68 @@ def make_panel(
     )
     layer.putalpha(ImageChops.multiply(layer.getchannel("A"), mask))
     return layer
+
+
+def placeholder_panel(
+    canvas_size: tuple[int, int],
+    member: Placement,
+    index: int,
+    row: int,
+    num_rows: int,
+    row_height: int,
+    panel_width: int,
+    step: float,
+    slant: int,
+    scale: int,
+    compact: bool,
+) -> Image.Image:
+    """A panel for a slot with no downloaded asset yet: same size/shape and
+    mask/paste logic as make_panel(), but without character art, glow,
+    shadow, or shade, since there is no Asset to read art from."""
+    target = (panel_width + slant * 2, row_height)
+    panel = panel_background(target, member.color, compact)
+    return paste_panel_on_canvas(canvas_size, panel, index, row, num_rows, row_height, step, slant, scale)
+
+
+# Bounded LRU caches for render output that would otherwise be recomputed
+# on every preview render regardless of what actually changed: one for
+# fully-composited panel layers (make_panel()/placeholder_panel() output),
+# one for decoded/resized weapon icons. Cleared via clear_render_cache(),
+# e.g. between tests that assert on cache hit/miss counts.
+_PANEL_CACHE_MAX = 32
+_panel_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
+
+_WEAPON_ICON_CACHE_MAX = 32
+_weapon_icon_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
+
+# Previews render on a background thread while export_project() renders on
+# the GUI thread, so both caches can be touched concurrently.
+_cache_lock = threading.Lock()
+
+
+def clear_render_cache() -> None:
+    """Empty the panel and weapon-icon render caches."""
+    with _cache_lock:
+        _panel_cache.clear()
+        _weapon_icon_cache.clear()
+
+
+def _cache_get(cache: collections.OrderedDict[tuple, Image.Image], key: tuple) -> Image.Image | None:
+    with _cache_lock:
+        if key not in cache:
+            return None
+        cache.move_to_end(key)
+        return cache[key]
+
+
+def _cache_put(
+    cache: collections.OrderedDict[tuple, Image.Image], key: tuple, value: Image.Image, max_size: int
+) -> None:
+    with _cache_lock:
+        cache[key] = value
+        cache.move_to_end(key)
+        while len(cache) > max_size:
+            cache.popitem(last=False)
 
 
 def add_card_borders(
@@ -254,9 +332,10 @@ def add_card_borders(
     draw = ImageDraw.Draw(image)
     for row, team in enumerate(teams):
         for index, member in enumerate(team):
-            asset = assets[member.name.casefold()]
+            asset = assets.get(member.name.casefold()) if member.name else None
+            color = card_color(member, asset) if asset else member.color
             points = panel_polygon(index, row, num_rows, width, row_height, step, slant, gap, border)
-            draw.polygon(points, outline=hex_to_rgba(card_color(member, asset), 255), width=round(border))
+            draw.polygon(points, outline=hex_to_rgba(color, 255), width=round(border))
 
 
 @dataclass(frozen=True)
@@ -323,6 +402,8 @@ def add_badges(
     stroke_width = (3 if compact else 4) * scale
     for row, team in enumerate(teams):
         for index, member in enumerate(team):
+            if not member.name or member.name.casefold() not in assets:
+                continue
             asset = assets[member.name.casefold()]
             center = int(round(index * step + step / 2))
             top_y = row * row_height + row_height - (68 if compact else 107) * scale
@@ -377,8 +458,12 @@ def add_badges(
                 outline=hex_to_rgba(card_color(member, asset), 240),
                 width=2 * scale,
             )
-            icon = Image.open(asset.weapon_path).convert("RGBA")
-            icon.thumbnail((icon_d, icon_d), Image.Resampling.LANCZOS)
+            icon_key = (str(asset.weapon_path), icon_d)
+            icon = _cache_get(_weapon_icon_cache, icon_key)
+            if icon is None:
+                icon = Image.open(asset.weapon_path).convert("RGBA")
+                icon.thumbnail((icon_d, icon_d), Image.Resampling.LANCZOS)
+                _cache_put(_weapon_icon_cache, icon_key, icon, _WEAPON_ICON_CACHE_MAX)
             circle_x, circle_y, circle_x1, _circle_y1 = geometry.circle
             circle_d = circle_x1 - circle_x
             image.alpha_composite(icon, (circle_x + (circle_d - icon.width) // 2, circle_y + (circle_d - icon.height) // 2))
@@ -390,6 +475,7 @@ def render_image(
     compact: bool,
     scale: int = 1,
     output_size: tuple[int, int] = (BASE_W, BASE_H),
+    require_complete: bool = True,
 ) -> Image.Image:
     if scale < 1 or scale > 4:
         raise ValueError("Scale must be between 1 and 4.")
@@ -403,15 +489,20 @@ def render_image(
     num_rows = len(teams)
     for row, team in enumerate(teams):
         for index, member in enumerate(team):
-            if not member.name or member.name.casefold() not in assets:
+            has_asset = bool(member.name) and member.name.casefold() in assets
+            if not has_asset and require_complete:
                 raise ValueError(f"No downloaded Akasha asset for slot {row + 1}-{index + 1}.")
-            panel = make_panel(
-                canvas.size,
-                member,
-                assets[member.name.casefold()],
+            asset = assets[member.name.casefold()] if has_asset else None
+            cache_key = (
                 index,
                 row,
                 num_rows,
+                member.name.casefold(),
+                round(member.fx, 4),
+                round(member.fy, 4),
+                round(member.zoom, 4),
+                member.color,
+                str(asset.art_path) if asset else None,
                 row_height,
                 panel_width,
                 step,
@@ -419,6 +510,38 @@ def render_image(
                 scale,
                 compact,
             )
+            panel = _cache_get(_panel_cache, cache_key)
+            if panel is None:
+                if asset is not None:
+                    panel = make_panel(
+                        canvas.size,
+                        member,
+                        asset,
+                        index,
+                        row,
+                        num_rows,
+                        row_height,
+                        panel_width,
+                        step,
+                        slant,
+                        scale,
+                        compact,
+                    )
+                else:
+                    panel = placeholder_panel(
+                        canvas.size,
+                        member,
+                        index,
+                        row,
+                        num_rows,
+                        row_height,
+                        panel_width,
+                        step,
+                        slant,
+                        scale,
+                        compact,
+                    )
+                _cache_put(_panel_cache, cache_key, panel, _PANEL_CACHE_MAX)
             canvas = Image.alpha_composite(canvas, panel)
     add_card_borders(canvas, teams, assets, row_height, step, slant, scale)
     add_badges(canvas, teams, assets, row_height, step, scale, compact)
@@ -428,8 +551,10 @@ def render_image(
 def render_preview(project: Project, assets: dict[str, Asset]) -> Image.Image:
     project.ensure_shape()
     if project.mode == "abyss":
-        return render_image(project.teams, assets, compact=True, scale=1)
-    return render_image([project.teams[project.active_team]], assets, compact=False, scale=1)
+        return render_image(project.teams, assets, compact=True, scale=1, require_complete=False)
+    return render_image(
+        [project.teams[project.active_team]], assets, compact=False, scale=1, require_complete=False
+    )
 
 
 def export_project(project: Project, assets: dict[str, Asset], directory: Path) -> list[Path]:

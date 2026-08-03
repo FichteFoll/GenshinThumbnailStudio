@@ -412,7 +412,12 @@ def _asset_path(root: Path, kind: str, build: Build, url: str) -> Path:
     return target
 
 
-def download_assets(builds: list[Build], root: Path, progress: Callable[[int, int, str], None] | None = None) -> dict[str, Asset]:
+def download_assets(
+    builds: list[Build],
+    root: Path,
+    progress: Callable[[int, int, str], None] | None = None,
+    on_asset: Callable[[str, Asset], None] | None = None,
+) -> dict[str, Asset]:
     assets: dict[str, Asset] = {}
     for index, build in enumerate(builds, start=1):
         if progress:
@@ -432,5 +437,8 @@ def download_assets(builds: list[Build], root: Path, progress: Callable[[int, in
         except (OSError, ValueError) as error:
             art.unlink(missing_ok=True)
             raise AkashaError(f"Downloaded image validation failed for {build.name}.") from error
-        assets[build.name.casefold()] = Asset(build=build, art_path=art, weapon_path=weapon)
+        key = build.name.casefold()
+        assets[key] = Asset(build=build, art_path=art, weapon_path=weapon)
+        if on_asset:
+            on_asset(key, assets[key])
     return assets
