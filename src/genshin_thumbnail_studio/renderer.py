@@ -277,7 +277,6 @@ def make_panel(
     row: int,
     num_rows: int,
     row_height: int,
-    panel_width: int,
     step: float,
     slant: int,
     scale: int,
@@ -349,7 +348,6 @@ def placeholder_panel(
     row: int,
     num_rows: int,
     row_height: int,
-    panel_width: int,
     step: float,
     slant: int,
     scale: int,
@@ -569,7 +567,7 @@ def render_image(
         raise ValueError("Scale must be between 1 and 4.")
     width = BASE_W * scale
     height = BASE_H * scale
-    row_height, panel_width, slant = panel_metrics(compact, scale)
+    row_height, _, slant = panel_metrics(compact, scale)
     step = width / 4
     canvas = Image.new("RGBA", (width, height), BACKGROUND_COLOR)
     num_rows = len(teams)
@@ -590,7 +588,6 @@ def render_image(
                 member.color,
                 str(asset.art_path) if asset else None,
                 row_height,
-                panel_width,
                 step,
                 slant,
                 scale,
@@ -607,7 +604,6 @@ def render_image(
                         row,
                         num_rows,
                         row_height,
-                        panel_width,
                         step,
                         slant,
                         scale,
@@ -621,7 +617,6 @@ def render_image(
                         row,
                         num_rows,
                         row_height,
-                        panel_width,
                         step,
                         slant,
                         scale,
