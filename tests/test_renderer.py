@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 from typing import NamedTuple
 
@@ -824,6 +825,65 @@ def test_clear_render_cache_empties_the_render_caches(tmp_path: Path) -> None:
     assert not renderer._work_cache
     assert not renderer._mask_cache
     assert not renderer._border_cache
+
+
+def test_slots_with_identical_badge_state_share_one_cached_tile(tmp_path: Path) -> None:
+    """A badge tile is drawn in tile-local coordinates and positioned only when
+    it is composited, so every slot showing the same build, card colour and
+    weapon icon must resolve to the same cache entry."""
+    clear_render_cache()
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    # One asset for every slot: same constellation, refinement, rarities and
+    # weapon icon. Its element pins the card colour too, which otherwise
+    # differs per slot via the placement colour fallback.
+    assets = create_assets(tmp_path, names[:1], elements={names[0]: "Pyro"})
+    for member in (member for team in project.teams for member in team):
+        member.name = names[0]
+
+    render_preview(project, assets)
+
+    assert len(renderer._badge_cache) == 1
+
+    clear_render_cache()
+    assert not renderer._badge_cache
+
+
+def test_badge_cache_key_separates_builds_differing_only_in_c_and_r(tmp_path: Path) -> None:
+    """Regression test: the badge cache key must include the constellation and
+    the refinement. They are the badge's whole text, yet everything else the
+    key covers (colour, rarities, weapon path, scale, compactness) can stay
+    identical between two builds, so dropping either from the key would serve
+    one build's tile for the other."""
+    clear_render_cache()
+    name = "Character 0"
+    project = Project.blank("abyss")
+    for member in (member for team in project.teams for member in team):
+        member.name = name
+    # A pinned element fixes the card colour across slots, so the only thing
+    # varying below is the badge text itself.
+    assets = create_assets(tmp_path, [name], elements={name: "Pyro"})
+    asset = assets[name.casefold()]
+
+    def render_with(constellation: int, refinement: int) -> Image.Image:
+        # Same tmp_path, hence the same weapon path, and no clear_render_cache()
+        # in between: all three renders share one warm _badge_cache.
+        assets[name.casefold()] = Asset(
+            replace(asset.build, constellation=constellation, refinement=refinement),
+            asset.art_path,
+            asset.weapon_path,
+        )
+        return render_preview(project, assets)
+
+    # Single-digit values throughout, so the badge text keeps its width and a
+    # stale tile would land pixel-for-pixel on top of the fresh one.
+    baseline = render_with(1, 1)
+    other_constellation = render_with(6, 1)
+    other_refinement = render_with(1, 5)
+
+    assert ImageChops.difference(baseline, other_constellation).getbbox() is not None
+    assert ImageChops.difference(baseline, other_refinement).getbbox() is not None
 
 
 def test_swapping_slots_with_warm_cache_matches_fresh_render(tmp_path: Path) -> None:

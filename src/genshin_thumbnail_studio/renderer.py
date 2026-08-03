@@ -7,6 +7,7 @@ import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypeVar
 
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
@@ -99,7 +100,18 @@ def card_color(member: Placement, asset: Asset) -> str:
     return member.color
 
 
+@functools.lru_cache(maxsize=8)
 def find_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    """The bold system font at `size`, memoized: probing the filesystem and
+    loading the TrueType face on every render is pure overhead, since the same
+    handful of sizes (one per scale) is requested over and over.
+
+    Memoizing shares one FreeTypeFont between callers, and Pillow does not
+    document those as thread-safe. It is safe here only because the preview
+    worker thread always renders at scale 1 (sizes 38/54) while export_project()
+    renders on the GUI thread at scale >= 2 (76 and up), so the two threads
+    never ask for the same size. Keep those scale ranges disjoint, or drop the
+    memoization."""
     candidates = [
         Path(r"C:\Windows\Fonts\arialbd.ttf"),
         Path(r"C:\Windows\Fonts\Arial.ttf"),
@@ -480,14 +492,21 @@ _mask_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDi
 _BORDER_CACHE_MAX = 16
 _border_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
 
+# A slot's C/R + weapon badge depends on the build and the card colour, never
+# on the placement's position or zoom, so it survives a drag untouched. Each
+# entry is the drawn tile plus the coverage mask that says which of its pixels
+# the drawing actually touched (see badge_tile()).
+_BADGE_CACHE_MAX = 16
+_badge_cache: collections.OrderedDict[tuple, tuple[Image.Image, Image.Image]] = collections.OrderedDict()
+
 # Previews render on a background thread while export_project() renders on
 # the GUI thread, so all caches can be touched concurrently.
 _cache_lock = threading.Lock()
 
 
 def clear_render_cache() -> None:
-    """Empty the panel, weapon-icon, character-art, working-copy, card-mask
-    and card-border caches."""
+    """Empty the panel, weapon-icon, character-art, working-copy, card-mask,
+    card-border and badge caches."""
     with _cache_lock:
         _panel_cache.clear()
         _weapon_icon_cache.clear()
@@ -495,9 +514,13 @@ def clear_render_cache() -> None:
         _work_cache.clear()
         _mask_cache.clear()
         _border_cache.clear()
+        _badge_cache.clear()
 
 
-def _cache_get(cache: collections.OrderedDict[tuple, Image.Image], key: tuple) -> Image.Image | None:
+_CacheValue = TypeVar("_CacheValue")
+
+
+def _cache_get(cache: collections.OrderedDict[tuple, _CacheValue], key: tuple) -> _CacheValue | None:
     with _cache_lock:
         if key not in cache:
             return None
@@ -506,7 +529,7 @@ def _cache_get(cache: collections.OrderedDict[tuple, Image.Image], key: tuple) -
 
 
 def _cache_put(
-    cache: collections.OrderedDict[tuple, Image.Image], key: tuple, value: Image.Image, max_size: int
+    cache: collections.OrderedDict[tuple, _CacheValue], key: tuple, value: _CacheValue, max_size: int
 ) -> None:
     with _cache_lock:
         cache[key] = value
@@ -640,6 +663,133 @@ def badge_geometry(
     )
 
 
+def badge_tile_origin(geometry: BadgeGeometry) -> tuple[int, int]:
+    """Where a badge tile sits on the canvas: the top-left of the union of the
+    C/R box and the weapon circle, the latter of which starts slightly above
+    the box."""
+    return geometry.group_x, min(geometry.box[1], geometry.circle[1])
+
+
+def badge_tile(
+    geometry: BadgeGeometry,
+    asset: Asset,
+    color: str,
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    scale: int,
+    compact: bool,
+) -> tuple[Image.Image, Image.Image]:
+    """Draw one slot's C/R box and weapon circle into a standalone tile.
+
+    Returns the tile and an "L" coverage mask marking the pixels the drawing
+    touched. ImageDraw *replaces* pixels on an RGBA image rather than blending
+    into them, so the badge's semi-transparent fills are opaque once the canvas
+    is flattened to RGB; pasting the tile through its coverage mask reproduces
+    that exactly, while alpha-compositing it would instead let the card art
+    show through the badge.
+
+    Everything is drawn in tile-local coordinates, so the tile depends only on
+    the build, the card colour and the render scale, not on the slot it ends
+    up in.
+
+    The paste reproduces the original RGB exactly, but where a semi-transparent
+    weapon icon pokes out of the circle it writes the icon's own alpha instead
+    of the blended alpha an alpha_composite() would leave behind. That is
+    invisible today because add_badges() is the last step and render_image()
+    flattens to RGB right after; compositing anything on top of the badges
+    would make it a real difference.
+    """
+    origin_x, origin_y = badge_tile_origin(geometry)
+    box = (
+        geometry.box[0] - origin_x,
+        geometry.box[1] - origin_y,
+        geometry.box[2] - origin_x,
+        geometry.box[3] - origin_y,
+    )
+    circle = (
+        geometry.circle[0] - origin_x,
+        geometry.circle[1] - origin_y,
+        geometry.circle[2] - origin_x,
+        geometry.circle[3] - origin_y,
+    )
+    # Pillow's shape coordinates are inclusive, so the tile needs one pixel
+    # more than the raw extent in each direction.
+    size = (max(box[2], circle[2]) + 1, max(box[3], circle[3]) + 1)
+    tile = Image.new("RGBA", size, (0, 0, 0, 0))
+    coverage = Image.new("L", size, 0)
+    draw = ImageDraw.Draw(tile)
+    coverage_draw = ImageDraw.Draw(coverage)
+
+    box_radius = (14 if compact else 18) * scale
+    box_width = 3 * scale
+    draw.rounded_rectangle(
+        box,
+        radius=box_radius,
+        fill=(0, 0, 0, 178),
+        outline=hex_to_rgba(color, 245),
+        width=box_width,
+    )
+    coverage_draw.rounded_rectangle(box, radius=box_radius, fill=255, outline=255, width=box_width)
+
+    stroke_width = (3 if compact else 4) * scale
+    constellation_text = f"C{asset.build.constellation}"
+    refinement_text = f"R{asset.build.refinement}"
+    constellation_left, _, constellation_right, _ = draw.textbbox(
+        (0, 0), constellation_text, font=font, stroke_width=stroke_width
+    )
+    refinement_left, _, refinement_right, _ = draw.textbbox(
+        (0, 0), refinement_text, font=font, stroke_width=stroke_width
+    )
+    constellation_w = constellation_right - constellation_left
+    refinement_w = refinement_right - refinement_left
+    # Two separate bounding boxes each carry the stroke's overhang on
+    # both sides, so summing them double-counts the stroke width at
+    # the seam between the runs; subtract it once to land on the same
+    # combined width (and hence the same centering) as the original
+    # single-string measurement.
+    combined_w = constellation_w + refinement_w - 2 * stroke_width
+    text_x = geometry.text_center[0] - origin_x - combined_w // 2
+    text_y = geometry.text_center[1] - origin_y
+    draw.text(
+        (text_x, text_y),
+        constellation_text,
+        font=font,
+        fill=hex_to_rgba(rarity_color(asset.build.rarity), 255),
+        stroke_width=stroke_width,
+        stroke_fill=(0, 0, 0, 255),
+        anchor="lm",
+    )
+    draw.text(
+        (text_x + constellation_w - stroke_width, text_y),
+        refinement_text,
+        font=font,
+        fill=hex_to_rgba(rarity_color(asset.build.weapon_rarity), 255),
+        stroke_width=stroke_width,
+        stroke_fill=(0, 0, 0, 255),
+        anchor="lm",
+    )
+
+    circle_width = 2 * scale
+    draw.ellipse(circle, fill=(0, 0, 0, 170), outline=hex_to_rgba(color, 240), width=circle_width)
+    coverage_draw.ellipse(circle, fill=255, outline=255, width=circle_width)
+
+    icon_d = (48 if compact else 68) * scale
+    icon_key = (str(asset.weapon_path), icon_d)
+    icon = _cache_get(_weapon_icon_cache, icon_key)
+    if icon is None:
+        icon = Image.open(asset.weapon_path).convert("RGBA")
+        icon.thumbnail((icon_d, icon_d), Image.Resampling.LANCZOS)
+        _cache_put(_weapon_icon_cache, icon_key, icon, _WEAPON_ICON_CACHE_MAX)
+    circle_d = circle[2] - circle[0]
+    icon_pos = (circle[0] + (circle_d - icon.width) // 2, circle[1] + (circle_d - icon.height) // 2)
+    tile.alpha_composite(icon, icon_pos)
+    # The icon's square footprint pokes out of the circle at its corners, where
+    # the tile is blended onto whatever the card shows rather than replacing it.
+    # Coverage set to the icon's own alpha makes the paste do exactly that.
+    icon_box = (icon_pos[0], icon_pos[1], icon_pos[0] + icon.width, icon_pos[1] + icon.height)
+    coverage.paste(ImageChops.lighter(coverage.crop(icon_box), icon.getchannel("A")), icon_pos)
+    return tile, coverage
+
+
 def add_badges(
     image: Image.Image,
     teams: list[list[Placement]],
@@ -651,8 +801,6 @@ def add_badges(
 ) -> None:
     draw = ImageDraw.Draw(image)
     font = find_font((38 if compact else 54) * scale)
-    icon_d = (48 if compact else 68) * scale
-    stroke_width = (3 if compact else 4) * scale
     for row, team in enumerate(teams):
         for index, member in enumerate(team):
             if not member.name or member.name.casefold() not in assets:
@@ -662,64 +810,23 @@ def add_badges(
             top_y = row * row_height + row_height - (68 if compact else 107) * scale
             text = f"C{asset.build.constellation}R{asset.build.refinement}"
             geometry = badge_geometry(draw, text, font, center, top_y, scale, compact)
-            draw.rounded_rectangle(
-                geometry.box,
-                radius=(14 if compact else 18) * scale,
-                fill=(0, 0, 0, 178),
-                outline=hex_to_rgba(card_color(member, asset), 245),
-                width=3 * scale,
+            color = card_color(member, asset)
+            tile_key = (
+                asset.build.constellation,
+                asset.build.refinement,
+                asset.build.rarity,
+                asset.build.weapon_rarity,
+                color,
+                str(asset.weapon_path),
+                scale,
+                compact,
             )
-            constellation_text = f"C{asset.build.constellation}"
-            refinement_text = f"R{asset.build.refinement}"
-            constellation_left, _, constellation_right, _ = draw.textbbox(
-                (0, 0), constellation_text, font=font, stroke_width=stroke_width
-            )
-            refinement_left, _, refinement_right, _ = draw.textbbox(
-                (0, 0), refinement_text, font=font, stroke_width=stroke_width
-            )
-            constellation_w = constellation_right - constellation_left
-            refinement_w = refinement_right - refinement_left
-            # Two separate bounding boxes each carry the stroke's overhang on
-            # both sides, so summing them double-counts the stroke width at
-            # the seam between the runs; subtract it once to land on the same
-            # combined width (and hence the same centering) as the original
-            # single-string measurement.
-            combined_w = constellation_w + refinement_w - 2 * stroke_width
-            text_x = geometry.text_center[0] - combined_w // 2
-            text_y = geometry.text_center[1]
-            draw.text(
-                (text_x, text_y),
-                constellation_text,
-                font=font,
-                fill=hex_to_rgba(rarity_color(asset.build.rarity), 255),
-                stroke_width=stroke_width,
-                stroke_fill=(0, 0, 0, 255),
-                anchor="lm",
-            )
-            draw.text(
-                (text_x + constellation_w - stroke_width, text_y),
-                refinement_text,
-                font=font,
-                fill=hex_to_rgba(rarity_color(asset.build.weapon_rarity), 255),
-                stroke_width=stroke_width,
-                stroke_fill=(0, 0, 0, 255),
-                anchor="lm",
-            )
-            draw.ellipse(
-                geometry.circle,
-                fill=(0, 0, 0, 170),
-                outline=hex_to_rgba(card_color(member, asset), 240),
-                width=2 * scale,
-            )
-            icon_key = (str(asset.weapon_path), icon_d)
-            icon = _cache_get(_weapon_icon_cache, icon_key)
-            if icon is None:
-                icon = Image.open(asset.weapon_path).convert("RGBA")
-                icon.thumbnail((icon_d, icon_d), Image.Resampling.LANCZOS)
-                _cache_put(_weapon_icon_cache, icon_key, icon, _WEAPON_ICON_CACHE_MAX)
-            circle_x, circle_y, circle_x1, _circle_y1 = geometry.circle
-            circle_d = circle_x1 - circle_x
-            image.alpha_composite(icon, (circle_x + (circle_d - icon.width) // 2, circle_y + (circle_d - icon.height) // 2))
+            cached = _cache_get(_badge_cache, tile_key)
+            if cached is None:
+                cached = badge_tile(geometry, asset, color, font, scale, compact)
+                _cache_put(_badge_cache, tile_key, cached, _BADGE_CACHE_MAX)
+            tile, coverage = cached
+            image.paste(tile, badge_tile_origin(geometry), coverage)
 
 
 def render_image(
