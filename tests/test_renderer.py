@@ -6,6 +6,7 @@ from genshin_thumbnail_studio.models import Asset, Build, Project
 from genshin_thumbnail_studio.renderer import (
     BACKGROUND_COLOR,
     ELEMENT_COLORS,
+    RARITY_COLORS,
     badge_geometry,
     export_project,
     find_font,
@@ -15,7 +16,10 @@ from genshin_thumbnail_studio.renderer import (
 
 
 def create_assets(
-    directory: Path, names: list[str], elements: dict[str, str] | None = None
+    directory: Path,
+    names: list[str],
+    elements: dict[str, str] | None = None,
+    rarities: dict[str, tuple[int | None, int | None]] | None = None,
 ) -> dict[str, Asset]:
     result = {}
     for index, name in enumerate(names):
@@ -28,6 +32,7 @@ def create_assets(
         weapon = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
         ImageDraw.Draw(weapon).polygon([(128, 10), (190, 220), (128, 190), (66, 220)], fill="white")
         weapon.save(weapon_path)
+        rarity, weapon_rarity = (rarities or {}).get(name, (None, None))
         build = Build(
             name=name,
             constellation=index % 7,
@@ -40,6 +45,8 @@ def create_assets(
             art_url="https://example.invalid/art.png",
             weapon_url="https://example.invalid/weapon.png",
             element=(elements or {}).get(name),
+            rarity=rarity,
+            weapon_rarity=weapon_rarity,
         )
         result[name.casefold()] = Asset(build, art_path, weapon_path)
     return result
@@ -170,3 +177,47 @@ def test_badge_render_and_geometry_for_long_constellation_string(tmp_path: Path)
     assert 0 <= circle_y0 <= circle_y1 <= 720
     assert box_y0 <= geometry.text_center[1] <= box_y1
     assert box_x0 <= geometry.text_center[0] <= box_x1
+
+
+def _color_present_in_box(
+    image: Image.Image, box: tuple[int, int, int, int], color_hex: str, tolerance: int = 40
+) -> bool:
+    target = hex_to_rgba(color_hex, 255)
+    x0, y0, x1, y1 = box
+    for y in range(max(0, y0), min(image.height, y1)):
+        for x in range(max(0, x0), min(image.width, x1)):
+            pixel = image.getpixel((x, y))
+            assert isinstance(pixel, tuple)
+            if all(abs(pixel[channel] - target[channel]) <= tolerance for channel in range(3)):
+                return True
+    return False
+
+
+def test_badge_constellation_and_refinement_use_distinct_rarity_colors(tmp_path: Path) -> None:
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    # 5-star character, 4-star weapon: two rarities that map to visibly
+    # distinct colors (gold vs. purple), unlike the fallback gold-on-gold
+    # look this test would silently pass under if both runs still shared
+    # one color.
+    assets = create_assets(tmp_path, names, rarities={names[0]: (5, 4)})
+    preview = render_preview(project, assets)
+
+    # Leftmost slot of the first (compact) abyss row; mirrors the geometry
+    # used in the long-string badge test above.
+    scale = 1
+    compact = True
+    row_height = 360
+    step = 320.0
+    font = find_font((38 if compact else 54) * scale)
+    canvas = Image.new("RGBA", (1280, 720), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+    center = int(round(0 * step + step / 2))
+    top_y = 0 * row_height + row_height - (68 if compact else 107) * scale
+    build = assets[names[0].casefold()].build
+    text = f"C{build.constellation}R{build.refinement}"
+    geometry = badge_geometry(draw, text, font, center_x=center, top_y=top_y, scale=scale, compact=compact)
+
+    assert _color_present_in_box(preview, geometry.box, RARITY_COLORS[5])
+    assert _color_present_in_box(preview, geometry.box, RARITY_COLORS[4])

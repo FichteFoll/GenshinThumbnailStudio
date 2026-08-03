@@ -29,6 +29,22 @@ ELEMENT_COLORS = {
     "cryo": "#9fe7ef",
 }
 
+RARITY_COLORS = {
+    5: "#ffd95d",
+    4: "#c69bff",
+    3: "#7ab3e0",
+    2: "#79c8a0",
+    1: "#c4c8cf",
+}
+
+
+def rarity_color(rarity: int | None) -> str:
+    """The in-game rarity accent color, falling back to the 5-star gold
+    when the rarity is unknown so the current look stays the default."""
+    if rarity is None:
+        return RARITY_COLORS[5]
+    return RARITY_COLORS.get(rarity, RARITY_COLORS[5])
+
 
 def safe_name(value: str) -> str:
     cleaned = re.sub(r'[<>:"/\\|?*]+', "_", value).strip(" ._")
@@ -319,14 +335,41 @@ def add_badges(
                 outline=hex_to_rgba(card_color(member, asset), 245),
                 width=3 * scale,
             )
+            constellation_text = f"C{asset.build.constellation}"
+            refinement_text = f"R{asset.build.refinement}"
+            constellation_left, _, constellation_right, _ = draw.textbbox(
+                (0, 0), constellation_text, font=font, stroke_width=stroke_width
+            )
+            refinement_left, _, refinement_right, _ = draw.textbbox(
+                (0, 0), refinement_text, font=font, stroke_width=stroke_width
+            )
+            constellation_w = constellation_right - constellation_left
+            refinement_w = refinement_right - refinement_left
+            # Two separate bounding boxes each carry the stroke's overhang on
+            # both sides, so summing them double-counts the stroke width at
+            # the seam between the runs; subtract it once to land on the same
+            # combined width (and hence the same centering) as the original
+            # single-string measurement.
+            combined_w = constellation_w + refinement_w - 2 * stroke_width
+            text_x = geometry.text_center[0] - combined_w // 2
+            text_y = geometry.text_center[1]
             draw.text(
-                geometry.text_center,
-                text,
+                (text_x, text_y),
+                constellation_text,
                 font=font,
-                fill=(255, 227, 111, 255),
+                fill=hex_to_rgba(rarity_color(asset.build.rarity), 255),
                 stroke_width=stroke_width,
                 stroke_fill=(0, 0, 0, 255),
-                anchor="mm",
+                anchor="lm",
+            )
+            draw.text(
+                (text_x + constellation_w - stroke_width, text_y),
+                refinement_text,
+                font=font,
+                fill=hex_to_rgba(rarity_color(asset.build.weapon_rarity), 255),
+                stroke_width=stroke_width,
+                stroke_fill=(0, 0, 0, 255),
+                anchor="lm",
             )
             draw.ellipse(
                 geometry.circle,
