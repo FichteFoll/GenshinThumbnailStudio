@@ -144,7 +144,7 @@ def test_drag_past_the_reachable_range_stops_at_the_bounds(tmp_path: Path, monke
     app = qapp()
     window = _window_with_assets(tmp_path, TEAM_NAMES)
 
-    max_x, max_y = window._offset_bounds(window.current_member())
+    max_x, max_y = window._placement.offset_bounds(window.current_member())
 
     window.drag_placement(10_000, 10_000)
 
@@ -227,7 +227,7 @@ def test_flip_round_trips_through_the_presets(tmp_path: Path, monkeypatch: pytes
     window.flip_check.setChecked(True)
 
     fresh = Placement(name=window.current_member().name)
-    window._apply_preset(fresh)
+    window._presets.apply_to(window, fresh)
     assert fresh.flip is True
 
     window.close()

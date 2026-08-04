@@ -1,0 +1,27 @@
+"""The editor state the Qt-free GUI collaborators read through.
+
+`MainWindow` satisfies this Protocol structurally; nothing has to declare it.
+
+The attribute types deliberately match `MainWindow`'s own annotations, because a
+Protocol's mutable attributes are invariant: declaring `Mapping[str, Asset]`
+here would reject the window's `dict[str, Asset]`.
+
+`PlacementController` and `PresetStore` read these attributes through the
+Protocol on *every* call instead of capturing them at construction time, because
+`_mode_changed`, `open_project`, `load_profile`, `_generate_preview_from_builds`
+and `_member_changed` all replace `project`, `builds` or `assets` wholesale. A
+captured `assets` would silently fall back to `STANDARD_ART_SIZE` and compute
+the wrong offset bounds.
+"""
+
+from __future__ import annotations
+
+from typing import Protocol
+
+from ..models import Asset, Build, Project
+
+
+class EditorState(Protocol):
+    project: Project
+    builds: dict[str, Build]
+    assets: dict[str, Asset]

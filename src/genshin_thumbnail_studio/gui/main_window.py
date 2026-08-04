@@ -35,25 +35,18 @@ from PySide6.QtWidgets import (
 )
 
 from ..akasha import AkashaError, AkashaWebClient, Build, StaleProfileError, download_assets
-from ..models import DEFAULT_ZOOM, Asset, Placement, Project
-from ..renderer import (
-    STANDARD_ART_SIZE,
-    art_pixel_size,
-    export_project,
-    max_offset,
-    panel_target_size,
-    safe_name,
-)
+from ..models import Asset, Placement, Project
+from ..renderer import export_project, safe_name
 from ..storage import (
     cache_dir,
-    load_presets,
     load_profile_cache,
     load_project,
-    save_presets,
     save_profile_cache,
     save_project,
 )
 from .lineup import parse_lineup
+from .placement import PlacementController
+from .presets import PresetStore
 from .preview import PreviewWidget
 from .render_job import RenderJob
 from .style import MAIN_STYLESHEET
@@ -81,7 +74,8 @@ class MainWindow(QMainWindow):
         self.project_path: Path | None = None
         self.builds: dict[str, Build] = {}
         self.assets: dict[str, Asset] = {}
-        self.presets = load_presets()
+        self._presets = PresetStore.load()
+        self._placement = PlacementController(self)
         self.selected = (0, 0)
         self._updating_controls = False
         self._render_timer = QTimer(self)
@@ -359,41 +353,15 @@ class MainWindow(QMainWindow):
         old_name = member.name
         member.name = name.strip()
         if member.name and member.name.casefold() != old_name.casefold():
-            self._apply_preset(member)
+            self._presets.apply_to(self, member)
         self.assets = {key: value for key, value in self.assets.items() if key in self._selected_name_keys()}
         self._sync_controls()
 
     def _selected_name_keys(self) -> set[str]:
         return {member.name.casefold() for team in self.project.teams for member in team if member.name}
 
-    def _preset_key(self, member: Placement) -> str:
-        build = self.builds.get(member.name.casefold())
-        identity = (
-            build.costume_id
-            if build and build.costume_id
-            else (build.build_id if build else member.name.casefold())
-        )
-        return f"{self.project.mode}|{identity}"
-
-    def _apply_preset(self, member: Placement) -> None:
-        preset = self.presets.get(self._preset_key(member))
-        if preset:
-            member.offset_x = float(preset.get("offset_x", member.offset_x))
-            member.offset_y = float(preset.get("offset_y", member.offset_y))
-            member.zoom = float(preset.get("zoom", member.zoom))
-            member.flip = bool(preset.get("flip", member.flip))
-
     def _save_current_preset(self) -> None:
-        member = self.current_member()
-        if not member.name:
-            return
-        self.presets[self._preset_key(member)] = {
-            "offset_x": member.offset_x,
-            "offset_y": member.offset_y,
-            "zoom": member.zoom,
-            "flip": member.flip,
-        }
-        save_presets(self.presets)
+        self._presets.remember(self, self.current_member())
 
     def current_member(self) -> Placement:
         team, slot = self.selected
@@ -403,12 +371,6 @@ class MainWindow(QMainWindow):
         self.selected = (team, slot)
         self._sync_controls()
 
-    def _offset_bounds(self, member: Placement) -> tuple[float, float]:
-        """Reachable +/- offset per axis for the member's art and zoom."""
-        asset = self.assets.get(member.name.casefold()) if member.name else None
-        art_size = art_pixel_size(str(asset.art_path)) if asset else STANDARD_ART_SIZE
-        return max_offset(art_size, self.project.mode == "abyss", member.zoom)
-
     def _sync_controls(self) -> None:
         team, slot = self.selected
         team = min(team, len(self.project.teams) - 1)
@@ -416,7 +378,7 @@ class MainWindow(QMainWindow):
         self.selected = (team, slot)
         member = self.current_member()
         self._updating_controls = True
-        max_x, max_y = self._offset_bounds(member)
+        max_x, max_y = self._placement.offset_bounds(member)
         # Truncate rather than round, so the slider end stays inside the range
         # the renderer can reach and no travel is left dead at the ends.
         limit_x, limit_y = int(max_x * 1000), int(max_y * 1000)
@@ -461,32 +423,19 @@ class MainWindow(QMainWindow):
 
     def drag_placement(self, dx: float, dy: float) -> None:
         """Pan the selected portrait by a drag delta given in canvas pixels."""
-        member = self.current_member()
-        # Offsets are fractions of the panel, and panels are pasted 1:1 onto the
-        # canvas, so dividing by the panel size pans one canvas pixel per mouse
-        # pixel on both axes.
-        target_w, target_h = panel_target_size(self.project.mode == "abyss")
-        max_x, max_y = self._offset_bounds(member)
-        member.offset_x = min(max_x, max(-max_x, member.offset_x + dx / target_w))
-        member.offset_y = min(max_y, max(-max_y, member.offset_y + dy / target_h))
+        self._placement.pan(self.current_member(), dx, dy)
         self._save_current_preset()
         self._sync_controls()
         self.schedule_render()
 
     def change_zoom(self, delta: float) -> None:
-        member = self.current_member()
-        member.zoom = min(1.80, max(0.70, member.zoom + delta))
+        self._placement.zoom_by(self.current_member(), delta)
         self._save_current_preset()
         self._sync_controls()
         self.schedule_render()
 
     def reset_placement(self) -> None:
-        member = self.current_member()
-        defaults = Placement()
-        member.offset_x = defaults.offset_x
-        member.offset_y = defaults.offset_y
-        member.zoom = DEFAULT_ZOOM[self.project.mode]
-        member.flip = defaults.flip
+        self._placement.reset(self.current_member())
         self._save_current_preset()
         self._sync_controls()
         self.schedule_render()
@@ -581,7 +530,7 @@ class MainWindow(QMainWindow):
         for team in self.project.teams:
             for member in team:
                 if member.name.casefold() == key:
-                    self._apply_preset(member)
+                    self._presets.apply_to(self, member)
         self.schedule_render()
 
     def prepare_preview(self) -> None:
@@ -611,7 +560,7 @@ class MainWindow(QMainWindow):
         )
         for team in self.project.teams:
             for member in team:
-                self._apply_preset(member)
+                self._presets.apply_to(self, member)
         self._dispatch_render()
 
     def _dispatch_render(self) -> None:
