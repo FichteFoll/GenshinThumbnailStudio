@@ -29,6 +29,16 @@ for the helpers more than one of its test modules needs;
 helpers used by a single file stay in that file.
 There is no `tests/__init__.py`.
 
+`tests/test_package_layout.py` guards this layout itself.
+It is purely static (it walks the tree and parses sources with `ast`,
+importing neither the package nor PySide6),
+and it asserts the exact set of modules,
+that sibling modules are reached by relative import,
+that each facade's `__all__` only names things it binds,
+and that no module has grown past a line-count tripwire.
+Read it before moving or adding a module,
+since it is the test that will fail.
+
 Headless/CI test runs need an offscreen Qt platform and a sandbox-free QtWebEngine, since Akasha access goes through a real `QWebEnginePage`:
 
 ```bash
@@ -44,7 +54,10 @@ the renderer is Qt-free and its test modules share nothing but `helpers.py`,
 so `uv run pytest tests/renderer` runs without the offscreen environment.
 So do `tests/gui/test_lineup.py`, `tests/gui/test_placement_controller.py`
 and `tests/gui/test_presets.py`,
-which import their modules directly rather than through the `gui` facade.
+because the modules they exercise construct no widget and need no display.
+PySide6 still gets imported for those files
+(reaching any `gui` submodule executes the package facade, which imports `MainWindow`),
+so the Qt-free property is about not needing a display, not about the import graph.
 
 Packaging (runs the test suite first, then builds a standalone package into `release/`):
 

@@ -87,8 +87,12 @@ from .panels import (
     placeholder_panel,
 )
 
-# The package's public surface, which is exactly what the flat renderer.py
-# exposed before the split, so nothing outside the package had to change.
+# The package's public surface. It covers every name the flat renderer.py made
+# public, so nothing outside the package had to change, and additionally carries
+# names that were private there (the caches and their bounds, cache_get/cache_put,
+# scaled_size, offset_limits) because splitting the module made them cross-module.
+# It is therefore wider than a minimal surface would be; narrowing it is a
+# one-file change that no current caller would notice.
 __all__ = [
     "ART_CACHE_MAX",
     "BACKGROUND_COLOR",
