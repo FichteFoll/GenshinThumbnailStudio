@@ -1,5 +1,8 @@
 import json
 from datetime import datetime, timezone
+from pathlib import Path
+
+import pytest
 
 from genshin_thumbnail_studio.models import Build
 from genshin_thumbnail_studio.renderer import STANDARD_ART_SIZE, panel_target_size, resized_art_size
@@ -32,7 +35,7 @@ def make_build(name: str) -> Build:
     )
 
 
-def test_profile_cache_round_trip(tmp_path, monkeypatch) -> None:
+def test_profile_cache_round_trip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     builds = [make_build("Furina"), make_build("Nahida")]
     last_update = datetime(2026, 8, 3, 10, 30, 15, tzinfo=timezone.utc)
@@ -46,12 +49,12 @@ def test_profile_cache_round_trip(tmp_path, monkeypatch) -> None:
     assert loaded_last_update == last_update
 
 
-def test_load_profile_cache_without_file(tmp_path, monkeypatch) -> None:
+def test_load_profile_cache_without_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     assert load_profile_cache("700000002") is None
 
 
-def test_load_profile_cache_with_invalid_json(tmp_path, monkeypatch) -> None:
+def test_load_profile_cache_with_invalid_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     profile_cache_path("700000003").write_text("{not json", encoding="utf-8")
 
@@ -64,9 +67,9 @@ def _expected_offsets(focal_x: float, focal_y: float, zoom: float, compact: bool
     return ((0.5 - focal_x) * resized_w / target_w, (0.5 - focal_y) * resized_h / target_h)
 
 
-def test_load_project_migrates_legacy_focal_points(tmp_path) -> None:
+def test_load_project_migrates_legacy_focal_points(tmp_path: Path) -> None:
     member = {"name": "Furina", "fx": 0.541, "fy": 0.52, "zoom": 1.06, "color": "#78d7ff"}
-    payload = {
+    payload: dict[str, object] = {
         "schemaVersion": 2,
         "mode": "abyss",
         "uid": "700000042",
@@ -90,11 +93,11 @@ def test_load_project_migrates_legacy_focal_points(tmp_path) -> None:
     assert abs(migrated.offset_y - (0.5 - 0.52) * 381.6 / 360) < 1e-3
 
 
-def test_load_project_keeps_a_saturated_focal_point_at_the_art_edge(tmp_path) -> None:
+def test_load_project_keeps_a_saturated_focal_point_at_the_art_edge(tmp_path: Path) -> None:
     # ``fy: 1.0`` meant "the bottom edge of the art": the old renderer clamped
     # the crop to the cover-fit slack. The migrated offset must stay there.
     member = {"name": "Furina", "fx": 0.5, "fy": 1.0, "zoom": 1.06}
-    payload = {
+    payload: dict[str, object] = {
         "schemaVersion": 2,
         "mode": "abyss",
         "teams": [[dict(member) for _ in range(4)] for _ in range(2)],
@@ -104,8 +107,8 @@ def test_load_project_keeps_a_saturated_focal_point_at_the_art_edge(tmp_path) ->
 
     project = load_project(path)
 
-    target_w, target_h = panel_target_size(compact=True)
-    resized_w, resized_h = resized_art_size(STANDARD_ART_SIZE, compact=True, zoom=1.06)
+    _, target_h = panel_target_size(compact=True)
+    _, resized_h = resized_art_size(STANDARD_ART_SIZE, compact=True, zoom=1.06)
     migrated = project.teams[0][0]
     assert migrated.offset_y == -(resized_h - target_h) / (2 * target_h)
     # The crop lands on the same row the legacy focal point produced.
@@ -113,9 +116,9 @@ def test_load_project_keeps_a_saturated_focal_point_at_the_art_edge(tmp_path) ->
     assert round((resized_h - target_h) / 2 - migrated.offset_y * target_h) == legacy_top
 
 
-def test_load_presets_migrates_legacy_focal_points(tmp_path, monkeypatch) -> None:
+def test_load_presets_migrates_legacy_focal_points(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    legacy = {
+    legacy: dict[str, dict[str, object]] = {
         "abyss|costume-1": {"fx": 0.541, "fy": 0.52, "zoom": 1.06},
         "stygian|costume-2": {"fx": 0.4, "fy": 0.5, "zoom": 1.18},
         "abyss|costume-3": {"offset_x": 0.12, "offset_y": -0.03, "zoom": 1.10},

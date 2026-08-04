@@ -7,6 +7,7 @@ os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--no-sandbox")
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 import pytest
 from PIL import Image, ImageDraw
@@ -18,6 +19,25 @@ from genshin_thumbnail_studio.gui import MainWindow
 from genshin_thumbnail_studio.models import Asset, Build, Placement, Project
 from genshin_thumbnail_studio.renderer import art_pixel_size, max_offset, panel_target_size
 from genshin_thumbnail_studio.storage import load_profile_cache, save_profile_cache, save_project
+
+
+def _approx(expected: float, abs: float) -> Any:
+    """Wraps `pytest.approx`, whose own `expected`/`rel`/`abs` parameters are
+    unannotated in pytest itself, not fixable from our code."""
+    return pytest.approx(expected, abs=abs)  # pyright: ignore[reportUnknownMemberType]
+
+
+def _qapp() -> QApplication:
+    """The running `QApplication`, or a fresh one if none exists yet.
+
+    `QApplication.instance()` is typed as returning the base `QCoreApplication`
+    even when called on the `QApplication` subclass, a PySide6 stub gap; the
+    isinstance narrowing works around it instead of widening every test's
+    `app` to that base type."""
+    instance = QApplication.instance()
+    if isinstance(instance, QApplication):
+        return instance
+    return QApplication([])
 
 
 def make_build(name: str) -> Build:
@@ -56,7 +76,7 @@ class StubMessageBox:
     StandardButton = QMessageBox.StandardButton
     instances: list["StubMessageBox"] = []
 
-    def __init__(self, parent=None) -> None:  # noqa: ANN001 - Qt parent
+    def __init__(self, parent: object = None) -> None:
         self.title = ""
         self.text = ""
         self.executed = False
@@ -68,7 +88,7 @@ class StubMessageBox:
     def setText(self, text: str) -> None:
         self.text = text
 
-    def addButton(self, *args) -> object:
+    def addButton(self, *args: object) -> object:
         return object()
 
     def exec(self) -> None:
@@ -78,24 +98,26 @@ class StubMessageBox:
         return None
 
     @staticmethod
-    def critical(parent, title, text) -> None:  # noqa: ANN001 - Qt parent
+    def critical(parent: object, title: str, text: str) -> None:
         raise AssertionError(f"unexpected error dialog: {title}: {text}")
 
     @staticmethod
-    def information(parent, title, text) -> None:  # noqa: ANN001 - Qt parent
+    def information(parent: object, title: str, text: str) -> None:
         return None
 
 
 class ForbiddenMessageBox(StubMessageBox):
-    def __init__(self, parent=None) -> None:  # noqa: ANN001 - Qt parent
+    def __init__(self, parent: object = None) -> None:
         raise AssertionError("unexpected message box")
 
     @staticmethod
-    def information(parent, title, text) -> None:  # noqa: ANN001 - Qt parent
+    def information(parent: object, title: str, text: str) -> None:
         raise AssertionError(f"unexpected info dialog: {title}: {text}")
 
 
-def prepare_cached_open(tmp_path, monkeypatch, last_update: datetime) -> tuple[MainWindow, str]:
+def prepare_cached_open(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, last_update: datetime
+) -> tuple[MainWindow, str]:
     uid = "700000042"
     builds = [make_build(name) for name in TEAM_NAMES]
     save_profile_cache(uid, builds, last_update)
@@ -103,7 +125,11 @@ def prepare_cached_open(tmp_path, monkeypatch, last_update: datetime) -> tuple[M
     write_project(project_path, uid)
     window = MainWindow()
     assets = _create_test_assets(tmp_path / "assets", TEAM_NAMES)
-    monkeypatch.setattr(gui, "download_assets", lambda *args, **kwargs: assets)
+
+    def fake_download_assets(*args: Any, **kwargs: Any) -> dict[str, Asset]:
+        return assets
+
+    monkeypatch.setattr(gui, "download_assets", fake_download_assets)
     monkeypatch.setattr(
         gui.QFileDialog, "getOpenFileName", staticmethod(lambda *args, **kwargs: (str(project_path), ""))
     )
@@ -120,9 +146,9 @@ def wait_for_render(window: MainWindow, app: QApplication) -> None:
     raise AssertionError("render job did not finish in time")
 
 
-def test_open_project_loads_cached_profile_and_previews(tmp_path, monkeypatch) -> None:
+def test_open_project_loads_cached_profile_and_previews(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     monkeypatch.setattr(gui, "QMessageBox", ForbiddenMessageBox)
     window, uid = prepare_cached_open(tmp_path, monkeypatch, datetime.now(timezone.utc) - timedelta(minutes=5))
 
@@ -137,17 +163,22 @@ def test_open_project_loads_cached_profile_and_previews(tmp_path, monkeypatch) -
     app.processEvents()
 
 
-def test_open_project_with_stale_cache_offers_refresh(tmp_path, monkeypatch) -> None:
+def test_open_project_with_stale_cache_offers_refresh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     StubMessageBox.instances = []
     monkeypatch.setattr(gui, "QMessageBox", StubMessageBox)
     window, _ = prepare_cached_open(tmp_path, monkeypatch, datetime.now(timezone.utc) - timedelta(hours=2))
-    refreshed = []
-    monkeypatch.setattr(window.client, "refresh_profile", lambda *args, **kwargs: refreshed.append(True))
-    monkeypatch.setattr(
-        window.client, "load_profile", lambda *args, **kwargs: pytest.fail("live profile load must not happen")
-    )
+    refreshed: list[bool] = []
+
+    def fake_refresh_profile(*args: Any, **kwargs: Any) -> None:
+        refreshed.append(True)
+
+    def forbidden_load_profile(*args: Any, **kwargs: Any) -> None:
+        pytest.fail("live profile load must not happen")
+
+    monkeypatch.setattr(window.client, "refresh_profile", fake_refresh_profile)
+    monkeypatch.setattr(window.client, "load_profile", forbidden_load_profile)
 
     window.open_project()
     wait_for_render(window, app)
@@ -162,9 +193,9 @@ def test_open_project_with_stale_cache_offers_refresh(tmp_path, monkeypatch) -> 
     app.processEvents()
 
 
-def test_open_project_without_cache_shows_hint(tmp_path, monkeypatch) -> None:
+def test_open_project_without_cache_shows_hint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     monkeypatch.setattr(gui, "QMessageBox", ForbiddenMessageBox)
     project_path = tmp_path / "project.json"
     write_project(project_path, "900000099")
@@ -182,9 +213,9 @@ def test_open_project_without_cache_shows_hint(tmp_path, monkeypatch) -> None:
     app.processEvents()
 
 
-def test_closing_window_does_not_warn_about_webengine_profile_teardown(tmp_path, monkeypatch, capfd) -> None:
+def test_closing_window_does_not_warn_about_webengine_profile_teardown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     window = MainWindow()
 
     window.close()
@@ -208,9 +239,9 @@ def test_closing_window_does_not_warn_about_webengine_profile_teardown(tmp_path,
     app.processEvents()
 
 
-def test_main_window_starts(tmp_path, monkeypatch) -> None:
+def test_main_window_starts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     window = MainWindow()
     assert window.windowTitle() == "Genshin Thumbnail Studio"
     assert len(window.team_combos) == 2
@@ -220,7 +251,7 @@ def test_main_window_starts(tmp_path, monkeypatch) -> None:
 
 def _create_test_assets(directory: Path, names: list[str]) -> dict[str, Asset]:
     directory.mkdir(parents=True, exist_ok=True)
-    assets = {}
+    assets: dict[str, Asset] = {}
     for index, name in enumerate(names):
         art_path = directory / f"art-{index}.png"
         weapon_path = directory / f"weapon-{index}.png"
@@ -252,13 +283,17 @@ def _fill_window_teams(window: MainWindow, names: list[str]) -> None:
         member.name = name
 
 
-def test_dispatch_render_marks_stale_while_job_running(tmp_path, monkeypatch) -> None:
+def test_dispatch_render_marks_stale_while_job_running(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     window = MainWindow()
 
-    started_jobs = []
-    monkeypatch.setattr(window._thread_pool, "start", lambda job: started_jobs.append(job))
+    started_jobs: list[gui.RenderJob] = []
+
+    def fake_start(job: gui.RenderJob) -> None:
+        started_jobs.append(job)
+
+    monkeypatch.setattr(window._thread_pool, "start", fake_start)
 
     window._render_job_running = True
     window._dispatch_render()
@@ -270,9 +305,9 @@ def test_dispatch_render_marks_stale_while_job_running(tmp_path, monkeypatch) ->
     app.processEvents()
 
 
-def test_stale_token_result_does_not_update_preview(tmp_path, monkeypatch) -> None:
+def test_stale_token_result_does_not_update_preview(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     window = MainWindow()
 
     baseline_pixmap = window.preview._pixmap
@@ -290,9 +325,9 @@ def test_stale_token_result_does_not_update_preview(tmp_path, monkeypatch) -> No
     app.processEvents()
 
 
-def test_dispatch_render_end_to_end_sets_preview_pixmap(tmp_path, monkeypatch) -> None:
+def test_dispatch_render_end_to_end_sets_preview_pixmap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     window = MainWindow()
 
     names = [
@@ -318,9 +353,9 @@ def test_dispatch_render_end_to_end_sets_preview_pixmap(tmp_path, monkeypatch) -
     app.processEvents()
 
 
-def test_on_asset_ready_populates_incrementally_and_schedules_render(tmp_path, monkeypatch) -> None:
+def test_on_asset_ready_populates_incrementally_and_schedules_render(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     window = MainWindow()
 
     names = ["Furina", "Nahida"]
@@ -341,9 +376,9 @@ def test_on_asset_ready_populates_incrementally_and_schedules_render(tmp_path, m
     app.processEvents()
 
 
-def test_schedule_render_throttles_instead_of_restarting_the_timer(tmp_path, monkeypatch) -> None:
+def test_schedule_render_throttles_instead_of_restarting_the_timer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     window = MainWindow()
 
     names = ["Furina", "Nahida"]
@@ -369,9 +404,9 @@ def test_schedule_render_throttles_instead_of_restarting_the_timer(tmp_path, mon
     app.processEvents()
 
 
-def test_schedule_render_without_assets_is_a_noop(tmp_path, monkeypatch) -> None:
+def test_schedule_render_without_assets_is_a_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     window = MainWindow()
 
     names = ["Furina", "Nahida"]
@@ -395,9 +430,9 @@ def test_schedule_render_without_assets_is_a_noop(tmp_path, monkeypatch) -> None
     app.processEvents()
 
 
-def test_swap_slots_exchanges_placements(tmp_path, monkeypatch) -> None:
+def test_swap_slots_exchanges_placements(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     window = MainWindow()
 
     first = window.project.teams[0][0]
@@ -432,9 +467,9 @@ def _prepare_export_window(window: MainWindow, tmp_path: Path, names: list[str])
     window.assets = assets
 
 
-def test_export_abyss_writes_the_file_chosen_in_the_save_dialog(tmp_path, monkeypatch) -> None:
+def test_export_abyss_writes_the_file_chosen_in_the_save_dialog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     window = MainWindow()
     _prepare_export_window(window, tmp_path, TEAM_NAMES)
     window.output_name.setText("prefilled")
@@ -446,9 +481,9 @@ def test_export_abyss_writes_the_file_chosen_in_the_save_dialog(tmp_path, monkey
         staticmethod(lambda *args, **kwargs: pytest.fail("abyss export must not ask for a folder")),
     )
     chosen = tmp_path / "out" / "chosen.png"
-    default_names = []
+    default_names: list[str] = []
 
-    def fake_save_dialog(parent, title, default_name, name_filter):  # noqa: ANN001 - Qt parent
+    def fake_save_dialog(parent: object, title: str, default_name: str, name_filter: str) -> tuple[str, str]:
         default_names.append(default_name)
         return str(chosen), "PNG (*.png)"
 
@@ -466,9 +501,9 @@ def test_export_abyss_writes_the_file_chosen_in_the_save_dialog(tmp_path, monkey
     app.processEvents()
 
 
-def test_export_stygian_still_asks_for_a_folder(tmp_path, monkeypatch) -> None:
+def test_export_stygian_still_asks_for_a_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     window = MainWindow()
     # Switching the mode replaces window.project, so fill the teams afterwards.
     window.stygian_radio.setChecked(True)
@@ -494,9 +529,9 @@ def test_export_stygian_still_asks_for_a_folder(tmp_path, monkeypatch) -> None:
     app.processEvents()
 
 
-def test_export_defaults_to_the_opened_project_folder(tmp_path, monkeypatch) -> None:
+def test_export_defaults_to_the_opened_project_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     project_dir = tmp_path / "projects"
     project_dir.mkdir()
     project_file = project_dir / "thumbnail-project.json"
@@ -509,9 +544,9 @@ def test_export_defaults_to_the_opened_project_folder(tmp_path, monkeypatch) -> 
 
     _prepare_export_window(window, tmp_path, TEAM_NAMES)
     window.output_name.setText("prefilled")
-    default_paths = []
+    default_paths: list[str] = []
 
-    def fake_save_dialog(parent, title, default_path, name_filter):  # noqa: ANN001 - Qt parent
+    def fake_save_dialog(parent: object, title: str, default_path: str, name_filter: str) -> tuple[str, str]:
         default_paths.append(default_path)
         return str(tmp_path / "out" / "chosen.png"), "PNG (*.png)"
 
@@ -525,9 +560,9 @@ def test_export_defaults_to_the_opened_project_folder(tmp_path, monkeypatch) -> 
     app.processEvents()
 
 
-def test_export_defaults_to_the_saved_project_folder(tmp_path, monkeypatch) -> None:
+def test_export_defaults_to_the_saved_project_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     project_dir = tmp_path / "saved"
     project_dir.mkdir()
     project_file = project_dir / "thumbnail-project.json"
@@ -540,9 +575,9 @@ def test_export_defaults_to_the_saved_project_folder(tmp_path, monkeypatch) -> N
     monkeypatch.setattr(gui.QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(project_file), "")))
     window.save_project()
 
-    default_paths = []
+    default_paths: list[str] = []
 
-    def fake_save_dialog(parent, title, default_path, name_filter):  # noqa: ANN001 - Qt parent
+    def fake_save_dialog(parent: object, title: str, default_path: str, name_filter: str) -> tuple[str, str]:
         default_paths.append(default_path)
         return str(tmp_path / "out" / "chosen.png"), "PNG (*.png)"
 
@@ -556,9 +591,9 @@ def test_export_defaults_to_the_saved_project_folder(tmp_path, monkeypatch) -> N
     app.processEvents()
 
 
-def test_offset_sliders_are_signed_and_span_the_reachable_range(tmp_path, monkeypatch) -> None:
+def test_offset_sliders_are_signed_and_span_the_reachable_range(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     window = MainWindow()
 
     _fill_window_teams(window, TEAM_NAMES)
@@ -579,7 +614,7 @@ def test_offset_sliders_are_signed_and_span_the_reachable_range(tmp_path, monkey
     assert window.y_slider.minimum() == -window.y_slider.maximum()
 
     window.x_slider.setValue(window.x_slider.minimum())
-    assert window.current_member().offset_x == pytest.approx(-max_x, abs=1e-3)
+    assert window.current_member().offset_x == _approx(-max_x, 1e-3)
     assert window.x_value.text().startswith("-")
 
     window.x_slider.setValue(0)
@@ -590,7 +625,7 @@ def test_offset_sliders_are_signed_and_span_the_reachable_range(tmp_path, monkey
     app.processEvents()
 
 
-def _window_with_assets(tmp_path, names: list[str]) -> MainWindow:
+def _window_with_assets(tmp_path: Path, names: list[str]) -> MainWindow:
     window = MainWindow()
     _fill_window_teams(window, names)
     window.assets = _create_test_assets(tmp_path / "assets", names)
@@ -604,9 +639,9 @@ def _window_with_assets(tmp_path, names: list[str]) -> MainWindow:
 OFFSET_TOLERANCE = 0.001
 
 
-def test_drag_moves_the_offsets_by_one_canvas_pixel_per_mouse_pixel(tmp_path, monkeypatch) -> None:
+def test_drag_moves_the_offsets_by_one_canvas_pixel_per_mouse_pixel(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     window = _window_with_assets(tmp_path, TEAM_NAMES)
 
     target_w, target_h = panel_target_size(True)
@@ -616,16 +651,16 @@ def test_drag_moves_the_offsets_by_one_canvas_pixel_per_mouse_pixel(tmp_path, mo
     window.drag_placement(30, 30)
 
     member = window.current_member()
-    assert member.offset_x - before_x == pytest.approx(30 / target_w, abs=OFFSET_TOLERANCE)
-    assert member.offset_y - before_y == pytest.approx(30 / target_h, abs=OFFSET_TOLERANCE)
+    assert member.offset_x - before_x == _approx(30 / target_w, OFFSET_TOLERANCE)
+    assert member.offset_y - before_y == _approx(30 / target_h, OFFSET_TOLERANCE)
 
     window.close()
     app.processEvents()
 
 
-def test_drag_displaces_the_portrait_equally_on_both_axes(tmp_path, monkeypatch) -> None:
+def test_drag_displaces_the_portrait_equally_on_both_axes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     window = _window_with_assets(tmp_path, TEAM_NAMES)
 
     target_w, target_h = panel_target_size(True)
@@ -639,16 +674,16 @@ def test_drag_displaces_the_portrait_equally_on_both_axes(tmp_path, monkeypatch)
     pixels_y = (member.offset_y - before_y) * target_h
     # A per-mille of the panel bounds the slider quantization on either axis.
     tolerance = OFFSET_TOLERANCE * max(target_w, target_h)
-    assert pixels_x == pytest.approx(pixels_y, abs=tolerance)
-    assert pixels_x == pytest.approx(30, abs=tolerance)
+    assert pixels_x == _approx(pixels_y, tolerance)
+    assert pixels_x == _approx(30, tolerance)
 
     window.close()
     app.processEvents()
 
 
-def test_drag_past_the_reachable_range_stops_at_the_bounds(tmp_path, monkeypatch) -> None:
+def test_drag_past_the_reachable_range_stops_at_the_bounds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     window = _window_with_assets(tmp_path, TEAM_NAMES)
 
     max_x, max_y = window._offset_bounds(window.current_member())
@@ -656,22 +691,22 @@ def test_drag_past_the_reachable_range_stops_at_the_bounds(tmp_path, monkeypatch
     window.drag_placement(10_000, 10_000)
 
     member = window.current_member()
-    assert member.offset_x == pytest.approx(max_x, abs=OFFSET_TOLERANCE)
-    assert member.offset_y == pytest.approx(max_y, abs=OFFSET_TOLERANCE)
+    assert member.offset_x == _approx(max_x, OFFSET_TOLERANCE)
+    assert member.offset_y == _approx(max_y, OFFSET_TOLERANCE)
 
     window.drag_placement(-20_000, -20_000)
 
     member = window.current_member()
-    assert member.offset_x == pytest.approx(-max_x, abs=OFFSET_TOLERANCE)
-    assert member.offset_y == pytest.approx(-max_y, abs=OFFSET_TOLERANCE)
+    assert member.offset_x == _approx(-max_x, OFFSET_TOLERANCE)
+    assert member.offset_y == _approx(-max_y, OFFSET_TOLERANCE)
 
     window.close()
     app.processEvents()
 
 
-def test_flip_check_toggles_the_selected_member(tmp_path, monkeypatch) -> None:
+def test_flip_check_toggles_the_selected_member(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     window = _window_with_assets(tmp_path, TEAM_NAMES)
 
     assert window.current_member().flip is False
@@ -686,9 +721,9 @@ def test_flip_check_toggles_the_selected_member(tmp_path, monkeypatch) -> None:
     app.processEvents()
 
 
-def test_sync_controls_shows_the_flip_without_writing_it_back(tmp_path, monkeypatch) -> None:
+def test_sync_controls_shows_the_flip_without_writing_it_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     window = _window_with_assets(tmp_path, TEAM_NAMES)
 
     window.current_member().flip = True
@@ -707,9 +742,9 @@ def test_sync_controls_shows_the_flip_without_writing_it_back(tmp_path, monkeypa
     app.processEvents()
 
 
-def test_selecting_another_slot_shows_that_slots_flip(tmp_path, monkeypatch) -> None:
+def test_selecting_another_slot_shows_that_slots_flip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     window = _window_with_assets(tmp_path, TEAM_NAMES)
 
     window.flip_check.setChecked(True)
@@ -725,9 +760,9 @@ def test_selecting_another_slot_shows_that_slots_flip(tmp_path, monkeypatch) -> 
     app.processEvents()
 
 
-def test_flip_round_trips_through_the_presets(tmp_path, monkeypatch) -> None:
+def test_flip_round_trips_through_the_presets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     window = _window_with_assets(tmp_path, TEAM_NAMES)
     window.builds = {name: asset.build for name, asset in window.assets.items()}
 
@@ -741,9 +776,9 @@ def test_flip_round_trips_through_the_presets(tmp_path, monkeypatch) -> None:
     app.processEvents()
 
 
-def test_reset_placement_clears_the_flip(tmp_path, monkeypatch) -> None:
+def test_reset_placement_clears_the_flip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     window = _window_with_assets(tmp_path, TEAM_NAMES)
 
     window.flip_check.setChecked(True)
@@ -757,15 +792,19 @@ def test_reset_placement_clears_the_flip(tmp_path, monkeypatch) -> None:
     app.processEvents()
 
 
-def test_load_profile_persists_profile_cache(tmp_path, monkeypatch) -> None:
+def test_load_profile_persists_profile_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    app = QApplication.instance() or QApplication([])
+    app = _qapp()
     window = MainWindow()
 
     uid = "700000042"
     builds = [make_build("Furina"), make_build("Nahida")]
     last_update = datetime(2026, 8, 3, 10, 30, 15, tzinfo=timezone.utc)
-    monkeypatch.setattr(window.client, "load_profile", lambda *args, **kwargs: (builds, 5.0, last_update))
+
+    def fake_load_profile(*args: Any, **kwargs: Any) -> tuple[list[Build], float, datetime]:
+        return builds, 5.0, last_update
+
+    monkeypatch.setattr(window.client, "load_profile", fake_load_profile)
     window.uid_edit.setText(uid)
 
     window.load_profile()

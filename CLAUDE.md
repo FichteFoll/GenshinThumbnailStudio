@@ -15,7 +15,10 @@ uv run genshin-thumbnail-studio   # run the app (auto-installs deps on first use
 uv sync --extra dev               # install dev deps (pytest, PyInstaller)
 uv run pytest                     # run the test suite
 uv run pytest tests/test_renderer.py::test_name   # run a single test
+uv run basedpyright               # strict type check
 ```
+
+The `dev` extra also carries `basedpyright` (configured in `pyproject.toml`'s `[tool.basedpyright]`, strict mode).
 
 Headless/CI test runs need an offscreen Qt platform and a sandbox-free QtWebEngine, since Akasha access goes through a real `QWebEnginePage`:
 
