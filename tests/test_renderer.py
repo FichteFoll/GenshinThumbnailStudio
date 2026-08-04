@@ -39,6 +39,7 @@ from genshin_thumbnail_studio.renderer import (
     render_preview,
     resized_art_size,
 )
+from genshin_thumbnail_studio.renderer import cache as render_cache_module
 
 
 def _rgb(image: Image.Image, xy: tuple[int, int]) -> tuple[int, int, int]:
@@ -66,14 +67,14 @@ def _gray(image: Image.Image, xy: tuple[int, int]) -> int:
 
 
 def _render_cache(name: str) -> Any:
-    """Fetch one of renderer.py's private cache dicts by name.
+    """Fetch one of the renderer's cache dicts by name.
 
     Their declared type is `OrderedDict[tuple, Image.Image]`: a bare `tuple`
     key that basedpyright treats as partially unknown until renderer.py's own
     cleanup commit (tracked separately from this one). `getattr` reads it as
     `Any` instead of leaking that `reportUnknownMemberType` into this file.
     """
-    return getattr(renderer, name)
+    return getattr(render_cache_module, name)
 
 
 class CompactLayout(NamedTuple):
@@ -1105,16 +1106,16 @@ def test_clear_render_cache_empties_the_render_caches(tmp_path: Path) -> None:
     assets = create_assets(tmp_path, names)
 
     render_preview(project, assets)
-    assert _render_cache("_art_cache")
-    assert _render_cache("_work_cache")  # 1200x900 art downscales for a preview panel
-    assert _render_cache("_mask_cache")
-    assert _render_cache("_border_cache")
+    assert _render_cache("art_cache")
+    assert _render_cache("work_cache")  # 1200x900 art downscales for a preview panel
+    assert _render_cache("mask_cache")
+    assert _render_cache("border_cache")
 
     clear_render_cache()
-    assert not _render_cache("_art_cache")
-    assert not _render_cache("_work_cache")
-    assert not _render_cache("_mask_cache")
-    assert not _render_cache("_border_cache")
+    assert not _render_cache("art_cache")
+    assert not _render_cache("work_cache")
+    assert not _render_cache("mask_cache")
+    assert not _render_cache("border_cache")
 
 
 def test_export_project_clears_the_render_caches_when_done(tmp_path: Path) -> None:
@@ -1125,22 +1126,22 @@ def test_export_project_clears_the_render_caches_when_done(tmp_path: Path) -> No
     assets = create_assets(tmp_path, names)
 
     render_preview(project, assets)
-    assert _render_cache("_panel_cache")
-    assert _render_cache("_weapon_icon_cache")
-    assert _render_cache("_art_cache")
-    assert _render_cache("_work_cache")
-    assert _render_cache("_mask_cache")
-    assert _render_cache("_border_cache")
-    assert _render_cache("_badge_cache")
+    assert _render_cache("panel_cache")
+    assert _render_cache("weapon_icon_cache")
+    assert _render_cache("art_cache")
+    assert _render_cache("work_cache")
+    assert _render_cache("mask_cache")
+    assert _render_cache("border_cache")
+    assert _render_cache("badge_cache")
 
     export_project(project, assets, tmp_path / "out")
-    assert not _render_cache("_panel_cache")
-    assert not _render_cache("_weapon_icon_cache")
-    assert not _render_cache("_art_cache")
-    assert not _render_cache("_work_cache")
-    assert not _render_cache("_mask_cache")
-    assert not _render_cache("_border_cache")
-    assert not _render_cache("_badge_cache")
+    assert not _render_cache("panel_cache")
+    assert not _render_cache("weapon_icon_cache")
+    assert not _render_cache("art_cache")
+    assert not _render_cache("work_cache")
+    assert not _render_cache("mask_cache")
+    assert not _render_cache("border_cache")
+    assert not _render_cache("badge_cache")
 
 
 def test_slots_with_identical_badge_state_share_one_cached_tile(tmp_path: Path) -> None:
@@ -1160,10 +1161,10 @@ def test_slots_with_identical_badge_state_share_one_cached_tile(tmp_path: Path) 
 
     render_preview(project, assets)
 
-    assert len(_render_cache("_badge_cache")) == 1
+    assert len(_render_cache("badge_cache")) == 1
 
     clear_render_cache()
-    assert not _render_cache("_badge_cache")
+    assert not _render_cache("badge_cache")
 
 
 def test_badge_cache_key_separates_builds_differing_only_in_c_and_r(tmp_path: Path) -> None:

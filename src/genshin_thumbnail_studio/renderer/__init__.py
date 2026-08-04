@@ -1,56 +1,119 @@
 from __future__ import annotations
 
-import collections
 import functools
 import math
 import re
 import threading
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypeAlias, TypeVar
 
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
-from .models import Asset, Placement, Project
+from ..models import Asset, Placement, Project
+from .cache import (
+    ART_CACHE_MAX,
+    BADGE_CACHE_MAX,
+    BORDER_CACHE_MAX,
+    MASK_CACHE_MAX,
+    PANEL_CACHE_MAX,
+    WEAPON_ICON_CACHE_MAX,
+    WORK_CACHE_MAX,
+    CacheKey,
+    art_cache,
+    badge_cache,
+    border_cache,
+    cache_get,
+    cache_put,
+    clear_render_cache,
+    mask_cache,
+    panel_cache,
+    weapon_icon_cache,
+    work_cache,
+)
+from .colors import (
+    ELEMENT_COLORS,
+    RARITY_COLORS,
+    card_color,
+    hex_to_rgba,
+    rarity_color,
+)
+from .coverage import (
+    GEOMETRY_SUPERSAMPLE,
+    paint_through_coverage,
+    supersampled_box,
+    supersampled_coverage,
+    supersampled_coverage_for,
+)
+from .geometry import (
+    BACKGROUND_COLOR,
+    BASE_H,
+    BASE_W,
+    CARD_BORDER,
+    CARD_GAP,
+    LINE,
+    PAN_OVERSCAN,
+    STANDARD_ART_SIZE,
+    cover_scale,
+    max_offset,
+    offset_limits,
+    panel_metrics,
+    panel_origin,
+    panel_polygon,
+    panel_target_size,
+    resized_art_size,
+    scaled_size,
+)
 
-BASE_W = 1280
-BASE_H = 720
-
-# Design-space constants (px at scale 1, multiplied by `scale` where used).
-LINE = 3
-CARD_BORDER = LINE
-CARD_GAP = 2 * LINE
-BACKGROUND_COLOR = (14, 14, 18, 255)  # #0e0e12
-
-# Size of an Enka splash art. Used as a fallback wherever the real art is not
-# available (a placement whose asset has not been downloaded yet, or a legacy
-# project file, which stores no art dimensions).
-STANDARD_ART_SIZE = (2048, 1024)
-
-# The crop window may leave the art by this fraction of the panel size on
-# every side. Cover-fit alone leaves almost no vertical slack for 2:1 splash
-# art (only target_h * (zoom - 1)), which made vertical panning useless;
-# overscanning exposes a bounded strip of the glow/background layer instead.
-PAN_OVERSCAN = 0.10
-
-ELEMENT_COLORS = {
-    "anemo": "#74c2a8",
-    "geo": "#ffb84d",
-    "electro": "#b08fc9",
-    "dendro": "#a5c83b",
-    "hydro": "#4cc2f1",
-    "pyro": "#ff7b52",
-    "cryo": "#9fe7ef",
-}
-
-RARITY_COLORS = {
-    5: "#ffd95d",
-    4: "#c69bff",
-    3: "#7ab3e0",
-    2: "#79c8a0",
-    1: "#c4c8cf",
-}
+# The names that moved into the submodules above, re-exported so the package's
+# public surface stays exactly what renderer.py exposed before the split. The
+# rest of the implementation still lives in this module.
+__all__ = [
+    "ART_CACHE_MAX",
+    "BACKGROUND_COLOR",
+    "BADGE_CACHE_MAX",
+    "BASE_H",
+    "BASE_W",
+    "BORDER_CACHE_MAX",
+    "CARD_BORDER",
+    "CARD_GAP",
+    "ELEMENT_COLORS",
+    "GEOMETRY_SUPERSAMPLE",
+    "LINE",
+    "MASK_CACHE_MAX",
+    "PANEL_CACHE_MAX",
+    "PAN_OVERSCAN",
+    "RARITY_COLORS",
+    "STANDARD_ART_SIZE",
+    "WEAPON_ICON_CACHE_MAX",
+    "WORK_CACHE_MAX",
+    "CacheKey",
+    "art_cache",
+    "badge_cache",
+    "border_cache",
+    "cache_get",
+    "cache_put",
+    "card_color",
+    "clear_render_cache",
+    "cover_scale",
+    "hex_to_rgba",
+    "mask_cache",
+    "max_offset",
+    "offset_limits",
+    "paint_through_coverage",
+    "panel_cache",
+    "panel_metrics",
+    "panel_origin",
+    "panel_polygon",
+    "panel_target_size",
+    "rarity_color",
+    "resized_art_size",
+    "scaled_size",
+    "supersampled_box",
+    "supersampled_coverage",
+    "supersampled_coverage_for",
+    "weapon_icon_cache",
+    "work_cache",
+]
 
 
 # The GUI clamps a placement's zoom to 0.70..1.80, so a preview working copy
@@ -63,15 +126,15 @@ MAX_PLACEMENT_ZOOM = 1.80
 # smaller radius) produces the same soft wash for a fraction of the work.
 GLOW_DOWNSCALE = 4
 
-# Pillow's ImageDraw has no antialiasing, so the near-vertical slanted card
-# edges come out stair-stepped. Drawing that geometry at 4x into a
-# single-channel coverage image and box-downsampling it yields proper edge
-# coverage; "L" rather than "RGBA" makes it ~6x cheaper for the same result,
-# and the outcome is cached anyway because it only depends on the layout.
-GEOMETRY_SUPERSAMPLE = 4
-
 # How much wider than the character crop the blurred glow layer is framed.
 GLOW_ZOOM_FACTOR = 0.78
+
+# Guards the shared FreeTypeFont that find_font() memoizes - not the render
+# caches above. Pillow does not document a font object as safe to measure or
+# draw with from two threads at once, so add_badges() serializes its whole
+# font-using span on this lock. It is always taken before _cache_lock (never
+# the other way round), and nothing under it re-enters add_badges().
+_font_lock = threading.Lock()
 
 
 def glow_zoom(zoom: float) -> float:
@@ -89,33 +152,9 @@ def glow_zoom(zoom: float) -> float:
     return max(1.0, zoom * GLOW_ZOOM_FACTOR)
 
 
-def rarity_color(rarity: int | None) -> str:
-    """The in-game rarity accent color, falling back to the 5-star gold
-    when the rarity is unknown so the current look stays the default."""
-    if rarity is None:
-        return RARITY_COLORS[5]
-    return RARITY_COLORS.get(rarity, RARITY_COLORS[5])
-
-
 def safe_name(value: str) -> str:
     cleaned = re.sub(r'[<>:"/\\|?*]+', "_", value).strip(" ._")
     return cleaned or "thumbnail"
-
-
-def hex_to_rgba(value: str, alpha: int) -> tuple[int, int, int, int]:
-    raw = value.lstrip("#")
-    if not re.fullmatch(r"[0-9a-fA-F]{6}", raw):
-        raise ValueError(f"Invalid color: {value}")
-    return (int(raw[0:2], 16), int(raw[2:4], 16), int(raw[4:6], 16), alpha)
-
-
-def card_color(member: Placement, asset: Asset) -> str:
-    """The card's element-inspired accent color, falling back to the
-    placement's own color when the element is unknown or missing."""
-    element = asset.build.element
-    if element and element.casefold() in ELEMENT_COLORS:
-        return ELEMENT_COLORS[element.casefold()]
-    return member.color
 
 
 @functools.lru_cache(maxsize=8)
@@ -145,78 +184,6 @@ def find_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
         return ImageFont.load_default()
 
 
-def panel_metrics(compact: bool, scale: int = 1) -> tuple[int, int, int]:
-    """Row height, panel width and slant overhang of one character panel."""
-    height = BASE_H * scale
-    row_height = height // 2 if compact else height
-    panel_width = (340 if compact else 360) * scale
-    slant = (38 if compact else 52) * scale
-    return row_height, panel_width, slant
-
-
-def panel_target_size(compact: bool, scale: int = 1) -> tuple[int, int]:
-    """Pixel size of the art crop for one panel, slant overhang included."""
-    row_height, panel_width, slant = panel_metrics(compact, scale)
-    return panel_width + slant * 2, row_height
-
-
-def cover_scale(source_size: tuple[int, int], target: tuple[int, int], zoom: float) -> float:
-    """Factor that scales the source art to cover the target box, times the zoom."""
-    source_w, source_h = source_size
-    target_w, target_h = target
-    return max(target_w / source_w, target_h / source_h) * zoom
-
-
-def _scaled_size(source_size: tuple[int, int], image_scale: float) -> tuple[int, int]:
-    """Both axes multiplied by the same factor, so the zoom never changes the
-    art's aspect ratio.
-
-    The result may end up smaller than the panel, which is intentional: the
-    crop window then overhangs the art and the panel background and glow show
-    through the margin, which is preferable to stretching the portrait.
-    """
-    source_w, source_h = source_size
-    return (max(1, int(source_w * image_scale + 0.5)), max(1, int(source_h * image_scale + 0.5)))
-
-
-def resized_art_size(
-    art_size: tuple[int, int], compact: bool, zoom: float, scale: int = 1
-) -> tuple[int, int]:
-    """Pixel size the art is resized to before it is cropped into one panel."""
-    target = panel_target_size(compact, scale)
-    return _scaled_size(art_size, cover_scale(art_size, target, zoom))
-
-
-def _offset_limits(resized: tuple[int, int], target: tuple[int, int]) -> tuple[float, float]:
-    """Largest panel-relative offset per axis that still moves the crop.
-
-    The slack is the absolute difference between the art and the panel, so both
-    directions read the same way: art larger than the panel can be panned by
-    the part hanging over its edges, art smaller than the panel by the margin
-    it leaves inside them, and `PAN_OVERSCAN` adds a strip beyond that either
-    way. Signed slack would go negative for art smaller than the panel minus
-    the overscan, which inverts the `min(limit, max(-limit, offset))` clamp in
-    `cover_resize_offset()`.
-    """
-    return (
-        abs(resized[0] - target[0]) / (2 * target[0]) + PAN_OVERSCAN,
-        abs(resized[1] - target[1]) / (2 * target[1]) + PAN_OVERSCAN,
-    )
-
-
-def max_offset(
-    art_size: tuple[int, int], compact: bool, zoom: float, scale: int = 1
-) -> tuple[float, float]:
-    """Reachable +/- offset per axis, in fractions of the panel size.
-
-    Shares its formula with the clamp in `cover_resize_offset()`, so the GUI
-    slider bounds and the renderer can never disagree about the reachable range.
-    """
-    return _offset_limits(
-        resized_art_size(art_size, compact, zoom, scale), panel_target_size(compact, scale)
-    )
-
-
 def cover_resize_offset(
     image: Image.Image,
     size: tuple[int, int],
@@ -237,8 +204,8 @@ def cover_resize_offset(
     source_w, source_h = image.size
     target_w, target_h = size
     image_scale = cover_scale(image.size, size, zoom)
-    resized_w, resized_h = _scaled_size(image.size, image_scale)
-    limit_x, limit_y = _offset_limits((resized_w, resized_h), size)
+    resized_w, resized_h = scaled_size(image.size, image_scale)
+    limit_x, limit_y = offset_limits((resized_w, resized_h), size)
     offset_x = min(limit_x, max(-limit_x, offset_x))
     offset_y = min(limit_y, max(-limit_y, offset_y))
     left = round((resized_w - target_w) / 2 - offset_x * target_w)
@@ -308,144 +275,6 @@ def art_pixel_size(path: str) -> tuple[int, int]:
     """
     with Image.open(path) as image:
         return image.size
-
-
-def panel_polygon(
-    index: int,
-    row: int,
-    num_rows: int,
-    width: int,
-    row_height: int,
-    step: float,
-    slant: int,
-    gap: float,
-    border: float,
-) -> list[tuple[int, int]]:
-    """Compute one card's outline, inset by half the gap/border on every
-    shared or outer edge so neighbouring cards never touch.
-
-    Vertical (slanted) edges are inset horizontally by more than the plain
-    gap/2, scaled by the secant of the slant angle, so the resulting inset
-    is perpendicular to the slanted edge rather than a raw horizontal shift.
-    """
-    half_gap = gap / 2
-    half_border = border / 2
-    y0 = row * row_height + (half_border if row == 0 else half_gap)
-    y1 = (row + 1) * row_height - (half_border if row == num_rows - 1 else half_gap)
-
-    perp_scale = math.hypot(row_height, 2 * slant) / row_height if slant else 1.0
-
-    x0 = index * step
-    x1 = (index + 1) * step
-
-    if index == 0:
-        left_top = left_bottom = half_border
-    else:
-        left_inset = half_gap * perp_scale
-        left_top = x0 + slant + left_inset
-        left_bottom = x0 - slant + left_inset
-
-    if index == 3:
-        right_top = right_bottom = width - half_border
-    else:
-        right_inset = half_gap * perp_scale
-        right_top = x1 + slant - right_inset
-        right_bottom = x1 - slant - right_inset
-
-    return [
-        (round(left_top), round(y0)),
-        (round(right_top), round(y0)),
-        (round(right_bottom), round(y1)),
-        (round(left_bottom), round(y1)),
-    ]
-
-
-def supersampled_coverage_for(
-    size: tuple[int, int], draw_shape: Callable[[ImageDraw.ImageDraw, int], None]
-) -> Image.Image:
-    """An antialiased "L" coverage map of `size`, drawn by `draw_shape(draw, factor)`
-    in coordinates multiplied by `factor`.
-
-    Drawing outside the map is clipped by ImageDraw, which is what lets the
-    slanted card outlines overhang their own layer.
-    """
-    big_size = (size[0] * GEOMETRY_SUPERSAMPLE, size[1] * GEOMETRY_SUPERSAMPLE)
-    big = Image.new("L", big_size, 0)
-    draw_shape(ImageDraw.Draw(big), GEOMETRY_SUPERSAMPLE)
-    # Pillow's Image.resize() stub leaves its overload partially unknown.
-    return big.resize(size, Image.Resampling.BOX)  # pyright: ignore[reportUnknownMemberType]
-
-
-def supersampled_coverage(
-    size: tuple[int, int], points: list[tuple[int, int]], width: int | None = None
-) -> Image.Image:
-    """An antialiased "L" coverage map of `size` for the polygon `points`:
-    filled when `width` is None, otherwise a `width`-pixel outline stroke.
-    """
-
-    def draw_shape(draw: ImageDraw.ImageDraw, factor: int) -> None:
-        big_points = [(x * factor, y * factor) for x, y in points]
-        if width is None:
-            draw.polygon(big_points, fill=255)
-        else:
-            draw.polygon(big_points, outline=255, width=width * factor)
-
-    return supersampled_coverage_for(size, draw_shape)
-
-
-def supersampled_box(box: tuple[int, int, int, int], factor: int) -> tuple[int, int, int, int]:
-    """`box` blown up by `factor` for a supersampled draw. Pillow's shape
-    coordinates are inclusive, so scaling the raw values would leave the far
-    edges one supersampled pixel short and shrink the shape by a whole
-    downsampled pixel."""
-    x0, y0, x1, y1 = box
-    return (x0 * factor, y0 * factor, (x1 + 1) * factor - 1, (y1 + 1) * factor - 1)
-
-
-def _hard_mask(mask: Image.Image) -> Image.Image:
-    """`mask` with every partially covered pixel promoted to full coverage."""
-
-    def lut(value: int) -> int:
-        return 255 if value else 0
-
-    # Pillow's Image.point() stub leaves its overload partially unknown.
-    return mask.point(lut)  # pyright: ignore[reportUnknownMemberType]
-
-
-def _fully_covered(mask: Image.Image) -> Image.Image:
-    """The part of `mask` that is covered completely rather than partially."""
-
-    def lut(value: int) -> int:
-        return 255 if value == 255 else 0
-
-    # Pillow's Image.point() stub leaves its overload partially unknown.
-    return mask.point(lut)  # pyright: ignore[reportUnknownMemberType]
-
-
-def paint_through_coverage(
-    tile: Image.Image, color: tuple[int, int, int, int], mask: Image.Image, painted: Image.Image
-) -> Image.Image:
-    """Paint `color` into `tile` through the antialiased `mask` and return the
-    grown `painted` coverage.
-
-    `Image.paste()` blends toward what the tile already holds, so on a shape's
-    outer silhouette, where that is still transparent black, a half-covered
-    pixel would end up at half the colour. The caller then pastes the tile onto
-    the card through the very same coverage, which would multiply by that half
-    a second time and fade every antialiased edge toward black. Seeding the
-    footprint with the flat colour first keeps those pixels at the colour
-    itself and leaves the softness to the coverage mask alone.
-
-    The seed is skipped where an earlier shape already covers the pixel
-    completely: there the tile holds real content the new shape should blend
-    into, which is what antialiases the shapes against each other. A pixel an
-    earlier shape only covers partially is part of the badge's silhouette and
-    gets seeded, so the outermost shape's colour survives the coverage paste.
-    """
-    seed = ImageChops.subtract(_hard_mask(mask), _fully_covered(painted))
-    tile.paste(color, mask=seed)
-    tile.paste(color, mask=mask)
-    return ImageChops.lighter(painted, mask)
 
 
 def panel_background(size: tuple[int, int], color: str, compact: bool) -> Image.Image:
@@ -534,13 +363,6 @@ def make_panel(
     return apply_panel_mask(panel, index, row, num_rows, canvas_width, row_height, step, slant, scale)
 
 
-def panel_origin(index: int, row: int, row_height: int, step: float, slant: int) -> tuple[int, int]:
-    """Where a panel-sized layer sits on the canvas. Slot 0's x is negative,
-    because the slant makes the panel overhang the canvas on the left (and
-    slot 3's makes it overhang on the right)."""
-    return round(index * step - slant), row * row_height
-
-
 def apply_panel_mask(
     panel: Image.Image,
     index: int,
@@ -559,7 +381,7 @@ def apply_panel_mask(
     shared by every placement that lands in the same slot.
     """
     mask_key = (index, row, num_rows, canvas_width, row_height, step, slant, scale, panel.size)
-    mask = _cache_get(_mask_cache, mask_key)
+    mask = cache_get(mask_cache, mask_key)
     if mask is None:
         gap = CARD_GAP * scale
         border = CARD_BORDER * scale
@@ -567,7 +389,7 @@ def apply_panel_mask(
         origin_x, origin_y = panel_origin(index, row, row_height, step, slant)
         local_points = [(x - origin_x, y - origin_y) for x, y in points]
         mask = supersampled_coverage(panel.size, local_points)
-        _cache_put(_mask_cache, mask_key, mask, _MASK_CACHE_MAX)
+        cache_put(mask_cache, mask_key, mask, MASK_CACHE_MAX)
     panel.putalpha(ImageChops.multiply(panel.getchannel("A"), mask))
     return panel
 
@@ -592,99 +414,6 @@ def placeholder_panel(
     return apply_panel_mask(panel, index, row, num_rows, canvas_width, row_height, step, slant, scale)
 
 
-# Bounded LRU caches for render output that would otherwise be recomputed
-# on every preview render regardless of what actually changed: one for
-# fully-composited panel layers (make_panel()/placeholder_panel() output),
-# one for decoded/resized weapon icons, one for decoded character art, and
-# one for preview-sized working copies of that art. Cleared via
-# clear_render_cache(), e.g. between tests that assert on cache hit/miss
-# counts, and automatically at the end of every export_project() call (even
-# if it raises) to release its larger export-scale entries.
-#
-# Cached panels are panel-sized (~0.6 MB each at preview scale, so the bound is
-# ~19 MB) and are composited *into* the canvas rather than being the composite
-# operand, so they must never be mutated once cached; canvas.alpha_composite()
-# only reads them.
-#
-# The keys are heterogeneous tuples of primitives (paths, floats, ints, bools)
-# assembled ad hoc by each cache's caller, so `tuple[object, ...]` is the
-# honest type rather than a made-up, more specific structure.
-CacheKey: TypeAlias = tuple[object, ...]
-
-_PANEL_CACHE_MAX = 32
-_panel_cache: collections.OrderedDict[CacheKey, Image.Image] = collections.OrderedDict()
-
-_WEAPON_ICON_CACHE_MAX = 32
-_weapon_icon_cache: collections.OrderedDict[CacheKey, Image.Image] = collections.OrderedDict()
-
-_ART_CACHE_MAX = 12
-_art_cache: collections.OrderedDict[CacheKey, Image.Image] = collections.OrderedDict()
-
-_WORK_CACHE_MAX = 12
-_work_cache: collections.OrderedDict[CacheKey, Image.Image] = collections.OrderedDict()
-
-# The supersampled card mask and card-border overlay depend on the layout
-# geometry alone (and, for the border, its colour), never on the placement, so
-# after the first frame they are permanent hits even while a portrait is dragged.
-_MASK_CACHE_MAX = 16
-_mask_cache: collections.OrderedDict[CacheKey, Image.Image] = collections.OrderedDict()
-
-_BORDER_CACHE_MAX = 16
-_border_cache: collections.OrderedDict[CacheKey, Image.Image] = collections.OrderedDict()
-
-# A slot's C/R + weapon badge depends on the build and the card colour, never
-# on the placement's position or zoom, so it survives a drag untouched. Each
-# entry is the drawn tile plus the coverage mask that says which of its pixels
-# the drawing actually touched (see badge_tile()).
-_BADGE_CACHE_MAX = 16
-_badge_cache: collections.OrderedDict[CacheKey, tuple[Image.Image, Image.Image]] = collections.OrderedDict()
-
-# Previews render on a background thread while export_project() renders on
-# the GUI thread, so all caches can be touched concurrently.
-_cache_lock = threading.Lock()
-
-# Guards the shared FreeTypeFont that find_font() memoizes - not the render
-# caches above. Pillow does not document a font object as safe to measure or
-# draw with from two threads at once, so add_badges() serializes its whole
-# font-using span on this lock. It is always taken before _cache_lock (never
-# the other way round), and nothing under it re-enters add_badges().
-_font_lock = threading.Lock()
-
-
-def clear_render_cache() -> None:
-    """Empty the panel, weapon-icon, character-art, working-copy, card-mask,
-    card-border and badge caches."""
-    with _cache_lock:
-        _panel_cache.clear()
-        _weapon_icon_cache.clear()
-        _art_cache.clear()
-        _work_cache.clear()
-        _mask_cache.clear()
-        _border_cache.clear()
-        _badge_cache.clear()
-
-
-_CacheValue = TypeVar("_CacheValue")
-
-
-def _cache_get(cache: collections.OrderedDict[CacheKey, _CacheValue], key: CacheKey) -> _CacheValue | None:
-    with _cache_lock:
-        if key not in cache:
-            return None
-        cache.move_to_end(key)
-        return cache[key]
-
-
-def _cache_put(
-    cache: collections.OrderedDict[CacheKey, _CacheValue], key: CacheKey, value: _CacheValue, max_size: int
-) -> None:
-    with _cache_lock:
-        cache[key] = value
-        cache.move_to_end(key)
-        while len(cache) > max_size:
-            cache.popitem(last=False)
-
-
 def source_art(asset: Asset, target: tuple[int, int], zoom: float, scale: int) -> Image.Image:
     """The image make_panel() should resample its panel art from.
 
@@ -699,10 +428,10 @@ def source_art(asset: Asset, target: tuple[int, int], zoom: float, scale: int) -
     a new image via resize()/crop(), so no copy is made here.
     """
     art_key = (str(asset.art_path),)
-    art = _cache_get(_art_cache, art_key)
+    art = cache_get(art_cache, art_key)
     if art is None:
         art = Image.open(asset.art_path).convert("RGBA")
-        _cache_put(_art_cache, art_key, art, _ART_CACHE_MAX)
+        cache_put(art_cache, art_key, art, ART_CACHE_MAX)
     if scale != 1 or zoom > MAX_PLACEMENT_ZOOM:
         return art
 
@@ -715,11 +444,11 @@ def source_art(asset: Asset, target: tuple[int, int], zoom: float, scale: int) -
         return art
 
     work_key = (str(asset.art_path), *work)
-    working = _cache_get(_work_cache, work_key)
+    working = cache_get(work_cache, work_key)
     if working is None:
         # Pillow's Image.resize() stub leaves its overload partially unknown.
         working = art.resize(work, Image.Resampling.LANCZOS)  # pyright: ignore[reportUnknownMemberType]
-        _cache_put(_work_cache, work_key, working, _WORK_CACHE_MAX)
+        cache_put(work_cache, work_key, working, WORK_CACHE_MAX)
     return working
 
 
@@ -749,13 +478,13 @@ def add_card_borders(
             origin_x, origin_y = panel_origin(index, row, row_height, step, slant)
             # overlay_size is fully derived from step, slant and row_height.
             overlay_key = (index, row, num_rows, width, row_height, step, slant, scale, color)
-            overlay = _cache_get(_border_cache, overlay_key)
+            overlay = cache_get(border_cache, overlay_key)
             if overlay is None:
                 points = panel_polygon(index, row, num_rows, width, row_height, step, slant, gap, border)
                 local_points = [(x - origin_x, y - origin_y) for x, y in points]
                 overlay = Image.new("RGBA", overlay_size, hex_to_rgba(color, 255))
                 overlay.putalpha(supersampled_coverage(overlay_size, local_points, width=round(border)))
-                _cache_put(_border_cache, overlay_key, overlay, _BORDER_CACHE_MAX)
+                cache_put(border_cache, overlay_key, overlay, BORDER_CACHE_MAX)
             # Same clipping as the panels: slot 0 overhangs the canvas on the
             # left and needs a source offset, slot 3 overhangs on the right and
             # is clipped by the in-place composite itself.
@@ -943,7 +672,7 @@ def badge_tile(
 
     icon_d = (48 if compact else 68) * scale
     icon_key = (str(asset.weapon_path), icon_d)
-    icon = _cache_get(_weapon_icon_cache, icon_key)
+    icon = cache_get(weapon_icon_cache, icon_key)
     if icon is None:
         icon = Image.open(asset.weapon_path).convert("RGBA")
         # Enka weapon PNGs can pad their visible art asymmetrically on the canvas,
@@ -952,7 +681,7 @@ def badge_tile(
         if alpha_bbox is not None:
             icon = icon.crop(alpha_bbox)
         icon.thumbnail((icon_d, icon_d), Image.Resampling.LANCZOS)
-        _cache_put(_weapon_icon_cache, icon_key, icon, _WEAPON_ICON_CACHE_MAX)
+        cache_put(weapon_icon_cache, icon_key, icon, WEAPON_ICON_CACHE_MAX)
     circle_d = circle[2] - circle[0]
     icon_pos = (circle[0] + (circle_d - icon.width) // 2, circle[1] + (circle_d - icon.height) // 2)
     tile.alpha_composite(icon, icon_pos)
@@ -999,10 +728,10 @@ def add_badges(
                     scale,
                     compact,
                 )
-                cached = _cache_get(_badge_cache, tile_key)
+                cached = cache_get(badge_cache, tile_key)
                 if cached is None:
                     cached = badge_tile(geometry, asset, color, font, scale, compact)
-                    _cache_put(_badge_cache, tile_key, cached, _BADGE_CACHE_MAX)
+                    cache_put(badge_cache, tile_key, cached, BADGE_CACHE_MAX)
                 tile, coverage = cached
                 image.paste(tile, badge_tile_origin(geometry), coverage)
 
@@ -1049,7 +778,7 @@ def render_image(
                 scale,
                 compact,
             )
-            panel = _cache_get(_panel_cache, cache_key)
+            panel = cache_get(panel_cache, cache_key)
             if panel is None:
                 if asset is not None:
                     panel = make_panel(
@@ -1078,7 +807,7 @@ def render_image(
                         scale,
                         compact,
                     )
-                _cache_put(_panel_cache, cache_key, panel, _PANEL_CACHE_MAX)
+                cache_put(panel_cache, cache_key, panel, PANEL_CACHE_MAX)
             # The panel overhangs the canvas on the left for slot 0 and on the
             # right for slot 3; clipping the left overhang needs a source
             # offset, while the in-place composite clips the right one itself.
