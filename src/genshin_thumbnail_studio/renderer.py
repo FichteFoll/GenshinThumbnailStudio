@@ -7,7 +7,7 @@ import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, TypeVar
+from typing import Callable, TypeAlias, TypeVar
 
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
@@ -106,7 +106,7 @@ def hex_to_rgba(value: str, alpha: int) -> tuple[int, int, int, int]:
     raw = value.lstrip("#")
     if not re.fullmatch(r"[0-9a-fA-F]{6}", raw):
         raise ValueError(f"Invalid color: {value}")
-    return tuple(int(raw[index : index + 2], 16) for index in (0, 2, 4)) + (alpha,)
+    return (int(raw[0:2], 16), int(raw[2:4], 16), int(raw[4:6], 16), alpha)
 
 
 def card_color(member: Placement, asset: Asset) -> str:
@@ -264,7 +264,8 @@ def cover_resize_offset(
         visible_bottom * source_h / resized_h,
     )
     visible_size = (visible_right - visible_left, visible_bottom - visible_top)
-    visible = image.resize(visible_size, resample, box=box)
+    # Pillow's Image.resize() stub leaves its overload partially unknown.
+    visible = image.resize(visible_size, resample, box=box)  # pyright: ignore[reportUnknownMemberType]
     if visible_size == size:
         return visible
 
@@ -371,7 +372,8 @@ def supersampled_coverage_for(
     big_size = (size[0] * GEOMETRY_SUPERSAMPLE, size[1] * GEOMETRY_SUPERSAMPLE)
     big = Image.new("L", big_size, 0)
     draw_shape(ImageDraw.Draw(big), GEOMETRY_SUPERSAMPLE)
-    return big.resize(size, Image.Resampling.BOX)
+    # Pillow's Image.resize() stub leaves its overload partially unknown.
+    return big.resize(size, Image.Resampling.BOX)  # pyright: ignore[reportUnknownMemberType]
 
 
 def supersampled_coverage(
@@ -402,12 +404,22 @@ def supersampled_box(box: tuple[int, int, int, int], factor: int) -> tuple[int, 
 
 def _hard_mask(mask: Image.Image) -> Image.Image:
     """`mask` with every partially covered pixel promoted to full coverage."""
-    return mask.point(lambda value: 255 if value else 0)
+
+    def lut(value: int) -> int:
+        return 255 if value else 0
+
+    # Pillow's Image.point() stub leaves its overload partially unknown.
+    return mask.point(lut)  # pyright: ignore[reportUnknownMemberType]
 
 
 def _fully_covered(mask: Image.Image) -> Image.Image:
     """The part of `mask` that is covered completely rather than partially."""
-    return mask.point(lambda value: 255 if value == 255 else 0)
+
+    def lut(value: int) -> int:
+        return 255 if value == 255 else 0
+
+    # Pillow's Image.point() stub leaves its overload partially unknown.
+    return mask.point(lut)  # pyright: ignore[reportUnknownMemberType]
 
 
 def paint_through_coverage(
@@ -486,7 +498,8 @@ def make_panel(
     )
     glow = glow.filter(ImageFilter.GaussianBlur((14 if compact else 18) * scale / GLOW_DOWNSCALE))
     glow = ImageEnhance.Color(glow).enhance(1.20 if compact else 1.25)
-    glow = glow.resize(target, Image.Resampling.BILINEAR)
+    # Pillow's Image.resize() stub leaves its overload partially unknown.
+    glow = glow.resize(target, Image.Resampling.BILINEAR)  # pyright: ignore[reportUnknownMemberType]
     background = Image.alpha_composite(background, glow)
 
     crop = panel_art(art, target, member, member.zoom)
@@ -495,7 +508,13 @@ def make_panel(
     alpha = crop.getchannel("A")
     shadow = Image.new("RGBA", target, (0, 0, 0, 0))
     shadow_blur = alpha.filter(ImageFilter.GaussianBlur((6 if compact else 8) * scale))
-    shadow.putalpha(shadow_blur.point(lambda value: int(value * (0.35 if compact else 0.38))))
+    shadow_opacity = 0.35 if compact else 0.38
+
+    def shadow_lut(value: int) -> int:
+        return int(value * shadow_opacity)
+
+    # Pillow's Image.point() stub leaves its overload partially unknown.
+    shadow.putalpha(shadow_blur.point(shadow_lut))  # pyright: ignore[reportUnknownMemberType]
     panel = Image.alpha_composite(background, shadow)
     panel = Image.alpha_composite(panel, crop)
     panel = Image.alpha_composite(panel, Image.new("RGBA", panel.size, hex_to_rgba(color, 14 if compact else 18)))
@@ -586,33 +605,39 @@ def placeholder_panel(
 # ~19 MB) and are composited *into* the canvas rather than being the composite
 # operand, so they must never be mutated once cached; canvas.alpha_composite()
 # only reads them.
+#
+# The keys are heterogeneous tuples of primitives (paths, floats, ints, bools)
+# assembled ad hoc by each cache's caller, so `tuple[object, ...]` is the
+# honest type rather than a made-up, more specific structure.
+CacheKey: TypeAlias = tuple[object, ...]
+
 _PANEL_CACHE_MAX = 32
-_panel_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
+_panel_cache: collections.OrderedDict[CacheKey, Image.Image] = collections.OrderedDict()
 
 _WEAPON_ICON_CACHE_MAX = 32
-_weapon_icon_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
+_weapon_icon_cache: collections.OrderedDict[CacheKey, Image.Image] = collections.OrderedDict()
 
 _ART_CACHE_MAX = 12
-_art_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
+_art_cache: collections.OrderedDict[CacheKey, Image.Image] = collections.OrderedDict()
 
 _WORK_CACHE_MAX = 12
-_work_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
+_work_cache: collections.OrderedDict[CacheKey, Image.Image] = collections.OrderedDict()
 
 # The supersampled card mask and card-border overlay depend on the layout
 # geometry alone (and, for the border, its colour), never on the placement, so
 # after the first frame they are permanent hits even while a portrait is dragged.
 _MASK_CACHE_MAX = 16
-_mask_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
+_mask_cache: collections.OrderedDict[CacheKey, Image.Image] = collections.OrderedDict()
 
 _BORDER_CACHE_MAX = 16
-_border_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
+_border_cache: collections.OrderedDict[CacheKey, Image.Image] = collections.OrderedDict()
 
 # A slot's C/R + weapon badge depends on the build and the card colour, never
 # on the placement's position or zoom, so it survives a drag untouched. Each
 # entry is the drawn tile plus the coverage mask that says which of its pixels
 # the drawing actually touched (see badge_tile()).
 _BADGE_CACHE_MAX = 16
-_badge_cache: collections.OrderedDict[tuple, tuple[Image.Image, Image.Image]] = collections.OrderedDict()
+_badge_cache: collections.OrderedDict[CacheKey, tuple[Image.Image, Image.Image]] = collections.OrderedDict()
 
 # Previews render on a background thread while export_project() renders on
 # the GUI thread, so all caches can be touched concurrently.
@@ -642,7 +667,7 @@ def clear_render_cache() -> None:
 _CacheValue = TypeVar("_CacheValue")
 
 
-def _cache_get(cache: collections.OrderedDict[tuple, _CacheValue], key: tuple) -> _CacheValue | None:
+def _cache_get(cache: collections.OrderedDict[CacheKey, _CacheValue], key: CacheKey) -> _CacheValue | None:
     with _cache_lock:
         if key not in cache:
             return None
@@ -651,7 +676,7 @@ def _cache_get(cache: collections.OrderedDict[tuple, _CacheValue], key: tuple) -
 
 
 def _cache_put(
-    cache: collections.OrderedDict[tuple, _CacheValue], key: tuple, value: _CacheValue, max_size: int
+    cache: collections.OrderedDict[CacheKey, _CacheValue], key: CacheKey, value: _CacheValue, max_size: int
 ) -> None:
     with _cache_lock:
         cache[key] = value
@@ -692,7 +717,8 @@ def source_art(asset: Asset, target: tuple[int, int], zoom: float, scale: int) -
     work_key = (str(asset.art_path), *work)
     working = _cache_get(_work_cache, work_key)
     if working is None:
-        working = art.resize(work, Image.Resampling.LANCZOS)
+        # Pillow's Image.resize() stub leaves its overload partially unknown.
+        working = art.resize(work, Image.Resampling.LANCZOS)  # pyright: ignore[reportUnknownMemberType]
         _cache_put(_work_cache, work_key, working, _WORK_CACHE_MAX)
     return working
 
@@ -1060,7 +1086,8 @@ def render_image(
             canvas.alpha_composite(panel, (max(0, origin_x), origin_y), (max(0, -origin_x), 0))
     add_card_borders(canvas, teams, assets, row_height, step, slant, scale)
     add_badges(canvas, teams, assets, row_height, step, scale, compact)
-    return canvas.convert("RGB").resize(output_size, Image.Resampling.LANCZOS)
+    # Pillow's Image.resize() stub leaves its overload partially unknown.
+    return canvas.convert("RGB").resize(output_size, Image.Resampling.LANCZOS)  # pyright: ignore[reportUnknownMemberType]
 
 
 def render_preview(project: Project, assets: dict[str, Asset]) -> Image.Image:
@@ -1077,7 +1104,7 @@ def export_project(project: Project, assets: dict[str, Asset], directory: Path) 
     directory.mkdir(parents=True, exist_ok=True)
     scale = min(4, max(2, math.ceil(2 * project.output_height / BASE_H)))
     output_size = project.output_size
-    written = []
+    written: list[Path] = []
     try:
         if project.mode == "abyss":
             target = directory / f"{safe_name(project.output_name)}.png"
