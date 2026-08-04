@@ -13,19 +13,20 @@ from PySide6.QtCore import (
     QPoint,
     QRect,
     QRunnable,
-    QSize,
     Qt,
     QThreadPool,
     QTimer,
     Signal,
 )
 from PySide6.QtGui import (
+    QCloseEvent,
     QColor,
     QDrag,
     QDragEnterEvent,
     QDropEvent,
     QMouseEvent,
     QPainter,
+    QPaintEvent,
     QPen,
     QPixmap,
     QWheelEvent,
@@ -41,6 +42,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QLayout,
     QLineEdit,
     QMainWindow,
     QMessageBox,
@@ -142,7 +144,7 @@ class PreviewWidget(QFrame):
             (point.y() - rect.y()) * 720 / rect.height(),
         )
 
-    def paintEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+    def paintEvent(self, event: QPaintEvent) -> None:
         super().paintEvent(event)
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor("#111216"))
@@ -335,7 +337,7 @@ class MainWindow(QMainWindow):
     def _icon(self, standard: QStyle.StandardPixmap):
         return self.style().standardIcon(standard)
 
-    def closeEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+    def closeEvent(self, event: QCloseEvent) -> None:
         self.client.close()
         super().closeEvent(event)
 
@@ -393,7 +395,7 @@ class MainWindow(QMainWindow):
 
         output_form = QFormLayout()
         self.output_name = QLineEdit("genshin_thumbnail")
-        self.output_name.textChanged.connect(lambda value: setattr(self.project, "output_name", value))
+        self.output_name.textChanged.connect(self._output_name_changed)
         output_form.addRow("File name", self.output_name)
         self.resolution_combo = QComboBox()
         for label, height in RESOLUTION_OPTIONS:
@@ -501,14 +503,18 @@ class MainWindow(QMainWindow):
         slider.setMinimumWidth(80)
         return slider
 
-    def _clear_layout(self, layout: QVBoxLayout) -> None:
+    def _clear_layout(self, layout: QLayout) -> None:
         while layout.count():
             item = layout.takeAt(0)
+            if item is None:
+                continue
             widget = item.widget()
             if widget:
                 widget.deleteLater()
-            elif item.layout():
-                self._clear_layout(item.layout())  # type: ignore[arg-type]
+            else:
+                sub_layout = item.layout()
+                if sub_layout:
+                    self._clear_layout(sub_layout)
 
     def _rebuild_team_fields(self) -> None:
         self._clear_layout(self.team_layout)
@@ -519,7 +525,7 @@ class MainWindow(QMainWindow):
             self.team_layout.addWidget(title)
             rows = QVBoxLayout()
             rows.setSpacing(4)
-            row_combos = []
+            row_combos: list[QComboBox] = []
             for slot_index, member in enumerate(team):
                 combo = QComboBox()
                 combo.setEditable(True)
@@ -527,9 +533,11 @@ class MainWindow(QMainWindow):
                 combo.setPlaceholderText(f"Character {slot_index + 1}")
                 if member.name:
                     combo.setCurrentText(member.name)
-                combo.currentTextChanged.connect(
-                    lambda value, t=team_index, s=slot_index: self._member_changed(t, s, value)
-                )
+
+                def on_text_changed(value: str, t: int = team_index, s: int = slot_index) -> None:
+                    self._member_changed(t, s, value)
+
+                combo.currentTextChanged.connect(on_text_changed)
                 slot_widget = TeamSlotWidget(team_index, slot_index, combo)
                 slot_widget.swap_requested.connect(self.swap_slots_signal)
                 rows.addWidget(slot_widget)
@@ -579,6 +587,9 @@ class MainWindow(QMainWindow):
         self._rebuild_team_fields()
         self._sync_controls()
         self.preview.set_preview(QPixmap())
+
+    def _output_name_changed(self, value: str) -> None:
+        self.project.output_name = value
 
     def _resolution_changed(self, index: int) -> None:
         if self._updating_controls or index < 0:
@@ -796,8 +807,8 @@ class MainWindow(QMainWindow):
             self.team_combos[team][slot].setCurrentText(name)
 
     def _validate_team(self) -> list[Build]:
-        missing = []
-        selected = []
+        missing: list[str] = []
+        selected: list[Build] = []
         for team_index, row in enumerate(self.team_combos):
             for slot_index, combo in enumerate(row):
                 name = combo.currentText().strip()
@@ -809,7 +820,7 @@ class MainWindow(QMainWindow):
                     selected.append(build)
         if missing:
             raise ValueError("Build not in the loaded profile: " + ", ".join(missing))
-        unique = {build.name.casefold(): build for build in selected}
+        unique: dict[str, Build] = {build.name.casefold(): build for build in selected}
         return list(unique.values())
 
     def _on_asset_ready(self, key: str, asset: Asset) -> None:
@@ -833,15 +844,16 @@ class MainWindow(QMainWindow):
             QApplication.restoreOverrideCursor()
             self.preview_button.setEnabled(True)
 
+    def _report_download_progress(self, current: int, total: int, name: str) -> None:
+        self.statusBar().showMessage(f"Downloading {name} ({current}/{total}) ...")
+        QApplication.processEvents()
+
     def _generate_preview_from_builds(self, builds: list[Build]) -> None:
         self.assets = {}
         self.assets = download_assets(
             builds,
             cache_dir() / "assets",
-            progress=lambda current, total, name: (
-                self.statusBar().showMessage(f"Downloading {name} ({current}/{total}) ..."),
-                QApplication.processEvents(),
-            ),
+            progress=self._report_download_progress,
             on_asset=self._on_asset_ready,
         )
         for team in self.project.teams:
@@ -992,7 +1004,11 @@ class MainWindow(QMainWindow):
 
 
 def run() -> int:
-    app = QApplication.instance() or QApplication([])
+    app = QApplication.instance()
+    if not isinstance(app, QApplication):
+        # QApplication.instance() is typed as QCoreApplication | None, which
+        # lacks setStyle; a fresh QApplication is always the concrete subtype.
+        app = QApplication([])
     app.setStyle("Fusion")
     app.setApplicationName("Genshin Thumbnail Studio")
     app.setOrganizationName("GenshinThumbnailStudio")
