@@ -17,6 +17,7 @@ dev = [
   "PyInstaller>=6.10,<7",
   "pytest>=8.2,<9",
   "basedpyright>=1.39,<2",
+  "ruff>=0.16,<0.17",
 ]
 
 [project.gui-scripts]
@@ -46,3 +47,10 @@ venv = ".venv"
 [[tool.basedpyright.executionEnvironments]]
 root = "tests"
 reportPrivateUsage = "none"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
