@@ -1,4 +1,4 @@
-from genshin_thumbnail_studio.models import Build, Placement, Project
+from genshin_thumbnail_studio.models import DEFAULT_ZOOM, Build, Placement, Project
 
 
 def test_build_round_trip() -> None:
@@ -97,6 +97,16 @@ def test_project_from_dict_v1_keeps_720p() -> None:
     del value["schemaVersion"]
     restored_missing_version = Project.from_dict(value)
     assert restored_missing_version.output_height == 720
+
+
+def test_blank_abyss_placements_default_to_full_zoom() -> None:
+    abyss = Project.blank("abyss")
+    assert all(member.zoom == 1.0 for team in abyss.teams for member in team)
+
+    stygian = Project.blank("stygian")
+    assert all(member.zoom == 1.18 for team in stygian.teams for member in team)
+
+    assert Placement().zoom == 1.0
 
 
 def test_abyss_shape() -> None:

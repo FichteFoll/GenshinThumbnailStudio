@@ -1106,15 +1106,19 @@ def test_flip_keeps_the_horizontal_drag_direction() -> None:
     art = two_tone_art()
     target = panel_target_size(compact=True)
 
+    # The drag has to stay inside the reachable offset range, or the renderer
+    # clamps it and the shift no longer matches the requested offset.
+    drag = 0.1
     shifts = {}
     for flip in (False, True):
         member = Placement(offset_y=0.0, flip=flip)
+        assert drag < max_offset(art.size, compact=True, zoom=member.zoom)[0]
         centered = panel_art(art, target, member, member.zoom)
-        member.offset_x = 0.2
+        member.offset_x = drag
         shifted = panel_art(art, target, member, member.zoom)
         shifts[flip] = _tone_boundary_x(shifted) - _tone_boundary_x(centered)
         assert shifts[flip] > 0, flip
-        assert abs(shifts[flip] - 0.2 * target[0]) <= 2, flip
+        assert abs(shifts[flip] - drag * target[0]) <= 2, flip
 
     assert abs(shifts[True] - shifts[False]) <= 2
 

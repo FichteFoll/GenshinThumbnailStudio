@@ -13,6 +13,10 @@ TEAM_COLORS = [
     ["#1fc7a8", "#83caff", "#ffc95d", "#ff726d"],
 ]
 
+# The starting zoom per mode, read by both Project.blank() and the GUI's
+# Reset button so the two cannot drift apart.
+DEFAULT_ZOOM: dict[Mode, float] = {"abyss": 1.0, "stygian": 1.18}
+
 
 @dataclass
 class Build:
@@ -58,7 +62,7 @@ class Placement:
     name: str = ""
     offset_x: float = 0.0
     offset_y: float = -0.02
-    zoom: float = 1.06
+    zoom: float = 1.0
     color: str = "#78d7ff"
     flip: bool = False
 
@@ -93,7 +97,7 @@ class Project:
     @classmethod
     def blank(cls, mode: Mode = "abyss", uid: str = "") -> "Project":
         team_count = 2 if mode == "abyss" else 3
-        zoom = 1.06 if mode == "abyss" else 1.18
+        zoom = DEFAULT_ZOOM[mode]
         teams = []
         for team_index in range(team_count):
             colors = TEAM_COLORS[team_index]
