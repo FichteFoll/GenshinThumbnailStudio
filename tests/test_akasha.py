@@ -2,7 +2,9 @@ import os
 import time
 import urllib.error
 from pathlib import Path
+from typing import Any
 
+import pytest
 from PIL import Image
 
 import genshin_thumbnail_studio.akasha as akasha_module
@@ -16,11 +18,18 @@ from genshin_thumbnail_studio.akasha import (
     refinement,
     weapon_rarity,
 )
-from genshin_thumbnail_studio.models import Build
+from genshin_thumbnail_studio.models import Asset, Build
 
 
-def raw_build(name: str, icon: str, costume_id=None, element=None, character_id=None, weapon_id=None) -> dict:
-    build = {
+def raw_build(
+    name: str,
+    icon: str,
+    costume_id: int | None = None,
+    element: str | None = None,
+    character_id: int | None = None,
+    weapon_id: int | None = None,
+) -> dict[str, Any]:
+    build: dict[str, Any] = {
         "_id": "build-id",
         "md5": "build-md5",
         "name": name,
@@ -144,7 +153,7 @@ def test_load_enka_rarities_distills_and_caches(tmp_path: Path) -> None:
     cache_path = tmp_path / "enka-rarities.json"
     calls: list[str] = []
 
-    def fake_fetch(url: str):
+    def fake_fetch(url: str) -> dict[str, Any]:
         calls.append(url)
         if "avatars" in url:
             return {
@@ -178,7 +187,7 @@ def test_load_enka_rarities_falls_back_to_stale_cache_on_error(tmp_path: Path) -
     old_time = time.time() - 8 * 24 * 60 * 60
     os.utime(cache_path, (old_time, old_time))
 
-    def failing_fetch(_url: str):
+    def failing_fetch(_url: str) -> dict[str, Any]:
         raise urllib.error.URLError("offline")
 
     characters, weapons = load_enka_rarities(cache_path, fetch=failing_fetch)
@@ -189,7 +198,7 @@ def test_load_enka_rarities_falls_back_to_stale_cache_on_error(tmp_path: Path) -
 def test_load_enka_rarities_falls_back_to_empty_maps_without_cache(tmp_path: Path) -> None:
     cache_path = tmp_path / "enka-rarities.json"
 
-    def failing_fetch(_url: str):
+    def failing_fetch(_url: str) -> dict[str, Any]:
         raise urllib.error.URLError("offline")
 
     characters, weapons = load_enka_rarities(cache_path, fetch=failing_fetch)
@@ -212,7 +221,7 @@ def make_build(name: str) -> Build:
     )
 
 
-def test_download_assets_calls_on_asset_per_build(tmp_path: Path, monkeypatch) -> None:
+def test_download_assets_calls_on_asset_per_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_download(url: str, destination: Path) -> None:
         if "weapon" in url:
             image = Image.new("RGBA", (32, 32), (0, 0, 0, 0))
@@ -226,7 +235,7 @@ def test_download_assets_calls_on_asset_per_build(tmp_path: Path, monkeypatch) -
     builds = [make_build("Alpha"), make_build("Beta")]
     received: list[tuple[str, str]] = []
 
-    def on_asset(key, asset) -> None:
+    def on_asset(key: str, asset: Asset) -> None:
         received.append((key, asset.build.name))
 
     assets = download_assets(builds, tmp_path, on_asset=on_asset)

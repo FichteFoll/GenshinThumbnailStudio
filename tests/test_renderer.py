@@ -2,8 +2,9 @@ import threading
 import time
 from dataclasses import replace
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
+import pytest
 from PIL import Image, ImageChops, ImageDraw
 
 from genshin_thumbnail_studio import renderer
@@ -40,6 +41,41 @@ from genshin_thumbnail_studio.renderer import (
 )
 
 
+def _rgb(image: Image.Image, xy: tuple[int, int]) -> tuple[int, int, int]:
+    """Pixel read for RGB images (e.g. the final composited preview), narrowed
+    past `Image.getpixel`'s `float | tuple[int, ...] | None` return type."""
+    pixel = image.getpixel(xy)
+    assert isinstance(pixel, tuple) and len(pixel) == 3
+    return (pixel[0], pixel[1], pixel[2])
+
+
+def _rgba(image: Image.Image, xy: tuple[int, int]) -> tuple[int, int, int, int]:
+    """Pixel read for RGBA images (art crops, panel backgrounds, badge tiles),
+    narrowed past `Image.getpixel`'s `float | tuple[int, ...] | None` return type."""
+    pixel = image.getpixel(xy)
+    assert isinstance(pixel, tuple) and len(pixel) == 4
+    return (pixel[0], pixel[1], pixel[2], pixel[3])
+
+
+def _gray(image: Image.Image, xy: tuple[int, int]) -> int:
+    """Pixel read for single-band images (an alpha channel or a coverage mask),
+    narrowed past `Image.getpixel`'s `float | tuple[int, ...] | None` return type."""
+    pixel = image.getpixel(xy)
+    assert isinstance(pixel, int)
+    return pixel
+
+
+def _render_cache(name: str) -> Any:
+    """Fetch one of renderer.py's private cache dicts by name.
+
+    Their declared type is `OrderedDict[tuple, Image.Image]`: a bare `tuple`
+    key that basedpyright treats as partially unknown until renderer.py's own
+    cleanup commit (tracked separately from this one). `getattr` reads it as
+    `Any` instead of leaking that `reportUnknownMemberType` into this file.
+    """
+    return getattr(renderer, name)
+
+
 class CompactLayout(NamedTuple):
     row_height: int
     step: float
@@ -69,7 +105,7 @@ def create_assets(
     elements: dict[str, str] | None = None,
     rarities: dict[str, tuple[int | None, int | None]] | None = None,
 ) -> dict[str, Asset]:
-    result = {}
+    result: dict[str, Asset] = {}
     for index, name in enumerate(names):
         art_path = directory / f"art-{index}.png"
         weapon_path = directory / f"weapon-{index}.png"
@@ -115,7 +151,7 @@ def test_panel_target_size_scales_with_mode_and_scale() -> None:
 def _marker_center_x(image: Image.Image) -> float:
     """Horizontal center of the red marker stripe in a crop's middle row."""
     row = image.height // 2
-    columns = [x for x in range(image.width) if image.getpixel((x, row))[0] > 200]
+    columns = [x for x in range(image.width) if _rgba(image, (x, row))[0] > 200]
     assert columns, "marker stripe not visible in the crop"
     return (columns[0] + columns[-1]) / 2
 
@@ -169,7 +205,7 @@ def test_vertical_max_offset_is_the_overscan_plus_half_the_zoom() -> None:
 def _marker_center_y(image: Image.Image) -> float:
     """Vertical center of the red marker stripe in a crop's middle column."""
     column = image.width // 2
-    rows = [y for y in range(image.height) if image.getpixel((column, y))[0] > 200]
+    rows = [y for y in range(image.height) if _rgba(image, (column, y))[0] > 200]
     assert rows, "marker stripe not visible in the crop"
     return (rows[0] + rows[-1]) / 2
 
@@ -184,7 +220,7 @@ def _horizontally_marked_source() -> Image.Image:
 
 
 def _row_alpha(image: Image.Image, y: int) -> set[int]:
-    return {image.getpixel((x, y))[3] for x in range(image.width)}
+    return {_rgba(image, (x, y))[3] for x in range(image.width)}
 
 
 def test_vertical_overscan_pans_past_the_art_edge() -> None:
@@ -259,7 +295,8 @@ def reference_cover_resize_offset(
     limit_y = abs(resized_h - target_h) / (2 * target_h) + PAN_OVERSCAN
     offset_x = min(limit_x, max(-limit_x, offset_x))
     offset_y = min(limit_y, max(-limit_y, offset_y))
-    resized = image.resize((resized_w, resized_h), Image.Resampling.LANCZOS)
+    # Pillow's `resize` stub loses precision on its `resample` overload here.
+    resized = image.resize((resized_w, resized_h), Image.Resampling.LANCZOS)  # pyright: ignore[reportUnknownMemberType]
     left = int(round((resized_w - target_w) / 2 - offset_x * target_w))
     top = int(round((resized_h - target_h) / 2 - offset_y * target_h))
     return resized.crop((left, top, left + target_w, top + target_h))
@@ -284,7 +321,13 @@ def test_cover_resize_offset_matches_resize_then_crop() -> None:
                     # Resampling the source region directly is not bit-exact
                     # against resizing everything up front, but on smooth
                     # content the two stay within a couple of levels.
-                    assert max(band.getextrema()[1] for band in difference.split()) <= 4, case
+                    # Pillow's `getextrema` stub returns a per-band-tuple union
+                    # for multi-band images, which it cannot rule out here even
+                    # though `.split()` always yields single-band images.
+                    assert (
+                        max(band.getextrema()[1] for band in difference.split())  # pyright: ignore[reportOperatorIssue]
+                        <= 4
+                    ), case
 
 
 def test_zoom_scales_both_art_axes_identically() -> None:
@@ -526,7 +569,7 @@ def test_preview_renders_placeholder_panel_for_missing_asset(tmp_path: Path) -> 
     local_point = (188, 180)
     canvas_point = (local_point[0] - slant, local_point[1])
 
-    assert preview.getpixel(canvas_point) == expected.getpixel(local_point)[:3]
+    assert _rgb(preview, canvas_point) == _rgba(expected, local_point)[:3]
 
     # A slot with a real asset still composites character art on top of its
     # background gradient, so its pixel must differ from a plain
@@ -534,7 +577,7 @@ def test_preview_renders_placeholder_panel_for_missing_asset(tmp_path: Path) -> 
     real_color = project.teams[0][1].color
     plain_background = panel_background(target, real_color, compact=True)
     real_canvas_point = (1 * 320 - slant + local_point[0], local_point[1])
-    assert preview.getpixel(real_canvas_point) != plain_background.getpixel(local_point)[:3]
+    assert _rgb(preview, real_canvas_point) != _rgba(plain_background, local_point)[:3]
 
 
 def test_leftmost_slot_is_not_shifted_by_its_negative_panel_origin(tmp_path: Path) -> None:
@@ -604,7 +647,7 @@ def test_panel_mask_slanted_edge_is_antialiased() -> None:
     for top, bottom in ((points[0], points[3]), (points[1], points[2])):
         for y in (60, 300):
             edge_x = top[0] + (bottom[0] - top[0]) * (y - top[1]) / (bottom[1] - top[1]) - origin_x
-            window = [alpha.getpixel((x, y)) for x in range(round(edge_x) - 2, round(edge_x) + 3)]
+            window = [_gray(alpha, (x, y)) for x in range(round(edge_x) - 2, round(edge_x) + 3)]
             assert any(0 < value < 255 for value in window), (top, y, window)
 
 
@@ -633,13 +676,13 @@ def test_slanted_card_edge_is_antialiased(tmp_path: Path) -> None:
     # one of them would not pass.
     for y in (60, 300):
         edge_x = top_x + (bottom_x - top_x) * (y - top_y) / (bottom_y - top_y)
-        run = [(x, preview.getpixel((x, y))) for x in range(round(edge_x) - 8, round(edge_x) + 9)]
+        run = [(x, _rgb(preview, (x, y))) for x in range(round(edge_x) - 8, round(edge_x) + 9)]
         outside = [x for x, pixel in run if pixel == background]
         inside = [x for x, pixel in run if pixel == border]
         assert outside and inside, (y, run)
         last_outside, first_inside = max(outside), min(inside)
         assert last_outside < first_inside, (y, run)
-        blended = [preview.getpixel((x, y)) for x in range(last_outside + 1, first_inside)]
+        blended = [_rgb(preview, (x, y)) for x in range(last_outside + 1, first_inside)]
         assert blended, (y, run)
         for pixel in blended:
             assert all(
@@ -691,7 +734,7 @@ def test_glow_shows_through_a_transparent_gap_in_the_character_art(tmp_path: Pat
     uncovered = [
         x
         for x in range(target[0])
-        if crop.getpixel((x, row))[3] == 0 and glow.getpixel((x, row))[3] == 255
+        if _rgba(crop, (x, row))[3] == 0 and _rgba(glow, (x, row))[3] == 255
     ]
     assert uncovered, "no pixel where the art is transparent but the glow is not"
     local_point = (uncovered[len(uncovered) // 2], row)
@@ -736,7 +779,7 @@ def test_glow_reaches_into_a_transparent_gap_at_the_default_zoom(tmp_path: Path)
     art = Image.open(assets[member.name.casefold()].art_path).convert("RGBA")
     crop = cover_resize_offset(art, target, member.offset_x, member.offset_y, member.zoom)
     row = target[1] // 2
-    gap = [x for x in range(target[0]) if crop.getpixel((x, row))[3] == 0]
+    gap = [x for x in range(target[0]) if _rgba(crop, (x, row))[3] == 0]
     assert gap, "no pixel where the character art is transparent"
 
     slant = panel_metrics(compact=True)[2]
@@ -861,12 +904,11 @@ def test_weapon_icon_visible_content_is_centered_in_the_circle_despite_source_pa
     circle_x0, circle_y0, circle_x1, circle_y1 = geometry.circle
     target = (255, 0, 255)
     tolerance = 10
-    xs = []
-    ys = []
+    xs: list[int] = []
+    ys: list[int] = []
     for y in range(circle_y0, circle_y1 + 1):
         for x in range(circle_x0, circle_x1 + 1):
-            pixel = preview.getpixel((x, y))
-            assert isinstance(pixel, tuple)
+            pixel = _rgb(preview, (x, y))
             if all(abs(pixel[channel] - target[channel]) <= tolerance for channel in range(3)):
                 xs.append(x)
                 ys.append(y)
@@ -887,7 +929,7 @@ def _has_partial_coverage(coverage: Image.Image, box: tuple[int, int, int, int])
     which is where the callers take their probe regions from."""
     x0, y0, x1, y1 = box
     return any(
-        0 < coverage.getpixel((x, y)) < 255
+        0 < _gray(coverage, (x, y)) < 255
         for y in range(max(0, y0), min(coverage.height, y1 + 1))
         for x in range(max(0, x0), min(coverage.width, x1 + 1))
     )
@@ -933,9 +975,9 @@ def test_badge_shape_edges_are_antialiased(tmp_path: Path) -> None:
     # covered pixels sit above and below that point.
     assert _has_partial_coverage(coverage, (circle_x0, circle_y0, circle_x0 + 2, circle_y1))
 
-    assert coverage.getpixel(((box_x0 + box_x1) // 2, (box_y0 + box_y1) // 2)) == 255
+    assert _gray(coverage, ((box_x0 + box_x1) // 2, (box_y0 + box_y1) // 2)) == 255
     # Above the box's top edge and left of the circle: no shape reaches here.
-    assert coverage.getpixel((box_x0, 0)) == 0
+    assert _gray(coverage, (box_x0, 0)) == 0
 
     # add_badges() blends the tile onto the card through this very coverage, so
     # a partially covered pixel must still hold the shape's own colour. A tile
@@ -945,21 +987,21 @@ def test_badge_shape_edges_are_antialiased(tmp_path: Path) -> None:
         (x, y)
         for y in range(circle_y0, circle_y0 + 4)
         for x in range(circle_x0, circle_x1 + 1)
-        if 0 < coverage.getpixel((x, y)) < 255
+        if 0 < _gray(coverage, (x, y)) < 255
     ]
     assert partial_ring_pixels
     ring_color = hex_to_rgba(ELEMENT_COLORS["pyro"], 240)
-    assert all(tile.getpixel(pixel) == ring_color for pixel in partial_ring_pixels)
+    assert all(_rgba(tile, pixel) == ring_color for pixel in partial_ring_pixels)
 
 
-def _patch_counting_open(monkeypatch) -> list[str]:
+def _patch_counting_open(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Wrap PIL's Image.open with a call-recording proxy, so a test can
     assert on which paths were (re)opened without mocking away the actual
     decoding (the returned image is still real, from the original open)."""
     opened: list[str] = []
     real_open = Image.open
 
-    def counting_open(fp, *args, **kwargs):
+    def counting_open(fp: Any, *args: Any, **kwargs: Any) -> Image.Image:
         opened.append(str(fp))
         return real_open(fp, *args, **kwargs)
 
@@ -967,7 +1009,7 @@ def _patch_counting_open(monkeypatch) -> list[str]:
     return opened
 
 
-def _patch_counting_panels(monkeypatch) -> list[str]:
+def _patch_counting_panels(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """Wrap the panel builders with call-recording proxies, so a test can
     assert how many panels were actually composited rather than served from
     the panel cache. Image.open counts cannot show this, since the art and
@@ -979,11 +1021,11 @@ def _patch_counting_panels(monkeypatch) -> list[str]:
     real_make_panel = renderer.make_panel
     real_placeholder_panel = renderer.placeholder_panel
 
-    def counting_make_panel(*args, **kwargs):
+    def counting_make_panel(*args: Any, **kwargs: Any) -> Image.Image:
         built.append("make_panel")
         return real_make_panel(*args, **kwargs)
 
-    def counting_placeholder_panel(*args, **kwargs):
+    def counting_placeholder_panel(*args: Any, **kwargs: Any) -> Image.Image:
         built.append("placeholder_panel")
         return real_placeholder_panel(*args, **kwargs)
 
@@ -992,7 +1034,7 @@ def _patch_counting_panels(monkeypatch) -> list[str]:
     return built
 
 
-def test_repeated_render_reuses_panel_cache(tmp_path, monkeypatch) -> None:
+def test_repeated_render_reuses_panel_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     clear_render_cache()
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
@@ -1014,7 +1056,7 @@ def test_repeated_render_reuses_panel_cache(tmp_path, monkeypatch) -> None:
     assert second.tobytes() == first.tobytes()
 
 
-def test_changing_one_placement_only_recomputes_that_slot(tmp_path, monkeypatch) -> None:
+def test_changing_one_placement_only_recomputes_that_slot(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     clear_render_cache()
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
@@ -1038,7 +1080,7 @@ def test_changing_one_placement_only_recomputes_that_slot(tmp_path, monkeypatch)
     assert built == ["make_panel"]
 
 
-def test_clear_render_cache_forces_full_recompute(tmp_path, monkeypatch) -> None:
+def test_clear_render_cache_forces_full_recompute(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     clear_render_cache()
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
@@ -1063,16 +1105,16 @@ def test_clear_render_cache_empties_the_render_caches(tmp_path: Path) -> None:
     assets = create_assets(tmp_path, names)
 
     render_preview(project, assets)
-    assert renderer._art_cache
-    assert renderer._work_cache  # 1200x900 art downscales for a preview panel
-    assert renderer._mask_cache
-    assert renderer._border_cache
+    assert _render_cache("_art_cache")
+    assert _render_cache("_work_cache")  # 1200x900 art downscales for a preview panel
+    assert _render_cache("_mask_cache")
+    assert _render_cache("_border_cache")
 
     clear_render_cache()
-    assert not renderer._art_cache
-    assert not renderer._work_cache
-    assert not renderer._mask_cache
-    assert not renderer._border_cache
+    assert not _render_cache("_art_cache")
+    assert not _render_cache("_work_cache")
+    assert not _render_cache("_mask_cache")
+    assert not _render_cache("_border_cache")
 
 
 def test_export_project_clears_the_render_caches_when_done(tmp_path: Path) -> None:
@@ -1083,22 +1125,22 @@ def test_export_project_clears_the_render_caches_when_done(tmp_path: Path) -> No
     assets = create_assets(tmp_path, names)
 
     render_preview(project, assets)
-    assert renderer._panel_cache
-    assert renderer._weapon_icon_cache
-    assert renderer._art_cache
-    assert renderer._work_cache
-    assert renderer._mask_cache
-    assert renderer._border_cache
-    assert renderer._badge_cache
+    assert _render_cache("_panel_cache")
+    assert _render_cache("_weapon_icon_cache")
+    assert _render_cache("_art_cache")
+    assert _render_cache("_work_cache")
+    assert _render_cache("_mask_cache")
+    assert _render_cache("_border_cache")
+    assert _render_cache("_badge_cache")
 
     export_project(project, assets, tmp_path / "out")
-    assert not renderer._panel_cache
-    assert not renderer._weapon_icon_cache
-    assert not renderer._art_cache
-    assert not renderer._work_cache
-    assert not renderer._mask_cache
-    assert not renderer._border_cache
-    assert not renderer._badge_cache
+    assert not _render_cache("_panel_cache")
+    assert not _render_cache("_weapon_icon_cache")
+    assert not _render_cache("_art_cache")
+    assert not _render_cache("_work_cache")
+    assert not _render_cache("_mask_cache")
+    assert not _render_cache("_border_cache")
+    assert not _render_cache("_badge_cache")
 
 
 def test_slots_with_identical_badge_state_share_one_cached_tile(tmp_path: Path) -> None:
@@ -1118,10 +1160,10 @@ def test_slots_with_identical_badge_state_share_one_cached_tile(tmp_path: Path) 
 
     render_preview(project, assets)
 
-    assert len(renderer._badge_cache) == 1
+    assert len(_render_cache("_badge_cache")) == 1
 
     clear_render_cache()
-    assert not renderer._badge_cache
+    assert not _render_cache("_badge_cache")
 
 
 def test_badge_cache_key_separates_builds_differing_only_in_c_and_r(tmp_path: Path) -> None:
@@ -1160,7 +1202,7 @@ def test_badge_cache_key_separates_builds_differing_only_in_c_and_r(tmp_path: Pa
     assert ImageChops.difference(baseline, other_refinement).getbbox() is not None
 
 
-def test_add_badges_serializes_font_use_across_threads(tmp_path: Path, monkeypatch) -> None:
+def test_add_badges_serializes_font_use_across_threads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The FreeTypeFont find_font() memoizes is shared by the preview worker
     thread and the exporting GUI thread, and Pillow does not document measuring
     or drawing with one font from two threads at once as safe. add_badges() must
@@ -1286,14 +1328,14 @@ def test_flip_mirrors_the_panel_art(tmp_path: Path) -> None:
 
     clear_render_cache()
     unflipped = render_preview(project, assets)
-    assert _reddish(unflipped.getpixel(left_probe))
-    assert not _reddish(unflipped.getpixel(right_probe))
+    assert _reddish(_rgb(unflipped, left_probe))
+    assert not _reddish(_rgb(unflipped, right_probe))
 
     member.flip = True
     clear_render_cache()
     flipped = render_preview(project, assets)
-    assert not _reddish(flipped.getpixel(left_probe))
-    assert _reddish(flipped.getpixel(right_probe))
+    assert not _reddish(_rgb(flipped, left_probe))
+    assert _reddish(_rgb(flipped, right_probe))
 
 
 def _tone_boundary_x(crop: Image.Image) -> float:
@@ -1303,7 +1345,7 @@ def _tone_boundary_x(crop: Image.Image) -> float:
     also changes as a region is clipped at a panel edge.
     """
     row = crop.height // 2
-    pixels = [crop.getpixel((x, row)) for x in range(crop.width)]
+    pixels = [_rgba(crop, (x, row)) for x in range(crop.width)]
     reds = [x for x, pixel in enumerate(pixels) if pixel[3] and pixel[0] > pixel[2]]
     blues = [x for x, pixel in enumerate(pixels) if pixel[3] and pixel[2] > pixel[0]]
     assert reds and blues, "both tones must be visible in the crop"
@@ -1321,7 +1363,7 @@ def test_flip_keeps_the_horizontal_drag_direction() -> None:
     # The drag has to stay inside the reachable offset range, or the renderer
     # clamps it and the shift no longer matches the requested offset.
     drag = 0.1
-    shifts = {}
+    shifts: dict[bool, float] = {}
     for flip in (False, True):
         member = Placement(offset_y=0.0, flip=flip)
         assert drag < max_offset(art.size, compact=True, zoom=member.zoom)[0]

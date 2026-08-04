@@ -1,4 +1,4 @@
-from genshin_thumbnail_studio.models import DEFAULT_ZOOM, Build, Placement, Project
+from genshin_thumbnail_studio.models import Build, Placement, Project
 
 
 def test_build_round_trip() -> None:
