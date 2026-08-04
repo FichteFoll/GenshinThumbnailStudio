@@ -98,7 +98,7 @@ class Project:
     def blank(cls, mode: Mode = "abyss", uid: str = "") -> "Project":
         team_count = 2 if mode == "abyss" else 3
         zoom = DEFAULT_ZOOM[mode]
-        teams = []
+        teams: list[list[Placement]] = []
         for team_index in range(team_count):
             colors = TEAM_COLORS[team_index]
             teams.append(
@@ -125,8 +125,13 @@ class Project:
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "Project":
-        mode = str(value.get("mode", "abyss")).casefold()
-        if mode not in {"abyss", "stygian"}:
+        raw_mode = str(value.get("mode", "abyss")).casefold()
+        mode: Mode
+        if raw_mode == "abyss":
+            mode = "abyss"
+        elif raw_mode == "stygian":
+            mode = "stygian"
+        else:
             raise ValueError("Project mode must be abyss or stygian.")
         schema_version = int(value.get("schemaVersion", 1))
         if schema_version <= 1:
