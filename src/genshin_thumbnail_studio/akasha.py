@@ -9,7 +9,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, cast
 
 from PIL import Image
 from PySide6.QtCore import QEventLoop, QTimer, QUrl
@@ -39,6 +39,19 @@ QUALITY_TYPE_RARITY = {
     "QUALITY_GREEN": 2,
     "QUALITY_WHITE": 1,
 }
+
+
+def _as_mapping(value: object) -> dict[str, Any] | None:
+    """Narrow an `Any`-typed JSON value to a plain dict, or `None` if it isn't one.
+
+    A plain `isinstance(value, dict)` check narrows to `dict[Unknown, Unknown]`
+    even when the caller re-annotates the result, since pyright's assignment
+    narrowing prefers the isinstance-derived type over a wider declared one;
+    the explicit `cast` here is what actually produces a fully known `dict[str, Any]`.
+    """
+    if not isinstance(value, dict):
+        return None
+    return cast("dict[str, Any]", value)
 
 
 class AkashaError(RuntimeError):
@@ -74,9 +87,12 @@ def profile_age_minutes(payload: dict[str, Any]) -> tuple[float, datetime]:
 
 
 def refinement(build: dict[str, Any]) -> int:
-    raw = build.get("weapon", {}).get("weaponInfo", {}).get("refinementLevel", 0)
-    if isinstance(raw, dict):
-        raw = raw.get("value", 0)
+    weapon = _as_mapping(build.get("weapon")) or {}
+    weapon_info = _as_mapping(weapon.get("weaponInfo")) or {}
+    raw = weapon_info.get("refinementLevel", 0)
+    raw_as_map = _as_mapping(raw)
+    if raw_as_map is not None:
+        raw = raw_as_map.get("value", 0)
     try:
         return int(raw) + 1
     except (TypeError, ValueError):
@@ -95,28 +111,25 @@ def exact_art_url(build: dict[str, Any]) -> str:
 
 
 def weapon_url(build: dict[str, Any]) -> str:
-    weapon = build.get("weapon") or {}
-    url = weapon.get("icon") or (weapon.get("flat") or {}).get("icon")
+    weapon = _as_mapping(build.get("weapon")) or {}
+    flat = _as_mapping(weapon.get("flat")) or {}
+    url = weapon.get("icon") or flat.get("icon")
     if not url:
         raise AkashaError(f"Weapon icon is missing for {build.get('name', 'character')}.")
     return str(url)
 
 
 def character_element(raw: dict[str, Any]) -> str | None:
-    if not isinstance(raw, dict):
-        return None
-    metadata = raw.get("characterMetadata")
-    if not isinstance(metadata, dict):
+    metadata = _as_mapping(raw.get("characterMetadata"))
+    if metadata is None:
         return None
     element = metadata.get("element")
     return element if element in KNOWN_ELEMENTS else None
 
 
 def weapon_rarity(raw: dict[str, Any], rarity_map: dict[str, int] | None = None) -> int | None:
-    if not isinstance(raw, dict):
-        return None
-    weapon = raw.get("weapon")
-    if not isinstance(weapon, dict):
+    weapon = _as_mapping(raw.get("weapon"))
+    if weapon is None:
         return None
     weapon_id = weapon.get("weaponId")
     if weapon_id is None:
@@ -135,7 +148,7 @@ def weapon_rarity(raw: dict[str, Any], rarity_map: dict[str, int] | None = None)
 
 
 def character_rarity(raw: dict[str, Any], quality_map: dict[str, int] | None = None) -> int | None:
-    if not quality_map or not isinstance(raw, dict):
+    if not quality_map:
         return None
     character_id = raw.get("characterId")
     if character_id is None:
@@ -152,25 +165,32 @@ def _fetch_enka_json(url: str) -> Any:
 
 def _distill_avatar_rarities(payload: Any) -> dict[str, int]:
     result: dict[str, int] = {}
-    if not isinstance(payload, dict):
+    payload_map = _as_mapping(payload)
+    if payload_map is None:
         return result
-    for character_id, entry in payload.items():
-        if isinstance(entry, dict):
-            rarity = QUALITY_TYPE_RARITY.get(entry.get("QualityType"))
-            if rarity is not None:
-                result[str(character_id)] = rarity
+    for character_id, entry in payload_map.items():
+        entry_map = _as_mapping(entry)
+        if entry_map is None:
+            continue
+        quality_type = entry_map.get("QualityType")
+        rarity = QUALITY_TYPE_RARITY.get(quality_type) if isinstance(quality_type, str) else None
+        if rarity is not None:
+            result[str(character_id)] = rarity
     return result
 
 
 def _distill_weapon_rarities(payload: Any) -> dict[str, int]:
     result: dict[str, int] = {}
-    if not isinstance(payload, dict):
+    payload_map = _as_mapping(payload)
+    if payload_map is None:
         return result
-    for weapon_id, entry in payload.items():
-        if isinstance(entry, dict):
-            rarity = entry.get("Rarity")
-            if isinstance(rarity, int) and 1 <= rarity <= 5:
-                result[str(weapon_id)] = rarity
+    for weapon_id, entry in payload_map.items():
+        entry_map = _as_mapping(entry)
+        if entry_map is None:
+            continue
+        rarity = entry_map.get("Rarity")
+        if isinstance(rarity, int) and 1 <= rarity <= 5:
+            result[str(weapon_id)] = rarity
     return result
 
 
@@ -214,22 +234,26 @@ def parse_builds(
     character_rarity_map: dict[str, int] | None = None,
     weapon_rarity_map: dict[str, int] | None = None,
 ) -> list[Build]:
-    raw_builds = payload.get("data")
-    if not isinstance(raw_builds, list):
+    data = payload.get("data")
+    if not isinstance(data, list):
         raise AkashaError("Akasha did not return a build list.")
+    raw_builds = cast("list[Any]", data)
     newest: dict[str, dict[str, Any]] = {}
     for raw in raw_builds:
-        name = str(raw.get("name", "")).strip()
+        raw_dict = _as_mapping(raw)
+        if raw_dict is None:
+            continue
+        name = str(raw_dict.get("name", "")).strip()
         if not name:
             continue
         key = name.casefold()
         old = newest.get(key)
-        if old is None or int(raw.get("lastBuildUpdate") or 0) > int(old.get("lastBuildUpdate") or 0):
-            newest[key] = raw
+        if old is None or int(raw_dict.get("lastBuildUpdate") or 0) > int(old.get("lastBuildUpdate") or 0):
+            newest[key] = raw_dict
 
-    result = []
+    result: list[Build] = []
     for raw in newest.values():
-        weapon = raw.get("weapon") or {}
+        weapon = _as_mapping(raw.get("weapon")) or {}
         costume = raw.get("costumeId")
         result.append(
             Build(
@@ -296,7 +320,7 @@ class AkashaWebClient:
 
     def _plain_text(self, timeout_ms: int = 30_000) -> str:
         loop = QEventLoop()
-        result = {"value": None}
+        result: dict[str, str | None] = {"value": None}
         timer = QTimer()
         timer.setSingleShot(True)
         timer.timeout.connect(loop.quit)
@@ -340,11 +364,12 @@ class AkashaWebClient:
         except json.JSONDecodeError as error:
             title = self.page.title()
             raise AkashaError(f"Akasha returned no JSON ({title or 'unknown page'}).") from error
-        if not isinstance(payload, dict):
+        payload_dict = _as_mapping(payload)
+        if payload_dict is None:
             raise AkashaError("Akasha returned an unexpected response.")
-        if payload.get("error"):
-            raise AkashaError(str(payload["error"]))
-        return payload
+        if payload_dict.get("error"):
+            raise AkashaError(str(payload_dict["error"]))
+        return payload_dict
 
     def load_profile(self, uid: str, max_age_minutes: int = 60, allow_stale: bool = False) -> tuple[list[Build], float, datetime]:
         if not re.fullmatch(r"\d{6,12}", uid):
