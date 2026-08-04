@@ -4,7 +4,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-
 Mode = Literal["abyss", "stygian"]
 
 TEAM_COLORS = [
@@ -39,7 +38,7 @@ class Build:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "Build":
+    def from_dict(cls, value: dict[str, Any]) -> Build:
         return cls(**value)
 
 
@@ -67,7 +66,7 @@ class Placement:
     flip: bool = False
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "Placement":
+    def from_dict(cls, value: dict[str, Any]) -> Placement:
         """Read the known keys, ignoring unknown ones, so that a legacy payload
         loads with default framing instead of raising."""
         defaults = cls()
@@ -95,7 +94,7 @@ class Project:
         return (self.output_height * 16 // 9, self.output_height)
 
     @classmethod
-    def blank(cls, mode: Mode = "abyss", uid: str = "") -> "Project":
+    def blank(cls, mode: Mode = "abyss", uid: str = "") -> Project:
         team_count = 2 if mode == "abyss" else 3
         zoom = DEFAULT_ZOOM[mode]
         teams: list[list[Placement]] = []
@@ -124,7 +123,7 @@ class Project:
         }
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "Project":
+    def from_dict(cls, value: dict[str, Any]) -> Project:
         raw_mode = str(value.get("mode", "abyss")).casefold()
         mode: Mode
         if raw_mode == "abyss":
@@ -134,12 +133,9 @@ class Project:
         else:
             raise ValueError("Project mode must be abyss or stygian.")
         schema_version = int(value.get("schemaVersion", 1))
-        if schema_version <= 1:
-            # Version 1 files predate the setting and were rendered at the
-            # then-hardcoded 720p, so keep their output size unchanged.
-            output_height = 720
-        else:
-            output_height = int(value.get("outputHeight", 1080))
+        # Version 1 files predate the setting and were rendered at the
+        # then-hardcoded 720p, so keep their output size unchanged.
+        output_height = 720 if schema_version <= 1 else int(value.get("outputHeight", 1080))
         project = cls(
             mode=mode,
             uid=str(value.get("uid", "")),

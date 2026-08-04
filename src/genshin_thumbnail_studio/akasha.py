@@ -7,16 +7,16 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 from PIL import Image
 from PySide6.QtCore import QEventLoop, QTimer, QUrl
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 
 from .models import Asset, Build
-
 
 API_ROOT = "https://akasha.cv/api"
 ENKA_ROOT = "https://enka.network/ui"
@@ -371,7 +371,9 @@ class AkashaWebClient:
             raise AkashaError(str(payload_dict["error"]))
         return payload_dict
 
-    def load_profile(self, uid: str, max_age_minutes: int = 60, allow_stale: bool = False) -> tuple[list[Build], float, datetime]:
+    def load_profile(
+        self, uid: str, max_age_minutes: int = 60, allow_stale: bool = False
+    ) -> tuple[list[Build], float, datetime]:
         if not re.fullmatch(r"\d{6,12}", uid):
             raise AkashaError("UID must contain 6 to 12 digits.")
         user = self.json(f"{API_ROOT}/user/{uid}")
@@ -396,7 +398,9 @@ class AkashaWebClient:
         builds = parse_builds(self.json(f"{API_ROOT}/builds/?{query}"), character_rarity_map, weapon_rarity_map)
         return builds, age, last
 
-    def refresh_profile(self, uid: str, timeout_seconds: int = 90, progress: Callable[[str], None] | None = None) -> bool:
+    def refresh_profile(
+        self, uid: str, timeout_seconds: int = 90, progress: Callable[[str], None] | None = None
+    ) -> bool:
         before = self.json(f"{API_ROOT}/user/{uid}")
         _, old_time = profile_age_minutes(before)
         self._wait_load(f"https://akasha.cv/profile/{uid}")
@@ -405,7 +409,8 @@ class AkashaWebClient:
         while time.monotonic() < deadline and not clicked:
             clicked = bool(
                 self.run_javascript(
-                    "(() => { const e=document.querySelector('[title=\"Refresh builds\"]'); if(!e) return false; e.click(); return true; })()"
+                    "(() => { const e=document.querySelector('[title=\"Refresh builds\"]'); "
+                    "if(!e) return false; e.click(); return true; })()"
                 )
             )
             if not clicked:

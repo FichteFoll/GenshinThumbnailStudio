@@ -16,6 +16,7 @@ uv sync --extra dev               # install dev deps (pytest, PyInstaller)
 uv run pytest                     # run the test suite
 uv run pytest tests/test_renderer.py::test_name   # run a single test
 uv run basedpyright               # strict type check
+uv run ruff check                 # lint the source and tests
 ```
 
 The `dev` extra also carries `basedpyright` (configured in `pyproject.toml`'s `[tool.basedpyright]`, strict mode).

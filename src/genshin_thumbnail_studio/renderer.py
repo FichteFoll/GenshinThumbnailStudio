@@ -5,14 +5,14 @@ import functools
 import math
 import re
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, TypeAlias, TypeVar
+from typing import TypeAlias, TypeVar
 
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
 from .models import Asset, Placement, Project
-
 
 BASE_W = 1280
 BASE_H = 720
@@ -241,8 +241,8 @@ def cover_resize_offset(
     limit_x, limit_y = _offset_limits((resized_w, resized_h), size)
     offset_x = min(limit_x, max(-limit_x, offset_x))
     offset_y = min(limit_y, max(-limit_y, offset_y))
-    left = int(round((resized_w - target_w) / 2 - offset_x * target_w))
-    top = int(round((resized_h - target_h) / 2 - offset_y * target_h))
+    left = round((resized_w - target_w) / 2 - offset_x * target_w)
+    top = round((resized_h - target_h) / 2 - offset_y * target_h)
 
     # Resampling only the crop window's source region is far cheaper than
     # scaling the whole image and throwing most of it away. The window is
@@ -538,7 +538,7 @@ def panel_origin(index: int, row: int, row_height: int, step: float, slant: int)
     """Where a panel-sized layer sits on the canvas. Slot 0's x is negative,
     because the slant makes the panel overhang the canvas on the left (and
     slot 3's makes it overhang on the right)."""
-    return int(round(index * step - slant)), row * row_height
+    return round(index * step - slant), row * row_height
 
 
 def apply_panel_mask(
@@ -984,7 +984,7 @@ def add_badges(
                 if not member.name or member.name.casefold() not in assets:
                     continue
                 asset = assets[member.name.casefold()]
-                center = int(round(index * step + step / 2))
+                center = round(index * step + step / 2)
                 top_y = row * row_height + row_height - (68 if compact else 107) * scale
                 text = f"C{asset.build.constellation}R{asset.build.refinement}"
                 geometry = badge_geometry(draw, text, font, center, top_y, scale, compact)
