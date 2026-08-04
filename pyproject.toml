@@ -16,6 +16,7 @@ dependencies = [
 dev = [
   "PyInstaller>=6.10,<7",
   "pytest>=8.2,<9",
+  "basedpyright>=1.39,<2",
 ]
 
 [project.gui-scripts]
@@ -27,6 +28,31 @@ package-dir = {"" = "src"}
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+genshin_thumbnail_studio = ["py.typed"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.basedpyright]
+include = ["src", "tests", "launch.py"]
+typeCheckingMode = "strict"
+pythonVersion = "3.10"
+venvPath = "."
+venv = ".venv"
+# Cleaned up module by module; every entry is removed again by the end
+# of the basedpyright adoption.
+ignore = [
+  "src/genshin_thumbnail_studio/akasha.py",
+  "src/genshin_thumbnail_studio/gui.py",
+  "src/genshin_thumbnail_studio/models.py",
+  "src/genshin_thumbnail_studio/renderer.py",
+  "src/genshin_thumbnail_studio/storage.py",
+  "tests",
+]
+
+# The GUI smoke tests deliberately inspect private widget state.
+[[tool.basedpyright.executionEnvironments]]
+root = "tests"
+reportPrivateUsage = "none"
