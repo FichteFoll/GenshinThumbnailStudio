@@ -17,6 +17,8 @@ from genshin_thumbnail_studio.renderer import (
     STANDARD_ART_SIZE,
     apply_panel_mask,
     badge_geometry,
+    badge_tile,
+    badge_tile_origin,
     clear_render_cache,
     cover_resize_offset,
     export_project,
@@ -741,6 +743,77 @@ def test_weapon_circle_outline_uses_element_color(tmp_path: Path) -> None:
     # The outline was plain white before; make sure it no longer is, so this
     # test fails if the element color stops being applied.
     assert not _color_present_in_box(preview, ring, "#ffffff", tolerance=12)
+
+
+def _has_partial_coverage(coverage: Image.Image, box: tuple[int, int, int, int]) -> bool:
+    """Whether any pixel in the inclusive `box` is only partially covered,
+    i.e. antialiased. The box is inclusive to match Pillow's shape coordinates,
+    which is where the callers take their probe regions from."""
+    x0, y0, x1, y1 = box
+    return any(
+        0 < coverage.getpixel((x, y)) < 255
+        for y in range(max(0, y0), min(coverage.height, y1 + 1))
+        for x in range(max(0, x0), min(coverage.width, x1 + 1))
+    )
+
+
+def test_badge_shape_edges_are_antialiased(tmp_path: Path) -> None:
+    names = ["Character 0"]
+    assets = create_assets(tmp_path, names, elements={names[0]: "Pyro"})
+    asset = assets[names[0].casefold()]
+
+    # Same leftmost-slot geometry as the badge tests above.
+    scale = 1
+    compact = True
+    row_height, step, *_ = compact_layout(scale)
+    font = find_font((38 if compact else 54) * scale)
+    draw = ImageDraw.Draw(Image.new("RGBA", (1280, 720), (0, 0, 0, 0)))
+    center = int(round(0 * step + step / 2))
+    top_y = 0 * row_height + row_height - (68 if compact else 107) * scale
+    text = f"C{asset.build.constellation}R{asset.build.refinement}"
+    geometry = badge_geometry(draw, text, font, center_x=center, top_y=top_y, scale=scale, compact=compact)
+
+    tile, coverage = badge_tile(geometry, asset, ELEMENT_COLORS["pyro"], font, scale, compact)
+
+    origin_x, origin_y = badge_tile_origin(geometry)
+    box_x0, box_y0, box_x1, box_y1 = (
+        geometry.box[0] - origin_x,
+        geometry.box[1] - origin_y,
+        geometry.box[2] - origin_x,
+        geometry.box[3] - origin_y,
+    )
+    circle_x0, circle_y0, circle_x1, circle_y1 = (
+        geometry.circle[0] - origin_x,
+        geometry.circle[1] - origin_y,
+        geometry.circle[2] - origin_x,
+        geometry.circle[3] - origin_y,
+    )
+    corner_radius = 14 * scale
+
+    assert _has_partial_coverage(
+        coverage, (box_x0, box_y0, box_x0 + corner_radius, box_y0 + corner_radius)
+    )
+    # The circle's left edge is vertical at its middle, so the partially
+    # covered pixels sit above and below that point.
+    assert _has_partial_coverage(coverage, (circle_x0, circle_y0, circle_x0 + 2, circle_y1))
+
+    assert coverage.getpixel(((box_x0 + box_x1) // 2, (box_y0 + box_y1) // 2)) == 255
+    # Above the box's top edge and left of the circle: no shape reaches here.
+    assert coverage.getpixel((box_x0, 0)) == 0
+
+    # add_badges() blends the tile onto the card through this very coverage, so
+    # a partially covered pixel must still hold the shape's own colour. A tile
+    # scaled by the coverage as well would fade every antialiased edge toward
+    # black instead of into the card art.
+    partial_ring_pixels = [
+        (x, y)
+        for y in range(circle_y0, circle_y0 + 4)
+        for x in range(circle_x0, circle_x1 + 1)
+        if 0 < coverage.getpixel((x, y)) < 255
+    ]
+    assert partial_ring_pixels
+    ring_color = hex_to_rgba(ELEMENT_COLORS["pyro"], 240)
+    assert all(tile.getpixel(pixel) == ring_color for pixel in partial_ring_pixels)
 
 
 def _patch_counting_open(monkeypatch) -> list[str]:
