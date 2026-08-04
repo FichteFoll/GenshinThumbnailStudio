@@ -912,6 +912,11 @@ def badge_tile(
     icon = _cache_get(_weapon_icon_cache, icon_key)
     if icon is None:
         icon = Image.open(asset.weapon_path).convert("RGBA")
+        # Enka weapon PNGs can pad their visible art asymmetrically on the canvas,
+        # so center on the art's own alpha bounding box, not the canvas it ships in.
+        alpha_bbox = icon.getbbox()
+        if alpha_bbox is not None:
+            icon = icon.crop(alpha_bbox)
         icon.thumbnail((icon_d, icon_d), Image.Resampling.LANCZOS)
         _cache_put(_weapon_icon_cache, icon_key, icon, _WEAPON_ICON_CACHE_MAX)
     circle_d = circle[2] - circle[0]
