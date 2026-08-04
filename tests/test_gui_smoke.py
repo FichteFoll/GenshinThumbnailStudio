@@ -1,4 +1,5 @@
 import gc
+import itertools
 import os
 import time
 
@@ -7,7 +8,7 @@ os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--no-sandbox")
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from PIL import Image, ImageDraw
@@ -74,7 +75,7 @@ class StubMessageBox:
 
     ButtonRole = QMessageBox.ButtonRole
     StandardButton = QMessageBox.StandardButton
-    instances: list["StubMessageBox"] = []
+    instances: ClassVar[list["StubMessageBox"]] = []
 
     def __init__(self, parent: object = None) -> None:
         self.title = ""
@@ -213,7 +214,9 @@ def test_open_project_without_cache_shows_hint(tmp_path: Path, monkeypatch: pyte
     app.processEvents()
 
 
-def test_closing_window_does_not_warn_about_webengine_profile_teardown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]) -> None:
+def test_closing_window_does_not_warn_about_webengine_profile_teardown(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capfd: pytest.CaptureFixture[str]
+) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = _qapp()
     window = MainWindow()
@@ -279,7 +282,7 @@ def _create_test_assets(directory: Path, names: list[str]) -> dict[str, Asset]:
 
 def _fill_window_teams(window: MainWindow, names: list[str]) -> None:
     members = [member for team in window.project.teams for member in team]
-    for member, name in zip(members, names):
+    for member, name in zip(members, names, strict=False):
         member.name = name
 
 
@@ -353,7 +356,9 @@ def test_dispatch_render_end_to_end_sets_preview_pixmap(tmp_path: Path, monkeypa
     app.processEvents()
 
 
-def test_on_asset_ready_populates_incrementally_and_schedules_render(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_on_asset_ready_populates_incrementally_and_schedules_render(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = _qapp()
     window = MainWindow()
@@ -376,7 +381,9 @@ def test_on_asset_ready_populates_incrementally_and_schedules_render(tmp_path: P
     app.processEvents()
 
 
-def test_schedule_render_throttles_instead_of_restarting_the_timer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_schedule_render_throttles_instead_of_restarting_the_timer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = _qapp()
     window = MainWindow()
@@ -397,7 +404,7 @@ def test_schedule_render_throttles_instead_of_restarting_the_timer(tmp_path: Pat
         assert window._render_timer.isActive()
         remaining.append(window._render_timer.remainingTime())
 
-    assert all(later <= earlier for earlier, later in zip(remaining, remaining[1:])), remaining
+    assert all(later <= earlier for earlier, later in itertools.pairwise(remaining)), remaining
     assert remaining[-1] < remaining[0], remaining
 
     window.close()
@@ -467,7 +474,9 @@ def _prepare_export_window(window: MainWindow, tmp_path: Path, names: list[str])
     window.assets = assets
 
 
-def test_export_abyss_writes_the_file_chosen_in_the_save_dialog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_export_abyss_writes_the_file_chosen_in_the_save_dialog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = _qapp()
     window = MainWindow()
@@ -507,7 +516,7 @@ def test_export_stygian_still_asks_for_a_folder(tmp_path: Path, monkeypatch: pyt
     window = MainWindow()
     # Switching the mode replaces window.project, so fill the teams afterwards.
     window.stygian_radio.setChecked(True)
-    names = TEAM_NAMES + ["Xingqiu", "Ganyu", "Raiden Shogun", "Yelan"]
+    names = [*TEAM_NAMES, "Xingqiu", "Ganyu", "Raiden Shogun", "Yelan"]
     _prepare_export_window(window, tmp_path, names)
     window.output_name.setText("bosses")
 
@@ -591,7 +600,9 @@ def test_export_defaults_to_the_saved_project_folder(tmp_path: Path, monkeypatch
     app.processEvents()
 
 
-def test_offset_sliders_are_signed_and_span_the_reachable_range(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_offset_sliders_are_signed_and_span_the_reachable_range(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = _qapp()
     window = MainWindow()
@@ -639,7 +650,9 @@ def _window_with_assets(tmp_path: Path, names: list[str]) -> MainWindow:
 OFFSET_TOLERANCE = 0.001
 
 
-def test_drag_moves_the_offsets_by_one_canvas_pixel_per_mouse_pixel(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_drag_moves_the_offsets_by_one_canvas_pixel_per_mouse_pixel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = _qapp()
     window = _window_with_assets(tmp_path, TEAM_NAMES)
