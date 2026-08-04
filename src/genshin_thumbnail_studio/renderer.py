@@ -70,6 +70,24 @@ GLOW_DOWNSCALE = 4
 # and the outcome is cached anyway because it only depends on the layout.
 GEOMETRY_SUPERSAMPLE = 4
 
+# How much wider than the character crop the blurred glow layer is framed.
+GLOW_ZOOM_FACTOR = 0.78
+
+
+def glow_zoom(zoom: float) -> float:
+    """The zoom the panel glow is cover-fit at, for a placement zoom.
+
+    The glow is deliberately framed wider than the crop, so the wash around the
+    portrait shows a different part of the art, but it must still cover the
+    whole panel. Since both art axes scale by the same factor, zoom 1.0 is the
+    smallest factor that still covers the panel, so the floor wins for every
+    placement zoom up to `1 / GLOW_ZOOM_FACTOR` and the factor itself only
+    applies above that. Below a placement zoom of 1.0 the floor even leaves the
+    glow more zoomed in than the crop, which is what keeps the panel covered
+    while the portrait shrinks inside it.
+    """
+    return max(1.0, zoom * GLOW_ZOOM_FACTOR)
+
 
 def rarity_color(rarity: int | None) -> str:
     """The in-game rarity accent color, falling back to the 5-star gold
@@ -403,7 +421,7 @@ def make_panel(
         art,
         glow_size,
         member,
-        member.zoom * 0.78,
+        glow_zoom(member.zoom),
         resample=Image.Resampling.BILINEAR,
     )
     glow = glow.filter(ImageFilter.GaussianBlur((14 if compact else 18) * scale / GLOW_DOWNSCALE))

@@ -21,6 +21,7 @@ from genshin_thumbnail_studio.renderer import (
     cover_resize_offset,
     export_project,
     find_font,
+    glow_zoom,
     hex_to_rgba,
     max_offset,
     panel_art,
@@ -627,6 +628,10 @@ def test_glow_shows_through_a_transparent_gap_in_the_character_art(tmp_path: Pat
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
     fill_project(project, names)
+    # Below 1 / GLOW_ZOOM_FACTOR the glow's floor keeps it near the crop's own
+    # framing, so zoom in far enough that the two framings clearly differ.
+    for member in (member for team in project.teams for member in team):
+        member.zoom = 1.6
     assets = create_assets(tmp_path, names)
     # The glow is only ever visible where the character art is transparent, so
     # give every asset opaque red art with a transparent hole punched into it.
@@ -637,15 +642,17 @@ def test_glow_shows_through_a_transparent_gap_in_the_character_art(tmp_path: Pat
 
     preview = render_preview(project, assets)
 
-    # The glow is framed slightly wider than the crop (zoom * 0.78), so its
-    # hole is smaller. Probe where the character art is transparent but the
-    # glow is not, derived from the renderer's own framing rather than from
-    # hard-coded pixels, which would depend on the default offsets.
+    # The glow is framed wider than the crop at this zoom, so its hole is
+    # smaller. Probe where the character art is transparent but the glow is
+    # not, derived from the renderer's own framing rather than from hard-coded
+    # pixels, which would depend on the default offsets.
     member = project.teams[0][1]
     target = panel_target_size(compact=True)
     art = Image.open(assets[member.name.casefold()].art_path).convert("RGBA")
     crop = cover_resize_offset(art, target, member.offset_x, member.offset_y, member.zoom)
-    glow = cover_resize_offset(art, target, member.offset_x, member.offset_y, member.zoom * 0.78)
+    glow = cover_resize_offset(
+        art, target, member.offset_x, member.offset_y, glow_zoom(member.zoom)
+    )
     row = target[1] // 2
     uncovered = [
         x
@@ -669,6 +676,16 @@ def test_glow_shows_through_a_transparent_gap_in_the_character_art(tmp_path: Pat
     # The art's red is the only red in this panel, so it can only have reached
     # a pixel the character art does not cover via the blurred glow layer.
     assert pixel[0] > background_pixel[0] + 10
+
+
+def test_glow_never_leaves_the_panel_uncovered() -> None:
+    for zoom in (0.70, 1.00, 1.28, 1.80):
+        assert glow_zoom(zoom) >= 1.0
+        for compact in (True, False):
+            target = panel_target_size(compact)
+            resized = resized_art_size(STANDARD_ART_SIZE, compact, glow_zoom(zoom))
+            assert resized[0] >= target[0], (zoom, compact, resized, target)
+            assert resized[1] >= target[1], (zoom, compact, resized, target)
 
 
 def test_render_image_requires_complete_assets_by_default(tmp_path: Path) -> None:
