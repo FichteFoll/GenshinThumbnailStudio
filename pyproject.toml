@@ -41,16 +41,6 @@ typeCheckingMode = "strict"
 pythonVersion = "3.10"
 venvPath = "."
 venv = ".venv"
-# Cleaned up module by module; every entry is removed again by the end
-# of the basedpyright adoption.
-ignore = [
-  "src/genshin_thumbnail_studio/akasha.py",
-  "src/genshin_thumbnail_studio/gui.py",
-  "src/genshin_thumbnail_studio/models.py",
-  "src/genshin_thumbnail_studio/renderer.py",
-  "src/genshin_thumbnail_studio/storage.py",
-  "tests",
-]
 
 # The GUI smoke tests deliberately inspect private widget state.
 [[tool.basedpyright.executionEnvironments]]
