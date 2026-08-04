@@ -297,8 +297,8 @@ def reference_cover_resize_offset(
     offset_y = min(limit_y, max(-limit_y, offset_y))
     # Pillow's `resize` stub loses precision on its `resample` overload here.
     resized = image.resize((resized_w, resized_h), Image.Resampling.LANCZOS)  # pyright: ignore[reportUnknownMemberType]
-    left = int(round((resized_w - target_w) / 2 - offset_x * target_w))
-    top = int(round((resized_h - target_h) / 2 - offset_y * target_h))
+    left = round((resized_w - target_w) / 2 - offset_x * target_w)
+    top = round((resized_h - target_h) / 2 - offset_y * target_h)
     return resized.crop((left, top, left + target_w, top + target_h))
 
 
@@ -489,7 +489,7 @@ def test_badge_render_and_geometry_for_long_constellation_string(tmp_path: Path)
     font = find_font((38 if compact else 54) * scale)
     canvas = Image.new("RGBA", (1280, 720), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
-    center = int(round(0 * step + step / 2))
+    center = round(0 * step + step / 2)
     top_y = 0 * row_height + row_height - (68 if compact else 107) * scale
     geometry = badge_geometry(draw, "C10R5", font, center_x=center, top_y=top_y, scale=scale, compact=compact)
     short_geometry = badge_geometry(draw, "C0R1", font, center_x=center, top_y=top_y, scale=scale, compact=compact)
@@ -538,7 +538,7 @@ def test_badge_constellation_and_refinement_use_distinct_rarity_colors(tmp_path:
     font = find_font((38 if compact else 54) * scale)
     canvas = Image.new("RGBA", (1280, 720), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
-    center = int(round(0 * step + step / 2))
+    center = round(0 * step + step / 2)
     top_y = 0 * row_height + row_height - (68 if compact else 107) * scale
     build = assets[names[0].casefold()].build
     text = f"C{build.constellation}R{build.refinement}"
@@ -845,7 +845,7 @@ def test_weapon_circle_outline_uses_element_color(tmp_path: Path) -> None:
     font = find_font((38 if compact else 54) * scale)
     canvas = Image.new("RGBA", (1280, 720), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
-    center = int(round(0 * step + step / 2))
+    center = round(0 * step + step / 2)
     top_y = 0 * row_height + row_height - (68 if compact else 107) * scale
     build = assets[names[0].casefold()].build
     text = f"C{build.constellation}R{build.refinement}"
@@ -895,7 +895,7 @@ def test_weapon_icon_visible_content_is_centered_in_the_circle_despite_source_pa
     font = find_font((38 if compact else 54) * scale)
     canvas = Image.new("RGBA", (1280, 720), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
-    center = int(round(0 * step + step / 2))
+    center = round(0 * step + step / 2)
     top_y = 0 * row_height + row_height - (68 if compact else 107) * scale
     build = assets[names[0].casefold()].build
     text = f"C{build.constellation}R{build.refinement}"
@@ -946,7 +946,7 @@ def test_badge_shape_edges_are_antialiased(tmp_path: Path) -> None:
     row_height, step, *_ = compact_layout(scale)
     font = find_font((38 if compact else 54) * scale)
     draw = ImageDraw.Draw(Image.new("RGBA", (1280, 720), (0, 0, 0, 0)))
-    center = int(round(0 * step + step / 2))
+    center = round(0 * step + step / 2)
     top_y = 0 * row_height + row_height - (68 if compact else 107) * scale
     text = f"C{asset.build.constellation}R{asset.build.refinement}"
     geometry = badge_geometry(draw, text, font, center_x=center, top_y=top_y, scale=scale, compact=compact)
@@ -1239,7 +1239,7 @@ def test_add_badges_serializes_font_use_across_threads(tmp_path: Path, monkeypat
     def render() -> None:
         try:
             render_preview(project, assets)
-        except BaseException as error:  # noqa: BLE001 - re-raised in the main thread
+        except BaseException as error:  # re-raised in the main thread
             failures.append(error)
 
     threads = [threading.Thread(target=render) for _ in range(4)]
