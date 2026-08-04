@@ -253,8 +253,8 @@ def reference_cover_resize_offset(
     image_scale = max(target_w / source_w, target_h / source_h) * zoom
     resized_w = max(1, int(source_w * image_scale + 0.5))
     resized_h = max(1, int(source_h * image_scale + 0.5))
-    limit_x = max(0.0, (resized_w - target_w) / (2 * target_w) + PAN_OVERSCAN)
-    limit_y = max(0.0, (resized_h - target_h) / (2 * target_h) + PAN_OVERSCAN)
+    limit_x = abs(resized_w - target_w) / (2 * target_w) + PAN_OVERSCAN
+    limit_y = abs(resized_h - target_h) / (2 * target_h) + PAN_OVERSCAN
     offset_x = min(limit_x, max(-limit_x, offset_x))
     offset_y = min(limit_y, max(-limit_y, offset_y))
     resized = image.resize((resized_w, resized_h), Image.Resampling.LANCZOS)
@@ -312,6 +312,28 @@ def test_zoom_below_cover_leaves_the_panel_uncovered() -> None:
     assert _row_alpha(crop, 0) == {0}
     assert _row_alpha(crop, target[1] - 1) == {0}
     assert _row_alpha(crop, target[1] // 2) == {255}
+
+
+def test_a_zoom_below_the_cover_fit_can_be_panned_to_the_panel_edges() -> None:
+    """Art that no longer covers the panel must still be movable across it, all
+    the way to either edge, instead of being stuck in the middle."""
+    zoom = 0.70
+    source = Image.new("RGBA", STANDARD_ART_SIZE, (0, 0, 40, 255))
+    for compact in (True, False):
+        target = panel_target_size(compact)
+        resized = resized_art_size(STANDARD_ART_SIZE, compact, zoom)
+        assert resized[1] < target[1], (compact, resized, target)
+        # The offset that moves the shrunken art's edge onto the panel's edge.
+        margin = (target[1] - resized[1]) / (2 * target[1])
+        assert max_offset(STANDARD_ART_SIZE, compact=compact, zoom=zoom)[1] >= margin
+
+        flush_bottom = cover_resize_offset(source, target, 0.0, margin, zoom)
+        assert _row_alpha(flush_bottom, target[1] - 1) == {255}, compact
+        assert _row_alpha(flush_bottom, 0) == {0}, compact
+
+        flush_top = cover_resize_offset(source, target, 0.0, -margin, zoom)
+        assert _row_alpha(flush_top, 0) == {255}, compact
+        assert _row_alpha(flush_top, target[1] - 1) == {0}, compact
 
 
 def test_abyss_render_and_export(tmp_path: Path) -> None:

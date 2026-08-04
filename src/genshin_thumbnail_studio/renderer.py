@@ -191,13 +191,17 @@ def resized_art_size(
 def _offset_limits(resized: tuple[int, int], target: tuple[int, int]) -> tuple[float, float]:
     """Largest panel-relative offset per axis that still moves the crop.
 
-    Floored at zero because art scaled to less than the panel minus the
-    overscan would otherwise produce a negative limit, which inverts the
-    `min(limit, max(-limit, offset))` clamp in `cover_resize_offset()`.
+    The slack is the absolute difference between the art and the panel, so both
+    directions read the same way: art larger than the panel can be panned by
+    the part hanging over its edges, art smaller than the panel by the margin
+    it leaves inside them, and `PAN_OVERSCAN` adds a strip beyond that either
+    way. Signed slack would go negative for art smaller than the panel minus
+    the overscan, which inverts the `min(limit, max(-limit, offset))` clamp in
+    `cover_resize_offset()`.
     """
     return (
-        max(0.0, (resized[0] - target[0]) / (2 * target[0]) + PAN_OVERSCAN),
-        max(0.0, (resized[1] - target[1]) / (2 * target[1]) + PAN_OVERSCAN),
+        abs(resized[0] - target[0]) / (2 * target[0]) + PAN_OVERSCAN,
+        abs(resized[1] - target[1]) / (2 * target[1]) + PAN_OVERSCAN,
     )
 
 

@@ -48,10 +48,10 @@ def _clamp_to_cover_fit(offset: float, resized: int, target: int) -> float:
     its own, wider limit, shifting the portrait. Clamping here keeps a migrated
     file framed the way it was saved.
     """
-    # Floored at zero for the same reason as `renderer._offset_limits()`: a
-    # zoom below the cover fit makes the resized art smaller than the panel,
-    # and a negative limit would invert the clamp below.
-    limit = max(0.0, (resized - target) / (2 * target))
+    # Absolute, for the same reason as `renderer._offset_limits()`: a zoom below
+    # the cover fit makes the resized art smaller than the panel, and a signed
+    # slack would go negative there and invert the clamp below.
+    limit = abs(resized - target) / (2 * target)
     return max(-limit, min(limit, offset))
 
 
