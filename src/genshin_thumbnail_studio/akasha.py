@@ -261,6 +261,18 @@ class AkashaWebClient:
         self.profile.setHttpUserAgent(USER_AGENT)
         self.page = QWebEnginePage(self.profile)
 
+    def close(self) -> None:
+        self.page.deleteLater()
+        loop = QEventLoop()
+        QTimer.singleShot(0, loop.quit)
+        loop.exec()
+        del self.page
+        self.profile.deleteLater()
+        loop2 = QEventLoop()
+        QTimer.singleShot(0, loop2.quit)
+        loop2.exec()
+        del self.profile
+
     def _wait_load(self, url: str, timeout_ms: int = 120_000) -> bool:
         loop = QEventLoop()
         result = {"ok": False, "timed_out": False}

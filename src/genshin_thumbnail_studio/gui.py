@@ -335,6 +335,10 @@ class MainWindow(QMainWindow):
     def _icon(self, standard: QStyle.StandardPixmap):
         return self.style().standardIcon(standard)
 
+    def closeEvent(self, event) -> None:  # type: ignore[no-untyped-def]
+        self.client.close()
+        super().closeEvent(event)
+
     def _build_ui(self) -> None:
         splitter = QSplitter(Qt.Orientation.Horizontal)
         self.setCentralWidget(splitter)
