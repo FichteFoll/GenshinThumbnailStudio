@@ -33,6 +33,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
+    QCheckBox,
     QComboBox,
     QFileDialog,
     QFormLayout,
@@ -446,6 +447,9 @@ class MainWindow(QMainWindow):
         self.zoom_value = QLabel("106%")
         for slider in [self.x_slider, self.y_slider, self.zoom_slider]:
             slider.valueChanged.connect(self._placement_slider_changed)
+        self.flip_check = QCheckBox("Flip")
+        self.flip_check.setToolTip("Mirror this character horizontally")
+        self.flip_check.toggled.connect(self._flip_toggled)
         reset_button = QPushButton("Reset")
         reset_button.clicked.connect(self.reset_placement)
         placement_row.addWidget(self.selected_label)
@@ -459,6 +463,7 @@ class MainWindow(QMainWindow):
         placement_row.addWidget(QLabel("Zoom"))
         placement_row.addWidget(self.zoom_slider, 1)
         placement_row.addWidget(self.zoom_value)
+        placement_row.addWidget(self.flip_check)
         placement_row.addWidget(reset_button)
         right_layout.addLayout(placement_row)
 
@@ -608,6 +613,7 @@ class MainWindow(QMainWindow):
             member.offset_x = float(preset.get("offset_x", member.offset_x))
             member.offset_y = float(preset.get("offset_y", member.offset_y))
             member.zoom = float(preset.get("zoom", member.zoom))
+            member.flip = bool(preset.get("flip", member.flip))
 
     def _save_current_preset(self) -> None:
         member = self.current_member()
@@ -617,6 +623,7 @@ class MainWindow(QMainWindow):
             "offset_x": member.offset_x,
             "offset_y": member.offset_y,
             "zoom": member.zoom,
+            "flip": member.flip,
         }
         save_presets(self.presets)
 
@@ -654,6 +661,7 @@ class MainWindow(QMainWindow):
         member.offset_x = self.x_slider.value() / 1000
         member.offset_y = self.y_slider.value() / 1000
         self.zoom_slider.setValue(int(round(member.zoom * 100)))
+        self.flip_check.setChecked(member.flip)
         resolution_index = self.resolution_combo.findData(self.project.output_height)
         self.resolution_combo.setCurrentIndex(resolution_index if resolution_index >= 0 else 1)
         self._updating_controls = False
@@ -671,6 +679,14 @@ class MainWindow(QMainWindow):
         member.offset_x = self.x_slider.value() / 1000
         member.offset_y = self.y_slider.value() / 1000
         member.zoom = self.zoom_slider.value() / 100
+        self._save_current_preset()
+        self._sync_controls()
+        self.schedule_render()
+
+    def _flip_toggled(self, checked: bool) -> None:
+        if self._updating_controls:
+            return
+        self.current_member().flip = checked
         self._save_current_preset()
         self._sync_controls()
         self.schedule_render()
@@ -702,6 +718,7 @@ class MainWindow(QMainWindow):
         member.offset_x = defaults.offset_x
         member.offset_y = defaults.offset_y
         member.zoom = 1.06 if self.project.mode == "abyss" else 1.18
+        member.flip = defaults.flip
         self._save_current_preset()
         self._sync_controls()
         self.schedule_render()

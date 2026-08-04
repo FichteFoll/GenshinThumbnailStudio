@@ -52,6 +52,7 @@ class Placement:
 
     `offset_x`/`offset_y` are signed fractions of the panel size, measured from
     the centered position: positive values move the portrait right/down.
+    `flip` mirrors the character art horizontally.
     """
 
     name: str = ""
@@ -59,6 +60,7 @@ class Placement:
     offset_y: float = -0.02
     zoom: float = 1.06
     color: str = "#78d7ff"
+    flip: bool = False
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "Placement":
@@ -71,6 +73,7 @@ class Placement:
             offset_y=float(value.get("offset_y", defaults.offset_y)),
             zoom=float(value.get("zoom", defaults.zoom)),
             color=str(value.get("color", defaults.color)),
+            flip=bool(value.get("flip", defaults.flip)),
         )
 
 

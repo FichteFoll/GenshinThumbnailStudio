@@ -241,6 +241,31 @@ def cover_resize_offset(
     return panned
 
 
+def panel_art(
+    art: Image.Image,
+    target: tuple[int, int],
+    member: Placement,
+    zoom: float,
+    resample: Image.Resampling = Image.Resampling.LANCZOS,
+) -> Image.Image:
+    """One panel's crop of the character art, mirrored when the placement is
+    flipped.
+
+    Flipping is defined as mirroring the source artwork, which would leave the
+    framing untouched. Mirroring the panel-sized crop and negating the
+    horizontal offset is the same image for a fraction of the cost, because
+    negating a panel-relative offset mirrors the crop window about the panel
+    center:
+    ``mirror(crop(art, -offset_x)) == crop(mirror(art), offset_x)``.
+    Mirroring the crop also keeps the shared, read-only art cache untouched.
+    """
+    offset_x = -member.offset_x if member.flip else member.offset_x
+    crop = cover_resize_offset(art, target, offset_x, member.offset_y, zoom, resample)
+    if member.flip:
+        crop = crop.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+    return crop
+
+
 @functools.lru_cache(maxsize=64)
 def art_pixel_size(path: str) -> tuple[int, int]:
     """The art file's dimensions, read from its header without decoding it.
@@ -363,11 +388,10 @@ def make_panel(
     color = card_color(member, asset)
     background = panel_background(target, color, compact)
     glow_size = (max(1, target[0] // GLOW_DOWNSCALE), max(1, target[1] // GLOW_DOWNSCALE))
-    glow = cover_resize_offset(
+    glow = panel_art(
         art,
         glow_size,
-        member.offset_x,
-        member.offset_y,
+        member,
         member.zoom * 0.78,
         resample=Image.Resampling.BILINEAR,
     )
@@ -376,7 +400,7 @@ def make_panel(
     glow = glow.resize(target, Image.Resampling.BILINEAR)
     background = Image.alpha_composite(background, glow)
 
-    crop = cover_resize_offset(art, target, member.offset_x, member.offset_y, member.zoom)
+    crop = panel_art(art, target, member, member.zoom)
     crop = ImageEnhance.Color(crop).enhance(1.09 if compact else 1.10)
     crop = ImageEnhance.Contrast(crop).enhance(1.06 if compact else 1.07)
     alpha = crop.getchannel("A")
@@ -859,6 +883,7 @@ def render_image(
                 round(member.offset_x, 4),
                 round(member.offset_y, 4),
                 round(member.zoom, 4),
+                member.flip,
                 member.color,
                 str(asset.art_path) if asset else None,
                 row_height,

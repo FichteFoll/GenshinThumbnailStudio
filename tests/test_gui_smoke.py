@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from genshin_thumbnail_studio import gui
 from genshin_thumbnail_studio.gui import MainWindow
-from genshin_thumbnail_studio.models import Asset, Build, Project
+from genshin_thumbnail_studio.models import Asset, Build, Placement, Project
 from genshin_thumbnail_studio.renderer import art_pixel_size, max_offset, panel_target_size
 from genshin_thumbnail_studio.storage import load_profile_cache, save_profile_cache, save_project
 
@@ -636,6 +636,94 @@ def test_drag_past_the_reachable_range_stops_at_the_bounds(tmp_path, monkeypatch
     member = window.current_member()
     assert member.offset_x == pytest.approx(-max_x, abs=OFFSET_TOLERANCE)
     assert member.offset_y == pytest.approx(-max_y, abs=OFFSET_TOLERANCE)
+
+    window.close()
+    app.processEvents()
+
+
+def test_flip_check_toggles_the_selected_member(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = QApplication.instance() or QApplication([])
+    window = _window_with_assets(tmp_path, TEAM_NAMES)
+
+    assert window.current_member().flip is False
+
+    window.flip_check.setChecked(True)
+    assert window.current_member().flip is True
+
+    window.flip_check.setChecked(False)
+    assert window.current_member().flip is False
+
+    window.close()
+    app.processEvents()
+
+
+def test_sync_controls_shows_the_flip_without_writing_it_back(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = QApplication.instance() or QApplication([])
+    window = _window_with_assets(tmp_path, TEAM_NAMES)
+
+    window.current_member().flip = True
+    # Asserting the member still reads True would hold even without the
+    # _updating_controls guard, since the handler would write back the same
+    # value. Only the write side proves the handler did not run.
+    writes: list[int] = []
+    monkeypatch.setattr(window, "_save_current_preset", lambda: writes.append(1))
+    window._sync_controls()
+
+    assert window.flip_check.isChecked() is True
+    assert window.current_member().flip is True
+    assert writes == []
+
+    window.close()
+    app.processEvents()
+
+
+def test_selecting_another_slot_shows_that_slots_flip(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = QApplication.instance() or QApplication([])
+    window = _window_with_assets(tmp_path, TEAM_NAMES)
+
+    window.flip_check.setChecked(True)
+
+    window.select_slot(0, 1)
+    assert window.flip_check.isChecked() is False
+    assert window.current_member().flip is False
+
+    window.select_slot(0, 0)
+    assert window.flip_check.isChecked() is True
+
+    window.close()
+    app.processEvents()
+
+
+def test_flip_round_trips_through_the_presets(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = QApplication.instance() or QApplication([])
+    window = _window_with_assets(tmp_path, TEAM_NAMES)
+    window.builds = {name: asset.build for name, asset in window.assets.items()}
+
+    window.flip_check.setChecked(True)
+
+    fresh = Placement(name=window.current_member().name)
+    window._apply_preset(fresh)
+    assert fresh.flip is True
+
+    window.close()
+    app.processEvents()
+
+
+def test_reset_placement_clears_the_flip(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = QApplication.instance() or QApplication([])
+    window = _window_with_assets(tmp_path, TEAM_NAMES)
+
+    window.flip_check.setChecked(True)
+
+    window.reset_placement()
+
+    assert window.current_member().flip is False
+    assert window.flip_check.isChecked() is False
 
     window.close()
     app.processEvents()

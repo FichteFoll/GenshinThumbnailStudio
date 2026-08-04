@@ -5,7 +5,7 @@ from typing import NamedTuple
 from PIL import Image, ImageChops, ImageDraw
 
 from genshin_thumbnail_studio import renderer
-from genshin_thumbnail_studio.models import Asset, Build, Project
+from genshin_thumbnail_studio.models import Asset, Build, Placement, Project
 from genshin_thumbnail_studio.renderer import (
     BACKGROUND_COLOR,
     BASE_W,
@@ -23,6 +23,7 @@ from genshin_thumbnail_studio.renderer import (
     find_font,
     hex_to_rgba,
     max_offset,
+    panel_art,
     panel_background,
     panel_metrics,
     panel_origin,
@@ -900,3 +901,148 @@ def test_swapping_slots_with_warm_cache_matches_fresh_render(tmp_path: Path) -> 
     fresh_result = render_preview(project, assets)
 
     assert warm_cache_result.tobytes() == fresh_result.tobytes()
+
+
+TWO_TONE_LEFT = (220, 40, 40, 255)
+TWO_TONE_RIGHT = (40, 40, 220, 255)
+
+
+def two_tone_art() -> Image.Image:
+    """Art the same size create_assets() writes, but horizontally asymmetric:
+    red left half, blue right half.
+
+    create_assets()' own ellipse is symmetric about the art's centre, so a
+    mirrored crop of it is indistinguishable from an unmirrored one.
+    """
+    art = Image.new("RGBA", (1200, 900), TWO_TONE_LEFT)
+    ImageDraw.Draw(art).rectangle((600, 0, 1199, 899), fill=TWO_TONE_RIGHT)
+    return art
+
+
+def _two_tone_project(tmp_path: Path) -> tuple[Project, dict[str, Asset]]:
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)
+    for asset in assets.values():
+        two_tone_art().save(asset.art_path)
+    return project, assets
+
+
+def _reddish(pixel: tuple[int, ...]) -> bool:
+    """Whether a probe leans towards the art's red half. Compares the channels
+    rather than exact values, since the renderer applies colour/contrast
+    enhancement, a card tint and a shade gradient on top of the art."""
+    return pixel[0] > pixel[2]
+
+
+def test_flip_mirrors_the_panel_art(tmp_path: Path) -> None:
+    project, assets = _two_tone_project(tmp_path)
+    member = project.teams[0][1]
+    member.offset_x = 0.0
+
+    # Two probes symmetric about the mirror axis, which is the centre of the
+    # panel-sized art crop, not of the (narrower) visible card. Row 0 slot 1 is
+    # used because its panel origin is non-negative, so it is not clipped.
+    row_height, step, slant, _, _, _ = compact_layout()
+    origin_x, _ = panel_origin(1, row=0, row_height=row_height, step=step, slant=slant)
+    target = panel_target_size(compact=True)
+    center_x = origin_x + target[0] // 2
+    # 60px clears the slanted edges (the card spans step-wide at mid-height),
+    # and mid-height is below the top shade gradient and above the badge.
+    left_probe = (center_x - 60, row_height // 2)
+    right_probe = (center_x + 60, row_height // 2)
+
+    clear_render_cache()
+    unflipped = render_preview(project, assets)
+    assert _reddish(unflipped.getpixel(left_probe))
+    assert not _reddish(unflipped.getpixel(right_probe))
+
+    member.flip = True
+    clear_render_cache()
+    flipped = render_preview(project, assets)
+    assert not _reddish(flipped.getpixel(left_probe))
+    assert _reddish(flipped.getpixel(right_probe))
+
+
+def _tone_boundary_x(crop: Image.Image) -> float:
+    """The x of the single red/blue transition in the crop's middle row.
+
+    A rigid feature of the two-tone art, unlike a per-colour pixel count, which
+    also changes as a region is clipped at a panel edge.
+    """
+    row = crop.height // 2
+    pixels = [crop.getpixel((x, row)) for x in range(crop.width)]
+    reds = [x for x, pixel in enumerate(pixels) if pixel[3] and pixel[0] > pixel[2]]
+    blues = [x for x, pixel in enumerate(pixels) if pixel[3] and pixel[2] > pixel[0]]
+    assert reds and blues, "both tones must be visible in the crop"
+    if reds[0] < blues[0]:
+        return (reds[-1] + blues[0]) / 2
+    return (blues[-1] + reds[0]) / 2
+
+
+def test_flip_keeps_the_horizontal_drag_direction() -> None:
+    """Increasing offset_x must move the visible content right whether or not
+    the placement is flipped, so dragging keeps following the mouse."""
+    art = two_tone_art()
+    target = panel_target_size(compact=True)
+
+    shifts = {}
+    for flip in (False, True):
+        member = Placement(offset_y=0.0, flip=flip)
+        centered = panel_art(art, target, member, member.zoom)
+        member.offset_x = 0.2
+        shifted = panel_art(art, target, member, member.zoom)
+        shifts[flip] = _tone_boundary_x(shifted) - _tone_boundary_x(centered)
+        assert shifts[flip] > 0, flip
+        assert abs(shifts[flip] - 0.2 * target[0]) <= 2, flip
+
+    assert abs(shifts[True] - shifts[False]) <= 2
+
+
+def test_flip_preserves_the_framing() -> None:
+    """"Mirror the artwork, change nothing else" as an assertion: the flipped
+    crop shows the mirror image of the unflipped one, so what was red in the
+    latter is blue in the former and vice versa."""
+    art = two_tone_art()
+    target = panel_target_size(compact=True)
+
+    def tone_counts(crop: Image.Image) -> tuple[int, int]:
+        """How many pixels of the crop lean red and how many lean blue.
+
+        The clipping subtract leaves 0 wherever a channel does not dominate,
+        which also covers the transparent overscan strip, whose pixels are
+        fully zeroed.
+        """
+        red_band, _, blue_band, _ = crop.split()
+        red = sum(ImageChops.subtract(red_band, blue_band).histogram()[1:])
+        blue = sum(ImageChops.subtract(blue_band, red_band).histogram()[1:])
+        return red, blue
+
+    unflipped_red, unflipped_blue = tone_counts(
+        panel_art(art, target, Placement(offset_x=0.2, offset_y=0.0), 1.06)
+    )
+    flipped_red, flipped_blue = tone_counts(
+        panel_art(art, target, Placement(offset_x=0.2, offset_y=0.0, flip=True), 1.06)
+    )
+
+    # A tolerance of a couple of pixel columns absorbs the integer rounding of
+    # the crop window.
+    tolerance = 2 * target[1]
+    assert abs(flipped_red - unflipped_blue) <= tolerance
+    assert abs(flipped_blue - unflipped_red) <= tolerance
+    # Not a vacuous comparison: the two tones do not cover equal areas here.
+    assert abs(unflipped_red - unflipped_blue) > tolerance
+
+
+def test_flip_is_part_of_the_panel_cache_key(tmp_path: Path) -> None:
+    """Regression test: flipping a placement must not be masked by the cached
+    panel of its unflipped self."""
+    clear_render_cache()
+    project, assets = _two_tone_project(tmp_path)
+
+    unflipped = render_preview(project, assets)
+    project.teams[0][1].flip = True
+    flipped = render_preview(project, assets)  # deliberately no cache clear
+
+    assert ImageChops.difference(unflipped, flipped).getbbox() is not None
