@@ -1243,3 +1243,30 @@ def test_flip_is_part_of_the_panel_cache_key(tmp_path: Path) -> None:
     flipped = render_preview(project, assets)  # deliberately no cache clear
 
     assert ImageChops.difference(unflipped, flipped).getbbox() is not None
+
+
+def test_changing_asset_element_invalidates_stale_panel_cache(tmp_path: Path) -> None:
+    """Regression test: _panel_cache must key on the resolved card_color(),
+    not the raw placement color. card_color() prefers asset.build.element
+    over member.color, so changing only the element (e.g. after an Akasha
+    profile refresh) while member.color stays the same must not serve a
+    stale, wrongly-colored panel from the cache."""
+    clear_render_cache()
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)  # no elements: Build.element is None
+
+    render_preview(project, assets)  # warm _panel_cache with the fallback-color panel
+
+    first_member_color = project.teams[0][0].color
+    pyro_color = ELEMENT_COLORS["pyro"]
+    assert first_member_color != pyro_color
+    assets[names[0].casefold()].build.element = "Pyro"
+
+    warm = render_preview(project, assets)  # deliberately no cache clear
+
+    clear_render_cache()
+    fresh = render_preview(project, assets)
+
+    assert ImageChops.difference(warm, fresh).getbbox() is None
