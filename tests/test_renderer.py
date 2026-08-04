@@ -819,6 +819,66 @@ def test_weapon_circle_outline_uses_element_color(tmp_path: Path) -> None:
     assert not _color_present_in_box(preview, ring, "#ffffff", tolerance=12)
 
 
+def test_weapon_icon_visible_content_is_centered_in_the_circle_despite_source_padding(
+    tmp_path: Path,
+) -> None:
+    # Diagnosis: badge_tile() centers the weapon icon using the thumbnailed
+    # icon's own width/height, i.e. its full source canvas including
+    # transparent padding, rather than the visible art's bounding box. Enka
+    # weapon PNGs aren't reliably centered on their own canvas, so uneven
+    # padding shifts the visible art off-center inside the circle. A
+    # manufactured 71x71 opaque square at (20, 20) on a 256x256 canvas
+    # (padded 20px left/top, ~165px right/bottom) was measured to render
+    # with the circle centered at (234, 321) but the visible content
+    # centered at (220, 307) - a 14px miss on both axes.
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)
+
+    weapon_path = assets[names[0].casefold()].weapon_path
+    weapon = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+    ImageDraw.Draw(weapon).rectangle((20, 20, 90, 90), fill=(255, 0, 255, 255))
+    weapon.save(weapon_path)
+
+    preview = render_preview(project, assets)
+
+    # Same leftmost-slot geometry as the badge tests above.
+    scale = 1
+    compact = True
+    row_height, step, *_ = compact_layout(scale)
+    font = find_font((38 if compact else 54) * scale)
+    canvas = Image.new("RGBA", (1280, 720), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+    center = int(round(0 * step + step / 2))
+    top_y = 0 * row_height + row_height - (68 if compact else 107) * scale
+    build = assets[names[0].casefold()].build
+    text = f"C{build.constellation}R{build.refinement}"
+    geometry = badge_geometry(draw, text, font, center_x=center, top_y=top_y, scale=scale, compact=compact)
+
+    circle_x0, circle_y0, circle_x1, circle_y1 = geometry.circle
+    target = (255, 0, 255)
+    tolerance = 10
+    xs = []
+    ys = []
+    for y in range(circle_y0, circle_y1 + 1):
+        for x in range(circle_x0, circle_x1 + 1):
+            pixel = preview.getpixel((x, y))
+            assert isinstance(pixel, tuple)
+            if all(abs(pixel[channel] - target[channel]) <= tolerance for channel in range(3)):
+                xs.append(x)
+                ys.append(y)
+
+    # Sanity check: the icon rendered at all.
+    assert xs
+
+    content_center = ((min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2)
+    circle_center = ((circle_x0 + circle_x1) / 2, (circle_y0 + circle_y1) / 2)
+
+    assert abs(content_center[0] - circle_center[0]) <= 1.5
+    assert abs(content_center[1] - circle_center[1]) <= 1.5
+
+
 def _has_partial_coverage(coverage: Image.Image, box: tuple[int, int, int, int]) -> bool:
     """Whether any pixel in the inclusive `box` is only partially covered,
     i.e. antialiased. The box is inclusive to match Pillow's shape coordinates,
