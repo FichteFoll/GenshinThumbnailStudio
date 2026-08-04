@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 from PIL import Image
 
-import genshin_thumbnail_studio.akasha as akasha_module
+import genshin_thumbnail_studio.akasha.assets as assets_module
 from genshin_thumbnail_studio.akasha import (
     character_element,
     character_rarity,
@@ -230,7 +230,7 @@ def test_download_assets_calls_on_asset_per_build(tmp_path: Path, monkeypatch: p
         destination.parent.mkdir(parents=True, exist_ok=True)
         image.save(destination)
 
-    monkeypatch.setattr(akasha_module, "_download", fake_download)
+    monkeypatch.setattr(assets_module, "download", fake_download)
 
     builds = [make_build("Alpha"), make_build("Beta")]
     received: list[tuple[str, str]] = []
