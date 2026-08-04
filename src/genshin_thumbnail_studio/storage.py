@@ -5,7 +5,7 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from . import renderer
 from .models import Build, Placement, Project
@@ -81,22 +81,27 @@ def _migrate_focal_point(placement: dict[str, Any], compact: bool) -> dict[str, 
     return migrated
 
 
+def _migrate_focal_point_if_dict(value: Any, compact: bool) -> Any:
+    if isinstance(value, dict):
+        return _migrate_focal_point(cast("dict[str, Any]", value), compact)
+    return value
+
+
 def load_project(path: Path) -> Project:
-    value: Any = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict):
+    raw: Any = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
         raise ValueError("Project file must contain a JSON object.")
+    value = cast(dict[str, Any], raw)
     compact = str(value.get("mode", "abyss")).casefold() == "abyss"
     teams = value.get("teams")
     if isinstance(teams, list):
+        teams_list = cast("list[Any]", teams)
         value = dict(value)
         value["teams"] = [
-            [
-                _migrate_focal_point(member, compact) if isinstance(member, dict) else member
-                for member in team
-            ]
+            [_migrate_focal_point_if_dict(member, compact) for member in cast("list[Any]", team)]
             if isinstance(team, list)
             else team
-            for team in teams
+            for team in teams_list
         ]
     return Project.from_dict(value)
 
@@ -135,17 +140,16 @@ def load_presets() -> dict[str, dict[str, float]]:
     if not path.exists():
         return {}
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        raw: Any = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
-    if not isinstance(value, dict):
+    if not isinstance(raw, dict):
         return {}
+    value = cast(dict[str, Any], raw)
     # Presets carry no mode of their own; it is the first half of their key
     # (see gui._preset_key), and the geometry the conversion needs depends on it.
     return {
-        key: _migrate_focal_point(preset, str(key).split("|", 1)[0] != "stygian")
-        if isinstance(preset, dict)
-        else preset
+        key: _migrate_focal_point_if_dict(preset, key.split("|", 1)[0] != "stygian")
         for key, preset in value.items()
     }
 
