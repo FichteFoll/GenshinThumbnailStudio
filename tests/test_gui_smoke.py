@@ -1,3 +1,4 @@
+import gc
 import os
 import time
 
@@ -9,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from PIL import Image, ImageDraw
+from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from genshin_thumbnail_studio import gui
@@ -177,6 +179,32 @@ def test_open_project_without_cache_shows_hint(tmp_path, monkeypatch) -> None:
     assert "no cached profile" in window.statusBar().currentMessage()
 
     window.close()
+    app.processEvents()
+
+
+def test_closing_window_does_not_warn_about_webengine_profile_teardown(tmp_path, monkeypatch, capfd) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+
+    window.close()
+    # ``close()`` alone does not destroy the underlying C++ widget (no
+    # ``WA_DeleteOnClose``), and its child widgets' signal connections hold
+    # closures referencing ``window`` that plain ``del``/``gc.collect()``
+    # cannot reclaim (the connection storage is on the C++ side and is not
+    # traversable by Python's cyclic GC). Explicitly tearing the widget down
+    # and spinning one real event loop iteration lets Qt actually destroy it,
+    # which is what exercises the GC-order-dependent page/profile teardown.
+    window.deleteLater()
+    loop = QEventLoop()
+    QTimer.singleShot(0, loop.quit)
+    loop.exec()
+    del window
+    gc.collect()
+
+    captured = capfd.readouterr()
+    assert "Release of profile" not in captured.err
+
     app.processEvents()
 
 
