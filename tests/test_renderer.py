@@ -7,7 +7,6 @@ from typing import Any, NamedTuple
 import pytest
 from PIL import Image, ImageChops, ImageDraw
 
-from genshin_thumbnail_studio import renderer
 from genshin_thumbnail_studio.models import Asset, Build, Placement, Project
 from genshin_thumbnail_studio.renderer import (
     BACKGROUND_COLOR,
@@ -39,7 +38,9 @@ from genshin_thumbnail_studio.renderer import (
     render_preview,
     resized_art_size,
 )
+from genshin_thumbnail_studio.renderer import badges as render_badges_module
 from genshin_thumbnail_studio.renderer import cache as render_cache_module
+from genshin_thumbnail_studio.renderer import panels as render_panels_module
 
 
 def _rgb(image: Image.Image, xy: tuple[int, int]) -> tuple[int, int, int]:
@@ -1006,7 +1007,7 @@ def _patch_counting_open(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         opened.append(str(fp))
         return real_open(fp, *args, **kwargs)
 
-    monkeypatch.setattr(renderer.Image, "open", counting_open)
+    monkeypatch.setattr(Image, "open", counting_open)
     return opened
 
 
@@ -1016,11 +1017,12 @@ def _patch_counting_panels(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     the panel cache. Image.open counts cannot show this, since the art and
     weapon-icon caches absorb every decode after the first render.
 
-    render_image() resolves both builders as module globals at call time, so
-    patching them on the module takes effect for renders already in flight."""
+    render_image() resolves both builders as attributes of the panels module at
+    call time, so patching them there takes effect for renders already in
+    flight."""
     built: list[str] = []
-    real_make_panel = renderer.make_panel
-    real_placeholder_panel = renderer.placeholder_panel
+    real_make_panel = render_panels_module.make_panel
+    real_placeholder_panel = render_panels_module.placeholder_panel
 
     def counting_make_panel(*args: Any, **kwargs: Any) -> Image.Image:
         built.append("make_panel")
@@ -1030,8 +1032,8 @@ def _patch_counting_panels(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         built.append("placeholder_panel")
         return real_placeholder_panel(*args, **kwargs)
 
-    monkeypatch.setattr(renderer, "make_panel", counting_make_panel)
-    monkeypatch.setattr(renderer, "placeholder_panel", counting_placeholder_panel)
+    monkeypatch.setattr(render_panels_module, "make_panel", counting_make_panel)
+    monkeypatch.setattr(render_panels_module, "placeholder_panel", counting_placeholder_panel)
     return built
 
 
@@ -1233,7 +1235,7 @@ def test_add_badges_serializes_font_use_across_threads(tmp_path: Path, monkeypat
             with probe_lock:
                 inside -= 1
 
-    monkeypatch.setattr(renderer, "find_font", probing_find_font)
+    monkeypatch.setattr(render_badges_module, "find_font", probing_find_font)
 
     failures: list[BaseException] = []
 
