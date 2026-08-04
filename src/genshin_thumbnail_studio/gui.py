@@ -55,7 +55,7 @@ from PySide6.QtWidgets import (
 )
 
 from .akasha import AkashaError, AkashaWebClient, Build, StaleProfileError, download_assets
-from .models import Asset, Placement, Project
+from .models import DEFAULT_ZOOM, Asset, Placement, Project
 from .renderer import (
     STANDARD_ART_SIZE,
     art_pixel_size,
@@ -441,10 +441,10 @@ class MainWindow(QMainWindow):
         # Placeholder offset ranges; _sync_controls() sets the reachable ones.
         self.x_slider = self._slider(-500, 500, 0)
         self.y_slider = self._slider(-500, 500, -20)
-        self.zoom_slider = self._slider(70, 180, 106)
+        self.zoom_slider = self._slider(70, 180, 100)
         self.x_value = QLabel("+0%")
         self.y_value = QLabel("-2%")
-        self.zoom_value = QLabel("106%")
+        self.zoom_value = QLabel("100%")
         for slider in [self.x_slider, self.y_slider, self.zoom_slider]:
             slider.valueChanged.connect(self._placement_slider_changed)
         self.flip_check = QCheckBox("Flip")
@@ -717,7 +717,7 @@ class MainWindow(QMainWindow):
         defaults = Placement()
         member.offset_x = defaults.offset_x
         member.offset_y = defaults.offset_y
-        member.zoom = 1.06 if self.project.mode == "abyss" else 1.18
+        member.zoom = DEFAULT_ZOOM[self.project.mode]
         member.flip = defaults.flip
         self._save_current_preset()
         self._sync_controls()

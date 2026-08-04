@@ -17,10 +17,13 @@ from genshin_thumbnail_studio.renderer import (
     STANDARD_ART_SIZE,
     apply_panel_mask,
     badge_geometry,
+    badge_tile,
+    badge_tile_origin,
     clear_render_cache,
     cover_resize_offset,
     export_project,
     find_font,
+    glow_zoom,
     hex_to_rgba,
     max_offset,
     panel_art,
@@ -248,10 +251,10 @@ def reference_cover_resize_offset(
     source_w, source_h = image.size
     target_w, target_h = size
     image_scale = max(target_w / source_w, target_h / source_h) * zoom
-    resized_w = max(target_w, int(source_w * image_scale + 0.5))
-    resized_h = max(target_h, int(source_h * image_scale + 0.5))
-    limit_x = (resized_w - target_w) / (2 * target_w) + PAN_OVERSCAN
-    limit_y = (resized_h - target_h) / (2 * target_h) + PAN_OVERSCAN
+    resized_w = max(1, int(source_w * image_scale + 0.5))
+    resized_h = max(1, int(source_h * image_scale + 0.5))
+    limit_x = abs(resized_w - target_w) / (2 * target_w) + PAN_OVERSCAN
+    limit_y = abs(resized_h - target_h) / (2 * target_h) + PAN_OVERSCAN
     offset_x = min(limit_x, max(-limit_x, offset_x))
     offset_y = min(limit_y, max(-limit_y, offset_y))
     resized = image.resize((resized_w, resized_h), Image.Resampling.LANCZOS)
@@ -280,6 +283,57 @@ def test_cover_resize_offset_matches_resize_then_crop() -> None:
                     # against resizing everything up front, but on smooth
                     # content the two stay within a couple of levels.
                     assert max(band.getextrema()[1] for band in difference.split()) <= 4, case
+
+
+def test_zoom_scales_both_art_axes_identically() -> None:
+    """Zoom is a real zoom: it never changes the art's aspect ratio, not even
+    where the scaled art no longer covers the panel."""
+    for compact in (True, False):
+        for art_size in (STANDARD_ART_SIZE, (1200, 900)):
+            for zoom in (0.70, 0.85, 1.00, 1.06, 1.80):
+                resized = resized_art_size(art_size, compact=compact, zoom=zoom)
+                case = (compact, art_size, zoom, resized)
+                source_ratio = art_size[0] / art_size[1]
+                # Both axes round independently, so the width may differ from
+                # the ratio-implied width by half a pixel per axis, widened here
+                # by the ratio the height is compared through.
+                assert abs(resized[0] - resized[1] * source_ratio) <= 1 + source_ratio, case
+
+
+def test_zoom_below_cover_leaves_the_panel_uncovered() -> None:
+    """Below zoom 1.0 the 2:1 splash art no longer reaches the panel's top and
+    bottom edges. The uncovered strip stays transparent instead of the art
+    being stretched to fill it."""
+    target = panel_target_size(compact=True)
+    source = Image.new("RGBA", STANDARD_ART_SIZE, (0, 0, 40, 255))
+
+    crop = cover_resize_offset(source, target, 0.0, 0.0, 0.85)
+
+    assert _row_alpha(crop, 0) == {0}
+    assert _row_alpha(crop, target[1] - 1) == {0}
+    assert _row_alpha(crop, target[1] // 2) == {255}
+
+
+def test_a_zoom_below_the_cover_fit_can_be_panned_to_the_panel_edges() -> None:
+    """Art that no longer covers the panel must still be movable across it, all
+    the way to either edge, instead of being stuck in the middle."""
+    zoom = 0.70
+    source = Image.new("RGBA", STANDARD_ART_SIZE, (0, 0, 40, 255))
+    for compact in (True, False):
+        target = panel_target_size(compact)
+        resized = resized_art_size(STANDARD_ART_SIZE, compact, zoom)
+        assert resized[1] < target[1], (compact, resized, target)
+        # The offset that moves the shrunken art's edge onto the panel's edge.
+        margin = (target[1] - resized[1]) / (2 * target[1])
+        assert max_offset(STANDARD_ART_SIZE, compact=compact, zoom=zoom)[1] >= margin
+
+        flush_bottom = cover_resize_offset(source, target, 0.0, margin, zoom)
+        assert _row_alpha(flush_bottom, target[1] - 1) == {255}, compact
+        assert _row_alpha(flush_bottom, 0) == {0}, compact
+
+        flush_top = cover_resize_offset(source, target, 0.0, -margin, zoom)
+        assert _row_alpha(flush_top, 0) == {255}, compact
+        assert _row_alpha(flush_top, target[1] - 1) == {0}, compact
 
 
 def test_abyss_render_and_export(tmp_path: Path) -> None:
@@ -594,29 +648,43 @@ def test_slanted_card_edge_is_antialiased(tmp_path: Path) -> None:
             ), (y, pixel)
 
 
-def test_glow_shows_through_a_transparent_gap_in_the_character_art(tmp_path: Path) -> None:
-    names = [f"Character {index}" for index in range(8)]
-    project = Project.blank("abyss")
-    fill_project(project, names)
-    assets = create_assets(tmp_path, names)
-    # The glow is only ever visible where the character art is transparent, so
-    # give every asset opaque red art with a transparent hole punched into it.
+def _punch_a_transparent_hole(assets: dict[str, Asset]) -> None:
+    """Give every asset opaque red art with a transparent hole in it.
+
+    The glow is only ever visible where the character art is transparent, and
+    the art's red is then the only red in the panel, so a red pixel outside the
+    art can only have arrived through the blurred glow layer.
+    """
     for asset in assets.values():
         art = Image.new("RGBA", (1200, 900), (255, 40, 40, 255))
         ImageDraw.Draw(art).ellipse((500, 350, 700, 550), fill=(0, 0, 0, 0))
         art.save(asset.art_path)
 
+
+def test_glow_shows_through_a_transparent_gap_in_the_character_art(tmp_path: Path) -> None:
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    # Below 1 / GLOW_ZOOM_FACTOR the glow's floor keeps it near the crop's own
+    # framing, so zoom in far enough that the two framings clearly differ.
+    for member in (member for team in project.teams for member in team):
+        member.zoom = 1.6
+    assets = create_assets(tmp_path, names)
+    _punch_a_transparent_hole(assets)
+
     preview = render_preview(project, assets)
 
-    # The glow is framed slightly wider than the crop (zoom * 0.78), so its
-    # hole is smaller. Probe where the character art is transparent but the
-    # glow is not, derived from the renderer's own framing rather than from
-    # hard-coded pixels, which would depend on the default offsets.
+    # The glow is framed wider than the crop at this zoom, so its hole is
+    # smaller. Probe where the character art is transparent but the glow is
+    # not, derived from the renderer's own framing rather than from hard-coded
+    # pixels, which would depend on the default offsets.
     member = project.teams[0][1]
     target = panel_target_size(compact=True)
     art = Image.open(assets[member.name.casefold()].art_path).convert("RGBA")
     crop = cover_resize_offset(art, target, member.offset_x, member.offset_y, member.zoom)
-    glow = cover_resize_offset(art, target, member.offset_x, member.offset_y, member.zoom * 0.78)
+    glow = cover_resize_offset(
+        art, target, member.offset_x, member.offset_y, glow_zoom(member.zoom)
+    )
     row = target[1] // 2
     uncovered = [
         x
@@ -640,6 +708,60 @@ def test_glow_shows_through_a_transparent_gap_in_the_character_art(tmp_path: Pat
     # The art's red is the only red in this panel, so it can only have reached
     # a pixel the character art does not cover via the blurred glow layer.
     assert pixel[0] > background_pixel[0] + 10
+
+
+def test_glow_reaches_into_a_transparent_gap_at_the_default_zoom(tmp_path: Path) -> None:
+    """The floored glow zoom deserves its own probe, since it is what a fresh
+    project renders with. There the glow is framed exactly like the crop, so a
+    gap in the art is a gap in the glow as well, and only the glow layer's own
+    softness reaches into it: it is built at a quarter of the panel resolution,
+    blurred and resampled back up, which carries colour a little way past the
+    gap's rim without filling its middle. Filling it is what the wider framing
+    above 1 / GLOW_ZOOM_FACTOR is for.
+    """
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)
+    _punch_a_transparent_hole(assets)
+
+    member = project.teams[0][1]
+    assert glow_zoom(member.zoom) == 1.0, "the default zoom has to exercise the floor"
+
+    preview = render_preview(project, assets)
+
+    target = panel_target_size(compact=True)
+    art = Image.open(assets[member.name.casefold()].art_path).convert("RGBA")
+    crop = cover_resize_offset(art, target, member.offset_x, member.offset_y, member.zoom)
+    row = target[1] // 2
+    gap = [x for x in range(target[0]) if crop.getpixel((x, row))[3] == 0]
+    assert gap, "no pixel where the character art is transparent"
+
+    slant = panel_metrics(compact=True)[2]
+    plain_background = panel_background(target, member.color, compact=True)
+
+    def red_over_the_bare_panel(x: int) -> float:
+        """How much redder the render is at `x` than the panel would be without
+        any glow, mapped to canvas coordinates the way the panel is pasted."""
+        pixel = preview.getpixel((1 * 320 - slant + x, row))
+        background_pixel = plain_background.getpixel((x, row))
+        assert isinstance(pixel, tuple)
+        assert isinstance(background_pixel, tuple)
+        return pixel[0] - background_pixel[0]
+
+    assert red_over_the_bare_panel(gap[0]) > 20
+    assert red_over_the_bare_panel(gap[-1]) > 20
+    assert red_over_the_bare_panel(gap[len(gap) // 2]) < 10
+
+
+def test_glow_never_leaves_the_panel_uncovered() -> None:
+    for zoom in (0.70, 1.00, 1.28, 1.80):
+        assert glow_zoom(zoom) >= 1.0
+        for compact in (True, False):
+            target = panel_target_size(compact)
+            resized = resized_art_size(STANDARD_ART_SIZE, compact, glow_zoom(zoom))
+            assert resized[0] >= target[0], (zoom, compact, resized, target)
+            assert resized[1] >= target[1], (zoom, compact, resized, target)
 
 
 def test_render_image_requires_complete_assets_by_default(tmp_path: Path) -> None:
@@ -695,6 +817,77 @@ def test_weapon_circle_outline_uses_element_color(tmp_path: Path) -> None:
     # The outline was plain white before; make sure it no longer is, so this
     # test fails if the element color stops being applied.
     assert not _color_present_in_box(preview, ring, "#ffffff", tolerance=12)
+
+
+def _has_partial_coverage(coverage: Image.Image, box: tuple[int, int, int, int]) -> bool:
+    """Whether any pixel in the inclusive `box` is only partially covered,
+    i.e. antialiased. The box is inclusive to match Pillow's shape coordinates,
+    which is where the callers take their probe regions from."""
+    x0, y0, x1, y1 = box
+    return any(
+        0 < coverage.getpixel((x, y)) < 255
+        for y in range(max(0, y0), min(coverage.height, y1 + 1))
+        for x in range(max(0, x0), min(coverage.width, x1 + 1))
+    )
+
+
+def test_badge_shape_edges_are_antialiased(tmp_path: Path) -> None:
+    names = ["Character 0"]
+    assets = create_assets(tmp_path, names, elements={names[0]: "Pyro"})
+    asset = assets[names[0].casefold()]
+
+    # Same leftmost-slot geometry as the badge tests above.
+    scale = 1
+    compact = True
+    row_height, step, *_ = compact_layout(scale)
+    font = find_font((38 if compact else 54) * scale)
+    draw = ImageDraw.Draw(Image.new("RGBA", (1280, 720), (0, 0, 0, 0)))
+    center = int(round(0 * step + step / 2))
+    top_y = 0 * row_height + row_height - (68 if compact else 107) * scale
+    text = f"C{asset.build.constellation}R{asset.build.refinement}"
+    geometry = badge_geometry(draw, text, font, center_x=center, top_y=top_y, scale=scale, compact=compact)
+
+    tile, coverage = badge_tile(geometry, asset, ELEMENT_COLORS["pyro"], font, scale, compact)
+
+    origin_x, origin_y = badge_tile_origin(geometry)
+    box_x0, box_y0, box_x1, box_y1 = (
+        geometry.box[0] - origin_x,
+        geometry.box[1] - origin_y,
+        geometry.box[2] - origin_x,
+        geometry.box[3] - origin_y,
+    )
+    circle_x0, circle_y0, circle_x1, circle_y1 = (
+        geometry.circle[0] - origin_x,
+        geometry.circle[1] - origin_y,
+        geometry.circle[2] - origin_x,
+        geometry.circle[3] - origin_y,
+    )
+    corner_radius = 14 * scale
+
+    assert _has_partial_coverage(
+        coverage, (box_x0, box_y0, box_x0 + corner_radius, box_y0 + corner_radius)
+    )
+    # The circle's left edge is vertical at its middle, so the partially
+    # covered pixels sit above and below that point.
+    assert _has_partial_coverage(coverage, (circle_x0, circle_y0, circle_x0 + 2, circle_y1))
+
+    assert coverage.getpixel(((box_x0 + box_x1) // 2, (box_y0 + box_y1) // 2)) == 255
+    # Above the box's top edge and left of the circle: no shape reaches here.
+    assert coverage.getpixel((box_x0, 0)) == 0
+
+    # add_badges() blends the tile onto the card through this very coverage, so
+    # a partially covered pixel must still hold the shape's own colour. A tile
+    # scaled by the coverage as well would fade every antialiased edge toward
+    # black instead of into the card art.
+    partial_ring_pixels = [
+        (x, y)
+        for y in range(circle_y0, circle_y0 + 4)
+        for x in range(circle_x0, circle_x1 + 1)
+        if 0 < coverage.getpixel((x, y)) < 255
+    ]
+    assert partial_ring_pixels
+    ring_color = hex_to_rgba(ELEMENT_COLORS["pyro"], 240)
+    assert all(tile.getpixel(pixel) == ring_color for pixel in partial_ring_pixels)
 
 
 def _patch_counting_open(monkeypatch) -> list[str]:
@@ -987,15 +1180,19 @@ def test_flip_keeps_the_horizontal_drag_direction() -> None:
     art = two_tone_art()
     target = panel_target_size(compact=True)
 
+    # The drag has to stay inside the reachable offset range, or the renderer
+    # clamps it and the shift no longer matches the requested offset.
+    drag = 0.1
     shifts = {}
     for flip in (False, True):
         member = Placement(offset_y=0.0, flip=flip)
+        assert drag < max_offset(art.size, compact=True, zoom=member.zoom)[0]
         centered = panel_art(art, target, member, member.zoom)
-        member.offset_x = 0.2
+        member.offset_x = drag
         shifted = panel_art(art, target, member, member.zoom)
         shifts[flip] = _tone_boundary_x(shifted) - _tone_boundary_x(centered)
         assert shifts[flip] > 0, flip
-        assert abs(shifts[flip] - 0.2 * target[0]) <= 2, flip
+        assert abs(shifts[flip] - drag * target[0]) <= 2, flip
 
     assert abs(shifts[True] - shifts[False]) <= 2
 

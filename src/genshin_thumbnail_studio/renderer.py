@@ -7,7 +7,7 @@ import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TypeVar
+from typing import Callable, TypeVar
 
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
@@ -69,6 +69,24 @@ GLOW_DOWNSCALE = 4
 # coverage; "L" rather than "RGBA" makes it ~6x cheaper for the same result,
 # and the outcome is cached anyway because it only depends on the layout.
 GEOMETRY_SUPERSAMPLE = 4
+
+# How much wider than the character crop the blurred glow layer is framed.
+GLOW_ZOOM_FACTOR = 0.78
+
+
+def glow_zoom(zoom: float) -> float:
+    """The zoom the panel glow is cover-fit at, for a placement zoom.
+
+    The glow is deliberately framed wider than the crop, so the wash around the
+    portrait shows a different part of the art, but it must still cover the
+    whole panel. Since both art axes scale by the same factor, zoom 1.0 is the
+    smallest factor that still covers the panel, so the floor wins for every
+    placement zoom up to `1 / GLOW_ZOOM_FACTOR` and the factor itself only
+    applies above that. Below a placement zoom of 1.0 the floor even leaves the
+    glow more zoomed in than the crop, which is what keeps the panel covered
+    while the portrait shrinks inside it.
+    """
+    return max(1.0, zoom * GLOW_ZOOM_FACTOR)
 
 
 def rarity_color(rarity: int | None) -> str:
@@ -150,12 +168,16 @@ def cover_scale(source_size: tuple[int, int], target: tuple[int, int], zoom: flo
     return max(target_w / source_w, target_h / source_h) * zoom
 
 
-def _scaled_size(source_size: tuple[int, int], target: tuple[int, int], image_scale: float) -> tuple[int, int]:
+def _scaled_size(source_size: tuple[int, int], image_scale: float) -> tuple[int, int]:
+    """Both axes multiplied by the same factor, so the zoom never changes the
+    art's aspect ratio.
+
+    The result may end up smaller than the panel, which is intentional: the
+    crop window then overhangs the art and the panel background and glow show
+    through the margin, which is preferable to stretching the portrait.
+    """
     source_w, source_h = source_size
-    return (
-        max(target[0], int(source_w * image_scale + 0.5)),
-        max(target[1], int(source_h * image_scale + 0.5)),
-    )
+    return (max(1, int(source_w * image_scale + 0.5)), max(1, int(source_h * image_scale + 0.5)))
 
 
 def resized_art_size(
@@ -163,14 +185,23 @@ def resized_art_size(
 ) -> tuple[int, int]:
     """Pixel size the art is resized to before it is cropped into one panel."""
     target = panel_target_size(compact, scale)
-    return _scaled_size(art_size, target, cover_scale(art_size, target, zoom))
+    return _scaled_size(art_size, cover_scale(art_size, target, zoom))
 
 
 def _offset_limits(resized: tuple[int, int], target: tuple[int, int]) -> tuple[float, float]:
-    """Largest panel-relative offset per axis that still moves the crop."""
+    """Largest panel-relative offset per axis that still moves the crop.
+
+    The slack is the absolute difference between the art and the panel, so both
+    directions read the same way: art larger than the panel can be panned by
+    the part hanging over its edges, art smaller than the panel by the margin
+    it leaves inside them, and `PAN_OVERSCAN` adds a strip beyond that either
+    way. Signed slack would go negative for art smaller than the panel minus
+    the overscan, which inverts the `min(limit, max(-limit, offset))` clamp in
+    `cover_resize_offset()`.
+    """
     return (
-        (resized[0] - target[0]) / (2 * target[0]) + PAN_OVERSCAN,
-        (resized[1] - target[1]) / (2 * target[1]) + PAN_OVERSCAN,
+        abs(resized[0] - target[0]) / (2 * target[0]) + PAN_OVERSCAN,
+        abs(resized[1] - target[1]) / (2 * target[1]) + PAN_OVERSCAN,
     )
 
 
@@ -207,7 +238,7 @@ def cover_resize_offset(
     source_w, source_h = image.size
     target_w, target_h = size
     image_scale = cover_scale(image.size, size, zoom)
-    resized_w, resized_h = _scaled_size(image.size, size, image_scale)
+    resized_w, resized_h = _scaled_size(image.size, image_scale)
     limit_x, limit_y = _offset_limits((resized_w, resized_h), size)
     offset_x = min(limit_x, max(-limit_x, offset_x))
     offset_y = min(limit_y, max(-limit_y, offset_y))
@@ -225,6 +256,8 @@ def cover_resize_offset(
     visible_top = max(0, top)
     visible_right = min(resized_w, left + target_w)
     visible_bottom = min(resized_h, top + target_h)
+    if visible_right <= visible_left or visible_bottom <= visible_top:
+        return Image.new("RGBA", size, (0, 0, 0, 0))
     box = (
         visible_left * source_w / resized_w,
         visible_top * source_h / resized_h,
@@ -327,24 +360,81 @@ def panel_polygon(
     ]
 
 
+def supersampled_coverage_for(
+    size: tuple[int, int], draw_shape: Callable[[ImageDraw.ImageDraw, int], None]
+) -> Image.Image:
+    """An antialiased "L" coverage map of `size`, drawn by `draw_shape(draw, factor)`
+    in coordinates multiplied by `factor`.
+
+    Drawing outside the map is clipped by ImageDraw, which is what lets the
+    slanted card outlines overhang their own layer.
+    """
+    big_size = (size[0] * GEOMETRY_SUPERSAMPLE, size[1] * GEOMETRY_SUPERSAMPLE)
+    big = Image.new("L", big_size, 0)
+    draw_shape(ImageDraw.Draw(big), GEOMETRY_SUPERSAMPLE)
+    return big.resize(size, Image.Resampling.BOX)
+
+
 def supersampled_coverage(
     size: tuple[int, int], points: list[tuple[int, int]], width: int | None = None
 ) -> Image.Image:
     """An antialiased "L" coverage map of `size` for the polygon `points`:
     filled when `width` is None, otherwise a `width`-pixel outline stroke.
-
-    Points outside `size` are clipped by ImageDraw, which is what lets the
-    slanted card outlines overhang their own layer.
     """
-    big_size = (size[0] * GEOMETRY_SUPERSAMPLE, size[1] * GEOMETRY_SUPERSAMPLE)
-    big_points = [(x * GEOMETRY_SUPERSAMPLE, y * GEOMETRY_SUPERSAMPLE) for x, y in points]
-    big = Image.new("L", big_size, 0)
-    draw = ImageDraw.Draw(big)
-    if width is None:
-        draw.polygon(big_points, fill=255)
-    else:
-        draw.polygon(big_points, outline=255, width=width * GEOMETRY_SUPERSAMPLE)
-    return big.resize(size, Image.Resampling.BOX)
+
+    def draw_shape(draw: ImageDraw.ImageDraw, factor: int) -> None:
+        big_points = [(x * factor, y * factor) for x, y in points]
+        if width is None:
+            draw.polygon(big_points, fill=255)
+        else:
+            draw.polygon(big_points, outline=255, width=width * factor)
+
+    return supersampled_coverage_for(size, draw_shape)
+
+
+def supersampled_box(box: tuple[int, int, int, int], factor: int) -> tuple[int, int, int, int]:
+    """`box` blown up by `factor` for a supersampled draw. Pillow's shape
+    coordinates are inclusive, so scaling the raw values would leave the far
+    edges one supersampled pixel short and shrink the shape by a whole
+    downsampled pixel."""
+    x0, y0, x1, y1 = box
+    return (x0 * factor, y0 * factor, (x1 + 1) * factor - 1, (y1 + 1) * factor - 1)
+
+
+def _hard_mask(mask: Image.Image) -> Image.Image:
+    """`mask` with every partially covered pixel promoted to full coverage."""
+    return mask.point(lambda value: 255 if value else 0)
+
+
+def _fully_covered(mask: Image.Image) -> Image.Image:
+    """The part of `mask` that is covered completely rather than partially."""
+    return mask.point(lambda value: 255 if value == 255 else 0)
+
+
+def paint_through_coverage(
+    tile: Image.Image, color: tuple[int, int, int, int], mask: Image.Image, painted: Image.Image
+) -> Image.Image:
+    """Paint `color` into `tile` through the antialiased `mask` and return the
+    grown `painted` coverage.
+
+    `Image.paste()` blends toward what the tile already holds, so on a shape's
+    outer silhouette, where that is still transparent black, a half-covered
+    pixel would end up at half the colour. The caller then pastes the tile onto
+    the card through the very same coverage, which would multiply by that half
+    a second time and fade every antialiased edge toward black. Seeding the
+    footprint with the flat colour first keeps those pixels at the colour
+    itself and leaves the softness to the coverage mask alone.
+
+    The seed is skipped where an earlier shape already covers the pixel
+    completely: there the tile holds real content the new shape should blend
+    into, which is what antialiases the shapes against each other. A pixel an
+    earlier shape only covers partially is part of the badge's silhouette and
+    gets seeded, so the outermost shape's colour survives the coverage paste.
+    """
+    seed = ImageChops.subtract(_hard_mask(mask), _fully_covered(painted))
+    tile.paste(color, mask=seed)
+    tile.paste(color, mask=mask)
+    return ImageChops.lighter(painted, mask)
 
 
 def panel_background(size: tuple[int, int], color: str, compact: bool) -> Image.Image:
@@ -392,7 +482,7 @@ def make_panel(
         art,
         glow_size,
         member,
-        member.zoom * 0.78,
+        glow_zoom(member.zoom),
         resample=Image.Resampling.BILINEAR,
     )
     glow = glow.filter(ImageFilter.GaussianBlur((14 if compact else 18) * scale / GLOW_DOWNSCALE))
@@ -711,16 +801,20 @@ def badge_tile(
     that exactly, while alpha-compositing it would instead let the card art
     show through the badge.
 
+    The box and the circle are drawn supersampled, so their edge pixels are
+    only partially covered on purpose: the paste in add_badges() then blends
+    them into the card art, which is what antialiases the shapes.
+
     Everything is drawn in tile-local coordinates, so the tile depends only on
     the build, the card colour and the render scale, not on the slot it ends
     up in.
 
-    The paste reproduces the original RGB exactly, but where a semi-transparent
-    weapon icon pokes out of the circle it writes the icon's own alpha instead
-    of the blended alpha an alpha_composite() would leave behind. That is
-    invisible today because add_badges() is the last step and render_image()
-    flattens to RGB right after; compositing anything on top of the badges
-    would make it a real difference.
+    Inside the shapes the paste reproduces the drawn RGB exactly, but where a
+    semi-transparent weapon icon pokes out of the circle it writes the icon's
+    own alpha instead of the blended alpha an alpha_composite() would leave
+    behind. That is invisible today because add_badges() is the last step and
+    render_image() flattens to RGB right after; compositing anything on top of
+    the badges would make it a real difference.
     """
     origin_x, origin_y = badge_tile_origin(geometry)
     box = (
@@ -739,20 +833,28 @@ def badge_tile(
     # more than the raw extent in each direction.
     size = (max(box[2], circle[2]) + 1, max(box[3], circle[3]) + 1)
     tile = Image.new("RGBA", size, (0, 0, 0, 0))
-    coverage = Image.new("L", size, 0)
     draw = ImageDraw.Draw(tile)
-    coverage_draw = ImageDraw.Draw(coverage)
 
     box_radius = (14 if compact else 18) * scale
     box_width = 3 * scale
-    draw.rounded_rectangle(
-        box,
-        radius=box_radius,
-        fill=(0, 0, 0, 178),
-        outline=hex_to_rgba(color, 245),
-        width=box_width,
+    box_fill = supersampled_coverage_for(
+        size,
+        lambda d, factor: d.rounded_rectangle(
+            supersampled_box(box, factor), radius=box_radius * factor, fill=255
+        ),
     )
-    coverage_draw.rounded_rectangle(box, radius=box_radius, fill=255, outline=255, width=box_width)
+    box_outline = supersampled_coverage_for(
+        size,
+        lambda d, factor: d.rounded_rectangle(
+            supersampled_box(box, factor),
+            radius=box_radius * factor,
+            outline=255,
+            width=box_width * factor,
+        ),
+    )
+    painted = Image.new("L", size, 0)
+    painted = paint_through_coverage(tile, (0, 0, 0, 178), box_fill, painted)
+    painted = paint_through_coverage(tile, hex_to_rgba(color, 245), box_outline, painted)
 
     stroke_width = (3 if compact else 4) * scale
     constellation_text = f"C{asset.build.constellation}"
@@ -793,8 +895,17 @@ def badge_tile(
     )
 
     circle_width = 2 * scale
-    draw.ellipse(circle, fill=(0, 0, 0, 170), outline=hex_to_rgba(color, 240), width=circle_width)
-    coverage_draw.ellipse(circle, fill=255, outline=255, width=circle_width)
+    circle_fill = supersampled_coverage_for(
+        size, lambda d, factor: d.ellipse(supersampled_box(circle, factor), fill=255)
+    )
+    circle_outline = supersampled_coverage_for(
+        size,
+        lambda d, factor: d.ellipse(
+            supersampled_box(circle, factor), outline=255, width=circle_width * factor
+        ),
+    )
+    painted = paint_through_coverage(tile, (0, 0, 0, 170), circle_fill, painted)
+    coverage = paint_through_coverage(tile, hex_to_rgba(color, 240), circle_outline, painted)
 
     icon_d = (48 if compact else 68) * scale
     icon_key = (str(asset.weapon_path), icon_d)
