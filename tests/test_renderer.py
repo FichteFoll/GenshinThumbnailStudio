@@ -648,6 +648,19 @@ def test_slanted_card_edge_is_antialiased(tmp_path: Path) -> None:
             ), (y, pixel)
 
 
+def _punch_a_transparent_hole(assets: dict[str, Asset]) -> None:
+    """Give every asset opaque red art with a transparent hole in it.
+
+    The glow is only ever visible where the character art is transparent, and
+    the art's red is then the only red in the panel, so a red pixel outside the
+    art can only have arrived through the blurred glow layer.
+    """
+    for asset in assets.values():
+        art = Image.new("RGBA", (1200, 900), (255, 40, 40, 255))
+        ImageDraw.Draw(art).ellipse((500, 350, 700, 550), fill=(0, 0, 0, 0))
+        art.save(asset.art_path)
+
+
 def test_glow_shows_through_a_transparent_gap_in_the_character_art(tmp_path: Path) -> None:
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
@@ -657,12 +670,7 @@ def test_glow_shows_through_a_transparent_gap_in_the_character_art(tmp_path: Pat
     for member in (member for team in project.teams for member in team):
         member.zoom = 1.6
     assets = create_assets(tmp_path, names)
-    # The glow is only ever visible where the character art is transparent, so
-    # give every asset opaque red art with a transparent hole punched into it.
-    for asset in assets.values():
-        art = Image.new("RGBA", (1200, 900), (255, 40, 40, 255))
-        ImageDraw.Draw(art).ellipse((500, 350, 700, 550), fill=(0, 0, 0, 0))
-        art.save(asset.art_path)
+    _punch_a_transparent_hole(assets)
 
     preview = render_preview(project, assets)
 
@@ -700,6 +708,50 @@ def test_glow_shows_through_a_transparent_gap_in_the_character_art(tmp_path: Pat
     # The art's red is the only red in this panel, so it can only have reached
     # a pixel the character art does not cover via the blurred glow layer.
     assert pixel[0] > background_pixel[0] + 10
+
+
+def test_glow_reaches_into_a_transparent_gap_at_the_default_zoom(tmp_path: Path) -> None:
+    """The floored glow zoom deserves its own probe, since it is what a fresh
+    project renders with. There the glow is framed exactly like the crop, so a
+    gap in the art is a gap in the glow as well, and only the glow layer's own
+    softness reaches into it: it is built at a quarter of the panel resolution,
+    blurred and resampled back up, which carries colour a little way past the
+    gap's rim without filling its middle. Filling it is what the wider framing
+    above 1 / GLOW_ZOOM_FACTOR is for.
+    """
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)
+    _punch_a_transparent_hole(assets)
+
+    member = project.teams[0][1]
+    assert glow_zoom(member.zoom) == 1.0, "the default zoom has to exercise the floor"
+
+    preview = render_preview(project, assets)
+
+    target = panel_target_size(compact=True)
+    art = Image.open(assets[member.name.casefold()].art_path).convert("RGBA")
+    crop = cover_resize_offset(art, target, member.offset_x, member.offset_y, member.zoom)
+    row = target[1] // 2
+    gap = [x for x in range(target[0]) if crop.getpixel((x, row))[3] == 0]
+    assert gap, "no pixel where the character art is transparent"
+
+    slant = panel_metrics(compact=True)[2]
+    plain_background = panel_background(target, member.color, compact=True)
+
+    def red_over_the_bare_panel(x: int) -> float:
+        """How much redder the render is at `x` than the panel would be without
+        any glow, mapped to canvas coordinates the way the panel is pasted."""
+        pixel = preview.getpixel((1 * 320 - slant + x, row))
+        background_pixel = plain_background.getpixel((x, row))
+        assert isinstance(pixel, tuple)
+        assert isinstance(background_pixel, tuple)
+        return pixel[0] - background_pixel[0]
+
+    assert red_over_the_bare_panel(gap[0]) > 20
+    assert red_over_the_bare_panel(gap[-1]) > 20
+    assert red_over_the_bare_panel(gap[len(gap) // 2]) < 10
 
 
 def test_glow_never_leaves_the_panel_uncovered() -> None:
