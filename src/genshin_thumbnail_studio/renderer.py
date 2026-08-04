@@ -995,7 +995,10 @@ def render_image(
                 round(member.offset_y, 4),
                 round(member.zoom, 4),
                 member.flip,
-                member.color,
+                # Must track what make_panel() actually paints with
+                # (card_color(member, asset)), not the raw placement color,
+                # or a stale panel can survive an element change.
+                card_color(member, asset) if asset else member.color,
                 str(asset.art_path) if asset else None,
                 row_height,
                 step,
