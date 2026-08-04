@@ -578,7 +578,9 @@ def placeholder_panel(
 # fully-composited panel layers (make_panel()/placeholder_panel() output),
 # one for decoded/resized weapon icons, one for decoded character art, and
 # one for preview-sized working copies of that art. Cleared via
-# clear_render_cache(), e.g. between tests that assert on cache hit/miss counts.
+# clear_render_cache(), e.g. between tests that assert on cache hit/miss
+# counts, and automatically at the end of every export_project() call (even
+# if it raises) to release its larger export-scale entries.
 #
 # Cached panels are panel-sized (~0.6 MB each at preview scale, so the bound is
 # ~19 MB) and are composited *into* the canvas rather than being the composite
@@ -1071,17 +1073,20 @@ def export_project(project: Project, assets: dict[str, Asset], directory: Path) 
     scale = min(4, max(2, math.ceil(2 * project.output_height / BASE_H)))
     output_size = project.output_size
     written = []
-    if project.mode == "abyss":
-        target = directory / f"{safe_name(project.output_name)}.png"
-        render_image(project.teams, assets, compact=True, scale=scale, output_size=output_size).save(
-            target, optimize=True
-        )
-        written.append(target)
-    else:
-        for index, team in enumerate(project.teams, start=1):
-            target = directory / f"{safe_name(project.output_name)}_boss{index}.png"
-            render_image([team], assets, compact=False, scale=scale, output_size=output_size).save(
+    try:
+        if project.mode == "abyss":
+            target = directory / f"{safe_name(project.output_name)}.png"
+            render_image(project.teams, assets, compact=True, scale=scale, output_size=output_size).save(
                 target, optimize=True
             )
             written.append(target)
+        else:
+            for index, team in enumerate(project.teams, start=1):
+                target = directory / f"{safe_name(project.output_name)}_boss{index}.png"
+                render_image([team], assets, compact=False, scale=scale, output_size=output_size).save(
+                    target, optimize=True
+                )
+                written.append(target)
+    finally:
+        clear_render_cache()
     return written

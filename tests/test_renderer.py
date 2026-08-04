@@ -1015,6 +1015,32 @@ def test_clear_render_cache_empties_the_render_caches(tmp_path: Path) -> None:
     assert not renderer._border_cache
 
 
+def test_export_project_clears_the_render_caches_when_done(tmp_path: Path) -> None:
+    clear_render_cache()
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)
+
+    render_preview(project, assets)
+    assert renderer._panel_cache
+    assert renderer._weapon_icon_cache
+    assert renderer._art_cache
+    assert renderer._work_cache
+    assert renderer._mask_cache
+    assert renderer._border_cache
+    assert renderer._badge_cache
+
+    export_project(project, assets, tmp_path / "out")
+    assert not renderer._panel_cache
+    assert not renderer._weapon_icon_cache
+    assert not renderer._art_cache
+    assert not renderer._work_cache
+    assert not renderer._mask_cache
+    assert not renderer._border_cache
+    assert not renderer._badge_cache
+
+
 def test_slots_with_identical_badge_state_share_one_cached_tile(tmp_path: Path) -> None:
     """A badge tile is drawn in tile-local coordinates and positioned only when
     it is composited, so every slot showing the same build, card colour and
