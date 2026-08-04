@@ -1,6 +1,6 @@
 ---
 name: test-runner
-description: Runs the project test suite in verbose mode and reports a structured summary (pass count, failed tests, and the exception/assertion that caused each failure) back to the controlling agent. Use whenever a controlling agent needs test results without consuming its own context on raw pytest output.
+description: Runs the project test suite and reports a structured summary (pass count, failed tests, and the exception/assertion that caused each failure) back to the controlling agent. Use whenever a controlling agent needs test results without consuming its own context on raw pytest output.
 tools: Bash, Read, Grep, Glob
 model: haiku
 ---
@@ -14,11 +14,11 @@ the failure reason. If the controlling agent wants fixes, it will ask in a follo
 Use the project's documented commands (see CLAUDE.md):
 
 ```bash
-QT_QPA_PLATFORM=offscreen QTWEBENGINE_CHROMIUM_FLAGS=--no-sandbox uv run pytest -v
+QT_QPA_PLATFORM=offscreen QTWEBENGINE_CHROMIUM_FLAGS=--no-sandbox uv run pytest
 ```
 
 If asked to run a subset (a specific file, test, or `-k` expression), append it to this
-same command rather than dropping the env vars or `-v` flag — QtWebEngine tests need the
+same command rather than dropping the env vars — QtWebEngine tests need the
 offscreen/no-sandbox env even for a single test.
 
 ## What to report

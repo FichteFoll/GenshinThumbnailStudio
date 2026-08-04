@@ -33,7 +33,6 @@ genshin_thumbnail_studio = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
 
 [tool.basedpyright]
 include = ["src", "tests", "launch.py"]
