@@ -45,6 +45,7 @@ def test_project_round_trip() -> None:
     project = Project.blank("stygian", "123456789")
     project.teams[1][2].name = "Test Character"
     project.teams[1][2].offset_x = 0.42
+    project.teams[1][2].flip = True
     project.output_height = 1440
     assert project.to_dict()["schemaVersion"] == 3
     restored = Project.from_dict(project.to_dict())
@@ -52,6 +53,8 @@ def test_project_round_trip() -> None:
     assert len(restored.teams) == 3
     assert restored.teams[1][2].name == "Test Character"
     assert restored.teams[1][2].offset_x == 0.42
+    assert restored.teams[1][2].flip is True
+    assert restored.teams[1][3].flip is False
     assert restored.output_height == 1440
     assert restored.output_size == (2560, 1440)
 
@@ -64,6 +67,13 @@ def test_placement_from_dict_ignores_unknown_keys() -> None:
     assert placement.zoom == 1.2
     assert placement.offset_x == Placement().offset_x
     assert placement.offset_y == Placement().offset_y
+
+
+def test_placement_from_dict_defaults_the_flip() -> None:
+    """The flip is optional in both directions, so a member dict written before
+    it existed loads as unflipped rather than raising."""
+    placement = Placement.from_dict({"name": "Furina", "offset_x": 0.1, "zoom": 1.2})
+    assert placement.flip is False
 
 
 def test_project_output_height_defaults_to_1080p() -> None:
