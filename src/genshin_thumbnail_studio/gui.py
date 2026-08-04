@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import copy
 import re
 from datetime import datetime, timezone
@@ -132,7 +133,12 @@ class PreviewWidget(QFrame):
         if not self._pixmap:
             return QRect()
         fitted = self._pixmap.size().scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio)
-        return QRect((self.width() - fitted.width()) // 2, (self.height() - fitted.height()) // 2, fitted.width(), fitted.height())
+        return QRect(
+            (self.width() - fitted.width()) // 2,
+            (self.height() - fitted.height()) // 2,
+            fitted.width(),
+            fitted.height(),
+        )
 
     def _image_point(self, point: QPoint) -> tuple[float, float] | None:
         rect = self._image_rect()
@@ -301,7 +307,7 @@ class RenderJob(QRunnable):
     def run(self) -> None:  # type: ignore[no-untyped-def]
         try:
             image: Image.Image | None = render_preview(self._project_snapshot, self._assets_snapshot)
-        except Exception as error:  # noqa: BLE001 - reported back to the GUI thread
+        except Exception as error:  # reported back to the GUI thread
             self.signals.finished.emit(self.token, None, error)
             return
         self.signals.finished.emit(self.token, image, None)
@@ -618,7 +624,11 @@ class MainWindow(QMainWindow):
 
     def _preset_key(self, member: Placement) -> str:
         build = self.builds.get(member.name.casefold())
-        identity = build.costume_id if build and build.costume_id else (build.build_id if build else member.name.casefold())
+        identity = (
+            build.costume_id
+            if build and build.costume_id
+            else (build.build_id if build else member.name.casefold())
+        )
         return f"{self.project.mode}|{identity}"
 
     def _apply_preset(self, member: Placement) -> None:
@@ -674,7 +684,7 @@ class MainWindow(QMainWindow):
         # model from holding an offset the renderer could not reach anyway.
         member.offset_x = self.x_slider.value() / 1000
         member.offset_y = self.y_slider.value() / 1000
-        self.zoom_slider.setValue(int(round(member.zoom * 100)))
+        self.zoom_slider.setValue(round(member.zoom * 100))
         self.flip_check.setChecked(member.flip)
         resolution_index = self.resolution_combo.findData(self.project.output_height)
         self.resolution_combo.setCurrentIndex(resolution_index if resolution_index >= 0 else 1)
@@ -767,7 +777,7 @@ class MainWindow(QMainWindow):
                     self.statusBar().showMessage("Refreshing Akasha ...")
                     QApplication.restoreOverrideCursor()
                     if not self.client.refresh_profile(uid, progress=lambda text: self.statusBar().showMessage(text)):
-                        raise AkashaError("Akasha refresh did not finish within 90 seconds.")
+                        raise AkashaError("Akasha refresh did not finish within 90 seconds.") from None
                     QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
                     builds, age, last = self.client.load_profile(uid)
                 elif dialog.clickedButton() == stale_button:
@@ -928,10 +938,8 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, "Save project", "thumbnail-project.json", "JSON (*.json)")
         if not path:
             return
-        try:
+        with contextlib.suppress(ValueError):
             self._validate_team()
-        except ValueError:
-            pass
         self.project.uid = self.uid_edit.text().strip()
         self.project.output_name = self.output_name.text().strip() or "genshin_thumbnail"
         save_project(self.project, Path(path))
