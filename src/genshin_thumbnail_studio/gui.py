@@ -77,7 +77,6 @@ from .storage import (
     save_project,
 )
 
-
 # Delay between a placement change and the preview render it triggers.
 RENDER_THROTTLE_MS = 80
 
@@ -217,7 +216,7 @@ SLOT_MIME_TYPE = "application/x-genshin-slot"
 class _SlotDragHandle(QLabel):
     """Small grip label; the only part of a team slot that starts a drag."""
 
-    def __init__(self, slot_widget: "TeamSlotWidget") -> None:
+    def __init__(self, slot_widget: TeamSlotWidget) -> None:
         super().__init__("☰")
         self._slot_widget = slot_widget
         self.setFixedWidth(18)

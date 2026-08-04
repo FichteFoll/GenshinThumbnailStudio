@@ -4,7 +4,6 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-
 Mode = Literal["abyss", "stygian"]
 
 TEAM_COLORS = [
@@ -39,7 +38,7 @@ class Build:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "Build":
+    def from_dict(cls, value: dict[str, Any]) -> Build:
         return cls(**value)
 
 
@@ -67,7 +66,7 @@ class Placement:
     flip: bool = False
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "Placement":
+    def from_dict(cls, value: dict[str, Any]) -> Placement:
         """Read the known keys, ignoring unknown ones, so that a legacy payload
         loads with default framing instead of raising."""
         defaults = cls()
@@ -95,7 +94,7 @@ class Project:
         return (self.output_height * 16 // 9, self.output_height)
 
     @classmethod
-    def blank(cls, mode: Mode = "abyss", uid: str = "") -> "Project":
+    def blank(cls, mode: Mode = "abyss", uid: str = "") -> Project:
         team_count = 2 if mode == "abyss" else 3
         zoom = DEFAULT_ZOOM[mode]
         teams: list[list[Placement]] = []
@@ -124,7 +123,7 @@ class Project:
         }
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> "Project":
+    def from_dict(cls, value: dict[str, Any]) -> Project:
         raw_mode = str(value.get("mode", "abyss")).casefold()
         mode: Mode
         if raw_mode == "abyss":

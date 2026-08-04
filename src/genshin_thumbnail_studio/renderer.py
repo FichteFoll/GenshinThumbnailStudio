@@ -5,14 +5,14 @@ import functools
 import math
 import re
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, TypeAlias, TypeVar
+from typing import TypeAlias, TypeVar
 
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
 from .models import Asset, Placement, Project
-
 
 BASE_W = 1280
 BASE_H = 720

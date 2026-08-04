@@ -7,16 +7,16 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 from PIL import Image
 from PySide6.QtCore import QEventLoop, QTimer, QUrl
 from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
 
 from .models import Asset, Build
-
 
 API_ROOT = "https://akasha.cv/api"
 ENKA_ROOT = "https://enka.network/ui"
