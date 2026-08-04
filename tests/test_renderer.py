@@ -1,3 +1,5 @@
+import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import NamedTuple
@@ -1013,6 +1015,32 @@ def test_clear_render_cache_empties_the_render_caches(tmp_path: Path) -> None:
     assert not renderer._border_cache
 
 
+def test_export_project_clears_the_render_caches_when_done(tmp_path: Path) -> None:
+    clear_render_cache()
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)
+
+    render_preview(project, assets)
+    assert renderer._panel_cache
+    assert renderer._weapon_icon_cache
+    assert renderer._art_cache
+    assert renderer._work_cache
+    assert renderer._mask_cache
+    assert renderer._border_cache
+    assert renderer._badge_cache
+
+    export_project(project, assets, tmp_path / "out")
+    assert not renderer._panel_cache
+    assert not renderer._weapon_icon_cache
+    assert not renderer._art_cache
+    assert not renderer._work_cache
+    assert not renderer._mask_cache
+    assert not renderer._border_cache
+    assert not renderer._badge_cache
+
+
 def test_slots_with_identical_badge_state_share_one_cached_tile(tmp_path: Path) -> None:
     """A badge tile is drawn in tile-local coordinates and positioned only when
     it is composited, so every slot showing the same build, card colour and
@@ -1070,6 +1098,56 @@ def test_badge_cache_key_separates_builds_differing_only_in_c_and_r(tmp_path: Pa
 
     assert ImageChops.difference(baseline, other_constellation).getbbox() is not None
     assert ImageChops.difference(baseline, other_refinement).getbbox() is not None
+
+
+def test_add_badges_serializes_font_use_across_threads(tmp_path: Path, monkeypatch) -> None:
+    """The FreeTypeFont find_font() memoizes is shared by the preview worker
+    thread and the exporting GUI thread, and Pillow does not document measuring
+    or drawing with one font from two threads at once as safe. add_badges() must
+    therefore hold _font_lock across its whole font-using span, so at most one
+    thread is ever inside it."""
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)
+
+    probe_lock = threading.Lock()
+    inside = 0
+    max_inside = 0
+
+    def probing_find_font(size: int):
+        nonlocal inside, max_inside
+        with probe_lock:
+            inside += 1
+            max_inside = max(max_inside, inside)
+        try:
+            font = find_font(size)
+            # Sleep while still counted as "inside" to widen the window in which
+            # an unserialized second thread would be observed.
+            time.sleep(0.02)
+            return font
+        finally:
+            with probe_lock:
+                inside -= 1
+
+    monkeypatch.setattr(renderer, "find_font", probing_find_font)
+
+    failures: list[BaseException] = []
+
+    def render() -> None:
+        try:
+            render_preview(project, assets)
+        except BaseException as error:  # noqa: BLE001 - re-raised in the main thread
+            failures.append(error)
+
+    threads = [threading.Thread(target=render) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert not failures
+    assert max_inside == 1
 
 
 def test_swapping_slots_with_warm_cache_matches_fresh_render(tmp_path: Path) -> None:
@@ -1243,3 +1321,30 @@ def test_flip_is_part_of_the_panel_cache_key(tmp_path: Path) -> None:
     flipped = render_preview(project, assets)  # deliberately no cache clear
 
     assert ImageChops.difference(unflipped, flipped).getbbox() is not None
+
+
+def test_changing_asset_element_invalidates_stale_panel_cache(tmp_path: Path) -> None:
+    """Regression test: _panel_cache must key on the resolved card_color(),
+    not the raw placement color. card_color() prefers asset.build.element
+    over member.color, so changing only the element (e.g. after an Akasha
+    profile refresh) while member.color stays the same must not serve a
+    stale, wrongly-colored panel from the cache."""
+    clear_render_cache()
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)  # no elements: Build.element is None
+
+    render_preview(project, assets)  # warm _panel_cache with the fallback-color panel
+
+    first_member_color = project.teams[0][0].color
+    pyro_color = ELEMENT_COLORS["pyro"]
+    assert first_member_color != pyro_color
+    assets[names[0].casefold()].build.element = "Pyro"
+
+    warm = render_preview(project, assets)  # deliberately no cache clear
+
+    clear_render_cache()
+    fresh = render_preview(project, assets)
+
+    assert ImageChops.difference(warm, fresh).getbbox() is None
