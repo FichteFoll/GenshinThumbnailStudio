@@ -1,15 +1,21 @@
+from dataclasses import replace
 from pathlib import Path
+from typing import NamedTuple
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
 
 from genshin_thumbnail_studio import renderer
 from genshin_thumbnail_studio.models import Asset, Build, Project
 from genshin_thumbnail_studio.renderer import (
     BACKGROUND_COLOR,
+    BASE_W,
+    CARD_BORDER,
+    CARD_GAP,
     ELEMENT_COLORS,
     PAN_OVERSCAN,
     RARITY_COLORS,
     STANDARD_ART_SIZE,
+    apply_panel_mask,
     badge_geometry,
     clear_render_cache,
     cover_resize_offset,
@@ -18,11 +24,37 @@ from genshin_thumbnail_studio.renderer import (
     hex_to_rgba,
     max_offset,
     panel_background,
+    panel_metrics,
+    panel_origin,
+    panel_polygon,
     panel_target_size,
     render_image,
     render_preview,
     resized_art_size,
 )
+
+
+class CompactLayout(NamedTuple):
+    row_height: int
+    step: float
+    slant: int
+    gap: float
+    border: float
+    panel_width: int
+
+
+def compact_layout(scale: int = 1) -> CompactLayout:
+    """render_image()'s layout numbers for a compact (two-row abyss) canvas,
+    taken from the renderer's own helpers so probes follow the layout."""
+    row_height, panel_width, slant = panel_metrics(compact=True, scale=scale)
+    return CompactLayout(
+        row_height=row_height,
+        step=BASE_W * scale / 4,
+        slant=slant,
+        gap=CARD_GAP * scale,
+        border=CARD_BORDER * scale,
+        panel_width=panel_width,
+    )
 
 
 def create_assets(
@@ -181,6 +213,74 @@ def test_default_offsets_still_center_the_crop() -> None:
     assert abs(_marker_center_x(centered) - target[0] / 2) <= 1
 
 
+def gradient_image(width: int, height: int) -> Image.Image:
+    # Smooth and different along both axes, so a swapped or inverted axis in
+    # the crop mapping changes the output. Deliberately not noise: LANCZOS
+    # ringing around isolated pixels makes noise sources differ by ~40/255
+    # between an upfront resize and a box resize even when both are correct.
+    image = Image.new("RGBA", (width, height))
+    pixels = image.load()
+    assert pixels is not None
+    for y in range(height):
+        for x in range(width):
+            pixels[x, y] = (
+                10 + int(200 * x / max(1, width - 1)),
+                10 + int(200 * y / max(1, height - 1)),
+                10 + int(100 * (x + y) / max(1, width + height - 2)),
+                255,
+            )
+    return image
+
+
+def reference_cover_resize_offset(
+    image: Image.Image,
+    size: tuple[int, int],
+    offset_x: float,
+    offset_y: float,
+    zoom: float,
+) -> Image.Image:
+    """The pre-optimisation implementation: resize the whole image, then crop.
+
+    Image.crop() zero-pads a window that leaves the art, which is what the
+    optimised version has to reproduce for the overscanned strip.
+    """
+    source_w, source_h = image.size
+    target_w, target_h = size
+    image_scale = max(target_w / source_w, target_h / source_h) * zoom
+    resized_w = max(target_w, int(source_w * image_scale + 0.5))
+    resized_h = max(target_h, int(source_h * image_scale + 0.5))
+    limit_x = (resized_w - target_w) / (2 * target_w) + PAN_OVERSCAN
+    limit_y = (resized_h - target_h) / (2 * target_h) + PAN_OVERSCAN
+    offset_x = min(limit_x, max(-limit_x, offset_x))
+    offset_y = min(limit_y, max(-limit_y, offset_y))
+    resized = image.resize((resized_w, resized_h), Image.Resampling.LANCZOS)
+    left = int(round((resized_w - target_w) / 2 - offset_x * target_w))
+    top = int(round((resized_h - target_h) / 2 - offset_y * target_h))
+    return resized.crop((left, top, left + target_w, top + target_h))
+
+
+def test_cover_resize_offset_matches_resize_then_crop() -> None:
+    # The compact abyss panel size, against a source both larger and smaller
+    # than it, so both the downscale and the upscale branch of the cover
+    # scaling are covered.
+    target = (416, 360)
+    for source in (gradient_image(1200, 900), gradient_image(120, 90)):
+        for zoom in (0.70, 1.00, 1.80):
+            # The outer values are past the reachable range, so the clamp
+            # decides the window and it overscans the art by PAN_OVERSCAN.
+            for offset_x in (-2.0, -0.3, 0.0, 0.3, 2.0):
+                for offset_y in (-2.0, -0.3, 0.0, 0.3, 2.0):
+                    case = (source.size, zoom, offset_x, offset_y)
+                    result = cover_resize_offset(source, target, offset_x, offset_y, zoom)
+                    assert result.size == target, case
+                    expected = reference_cover_resize_offset(source, target, offset_x, offset_y, zoom)
+                    difference = ImageChops.difference(result, expected)
+                    # Resampling the source region directly is not bit-exact
+                    # against resizing everything up front, but on smooth
+                    # content the two stay within a couple of levels.
+                    assert max(band.getextrema()[1] for band in difference.split()) <= 4, case
+
+
 def test_abyss_render_and_export(tmp_path: Path) -> None:
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
@@ -285,8 +385,7 @@ def test_badge_render_and_geometry_for_long_constellation_string(tmp_path: Path)
     # push past the canvas edge.
     scale = 1
     compact = True
-    row_height = 360
-    step = 320.0
+    row_height, step, *_ = compact_layout(scale)
     font = find_font((38 if compact else 54) * scale)
     canvas = Image.new("RGBA", (1280, 720), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
@@ -335,8 +434,7 @@ def test_badge_constellation_and_refinement_use_distinct_rarity_colors(tmp_path:
     # used in the long-string badge test above.
     scale = 1
     compact = True
-    row_height = 360
-    step = 320.0
+    row_height, step, *_ = compact_layout(scale)
     font = find_font((38 if compact else 54) * scale)
     canvas = Image.new("RGBA", (1280, 720), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
@@ -364,8 +462,8 @@ def test_preview_renders_placeholder_panel_for_missing_asset(tmp_path: Path) -> 
     # the shared-edge gap, mapped from panel-local to canvas coordinates the
     # same way make_panel()/placeholder_panel() paste onto the canvas
     # (index * step - slant, row * row_height).
-    panel_width, slant, row_height = 340, 38, 360
-    target = (panel_width + slant * 2, row_height)
+    slant = compact_layout().slant
+    target = panel_target_size(compact=True)
     placeholder_color = project.teams[0][0].color
     expected = panel_background(target, placeholder_color, compact=True)
     local_point = (188, 180)
@@ -380,6 +478,167 @@ def test_preview_renders_placeholder_panel_for_missing_asset(tmp_path: Path) -> 
     plain_background = panel_background(target, real_color, compact=True)
     real_canvas_point = (1 * 320 - slant + local_point[0], local_point[1])
     assert preview.getpixel(real_canvas_point) != plain_background.getpixel(local_point)[:3]
+
+
+def test_leftmost_slot_is_not_shifted_by_its_negative_panel_origin(tmp_path: Path) -> None:
+    """Slot 0's panel origin (index * step - slant) is negative, so its
+    panel-sized layer is composited with a source offset instead of a plain
+    destination offset. A panel's content depends only on its size, colour,
+    placement and art, never on its slot, so giving slot 1 the same asset lets
+    its (non-negative origin) rendering pin down slot 0's alignment.
+
+    The art carries a horizontal gradient, without which every probed row
+    would be constant and a horizontal shift invisible."""
+    clear_render_cache()
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)
+    art = Image.new("RGBA", (1200, 900), (0, 0, 0, 255))
+    art_draw = ImageDraw.Draw(art)
+    for x in range(art.width):
+        art_draw.line((x, 0, x, art.height), fill=(x * 255 // art.width, 40, 200, 255))
+    art.save(assets[names[0].casefold()].art_path)
+    project.teams[0][1].name = project.teams[0][0].name
+    project.teams[0][1].color = project.teams[0][0].color
+
+    preview = render_preview(project, assets)
+
+    # Preview geometry for a compact (two-row) abyss team at scale 1.
+    row_height, step, slant, _, _, panel_width = compact_layout()
+    first_origin_x, _ = panel_origin(0, row=0, row_height=row_height, step=step, slant=slant)
+    second_origin_x, _ = panel_origin(1, row=0, row_height=row_height, step=step, slant=slant)
+    # Horizontal centre of the panel: well inside both cards, clear of the
+    # borders and of the slanted shared edges at every probed height.
+    local_x = (panel_width + slant * 2) // 2
+
+    for local_y in (row_height // 4, row_height // 2, 3 * row_height // 4):
+        first = preview.getpixel((first_origin_x + local_x, local_y))
+        second = preview.getpixel((second_origin_x + local_x, local_y))
+        assert first == second, local_y
+        # Guard against this becoming vacuous: with `source` dropped, slot 0's
+        # panel would be shifted right by `slant`, so the pixel `slant` to the
+        # right is exactly what a broken composite would put at `first`. It
+        # must therefore differ from the correctly aligned value.
+        shifted = preview.getpixel((first_origin_x + local_x + slant, local_y))
+        assert shifted != second, local_y
+
+
+def test_panel_mask_slanted_edge_is_antialiased() -> None:
+    """The panel mask itself is supersampled, so a panel's alpha fades across
+    its slanted edges instead of stepping straight from 0 to 255.
+
+    The rendered-preview probe below cannot cover this: the opaque border
+    stroke is centred on the mask boundary and hides the mask's own edge, so
+    aliasing only the mask would go unnoticed there.
+    """
+    clear_render_cache()  # the mask is cached across tests
+    row_height, step, slant, gap, border, panel_width = compact_layout()
+    index, row, num_rows, scale = 2, 0, 2, 1
+    panel = Image.new("RGBA", (panel_width + 2 * slant, row_height), (255, 255, 255, 255))
+
+    apply_panel_mask(panel, index, row, num_rows, BASE_W, row_height, step, slant, scale)
+
+    points = panel_polygon(index, row, num_rows, BASE_W, row_height, step, slant, gap, border)
+    origin_x, _ = panel_origin(index, row, row_height, step, slant)
+    alpha = panel.getchannel("A")
+    # Both slanted edges, at two heights each, so an edge that only happened to
+    # blend at one spot would not pass.
+    for top, bottom in ((points[0], points[3]), (points[1], points[2])):
+        for y in (60, 300):
+            edge_x = top[0] + (bottom[0] - top[0]) * (y - top[1]) / (bottom[1] - top[1]) - origin_x
+            window = [alpha.getpixel((x, y)) for x in range(round(edge_x) - 2, round(edge_x) + 3)]
+            assert any(0 < value < 255 for value in window), (top, y, window)
+
+
+def test_slanted_card_edge_is_antialiased(tmp_path: Path) -> None:
+    """The slanted card edges and their border strokes are supersampled, so
+    crossing one horizontally must show at least one blended pixel between the
+    canvas background and the fully opaque border colour. An aliased edge would
+    step straight from one to the other."""
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)  # no elements -> placement colours
+    preview = render_preview(project, assets)
+
+    # The left edge of the first row's slot 2, which slants across the shared
+    # boundary at x = 2 * step. Both the layout numbers and the polygon come
+    # from the renderer's own geometry, so the probe follows the layout rather
+    # than hard-coded pixels.
+    row_height, step, slant, gap, border, _ = compact_layout()
+    points = panel_polygon(2, 0, 2, BASE_W, row_height, step, slant, gap, border)
+    (top_x, top_y), (bottom_x, bottom_y) = points[0], points[3]
+    background = BACKGROUND_COLOR[:3]
+    border = hex_to_rgba(project.teams[0][2].color, 255)[:3]
+
+    # Two heights, so a horizontal edge that only happened to be antialiased at
+    # one of them would not pass.
+    for y in (60, 300):
+        edge_x = top_x + (bottom_x - top_x) * (y - top_y) / (bottom_y - top_y)
+        run = [(x, preview.getpixel((x, y))) for x in range(round(edge_x) - 8, round(edge_x) + 9)]
+        outside = [x for x, pixel in run if pixel == background]
+        inside = [x for x, pixel in run if pixel == border]
+        assert outside and inside, (y, run)
+        last_outside, first_inside = max(outside), min(inside)
+        assert last_outside < first_inside, (y, run)
+        blended = [preview.getpixel((x, y)) for x in range(last_outside + 1, first_inside)]
+        assert blended, (y, run)
+        for pixel in blended:
+            assert all(
+                min(background[channel], border[channel])
+                <= pixel[channel]
+                <= max(background[channel], border[channel])
+                for channel in range(3)
+            ), (y, pixel)
+
+
+def test_glow_shows_through_a_transparent_gap_in_the_character_art(tmp_path: Path) -> None:
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)
+    # The glow is only ever visible where the character art is transparent, so
+    # give every asset opaque red art with a transparent hole punched into it.
+    for asset in assets.values():
+        art = Image.new("RGBA", (1200, 900), (255, 40, 40, 255))
+        ImageDraw.Draw(art).ellipse((500, 350, 700, 550), fill=(0, 0, 0, 0))
+        art.save(asset.art_path)
+
+    preview = render_preview(project, assets)
+
+    # The glow is framed slightly wider than the crop (zoom * 0.78), so its
+    # hole is smaller. Probe where the character art is transparent but the
+    # glow is not, derived from the renderer's own framing rather than from
+    # hard-coded pixels, which would depend on the default offsets.
+    member = project.teams[0][1]
+    target = panel_target_size(compact=True)
+    art = Image.open(assets[member.name.casefold()].art_path).convert("RGBA")
+    crop = cover_resize_offset(art, target, member.offset_x, member.offset_y, member.zoom)
+    glow = cover_resize_offset(art, target, member.offset_x, member.offset_y, member.zoom * 0.78)
+    row = target[1] // 2
+    uncovered = [
+        x
+        for x in range(target[0])
+        if crop.getpixel((x, row))[3] == 0 and glow.getpixel((x, row))[3] == 255
+    ]
+    assert uncovered, "no pixel where the art is transparent but the glow is not"
+    local_point = (uncovered[len(uncovered) // 2], row)
+
+    # Mapped to canvas coordinates the same way the panel is pasted
+    # (index * step - slant, row * row_height).
+    slant = panel_metrics(compact=True)[2]
+    canvas_point = (1 * 320 - slant + local_point[0], local_point[1])
+    plain_background = panel_background(target, member.color, compact=True)
+
+    pixel = preview.getpixel(canvas_point)
+    background_pixel = plain_background.getpixel(local_point)
+    assert isinstance(pixel, tuple)
+    assert isinstance(background_pixel, tuple)
+    assert pixel != background_pixel[:3]
+    # The art's red is the only red in this panel, so it can only have reached
+    # a pixel the character art does not cover via the blurred glow layer.
+    assert pixel[0] > background_pixel[0] + 10
 
 
 def test_render_image_requires_complete_assets_by_default(tmp_path: Path) -> None:
@@ -414,8 +673,7 @@ def test_weapon_circle_outline_uses_element_color(tmp_path: Path) -> None:
     # weapon icon's circle rather than the C/R box.
     scale = 1
     compact = True
-    row_height = 360
-    step = 320.0
+    row_height, step, *_ = compact_layout(scale)
     font = find_font((38 if compact else 54) * scale)
     canvas = Image.new("RGBA", (1280, 720), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
@@ -453,6 +711,31 @@ def _patch_counting_open(monkeypatch) -> list[str]:
     return opened
 
 
+def _patch_counting_panels(monkeypatch) -> list[str]:
+    """Wrap the panel builders with call-recording proxies, so a test can
+    assert how many panels were actually composited rather than served from
+    the panel cache. Image.open counts cannot show this, since the art and
+    weapon-icon caches absorb every decode after the first render.
+
+    render_image() resolves both builders as module globals at call time, so
+    patching them on the module takes effect for renders already in flight."""
+    built: list[str] = []
+    real_make_panel = renderer.make_panel
+    real_placeholder_panel = renderer.placeholder_panel
+
+    def counting_make_panel(*args, **kwargs):
+        built.append("make_panel")
+        return real_make_panel(*args, **kwargs)
+
+    def counting_placeholder_panel(*args, **kwargs):
+        built.append("placeholder_panel")
+        return real_placeholder_panel(*args, **kwargs)
+
+    monkeypatch.setattr(renderer, "make_panel", counting_make_panel)
+    monkeypatch.setattr(renderer, "placeholder_panel", counting_placeholder_panel)
+    return built
+
+
 def test_repeated_render_reuses_panel_cache(tmp_path, monkeypatch) -> None:
     clear_render_cache()
     names = [f"Character {index}" for index in range(8)]
@@ -461,13 +744,17 @@ def test_repeated_render_reuses_panel_cache(tmp_path, monkeypatch) -> None:
     assets = create_assets(tmp_path, names)
 
     opened = _patch_counting_open(monkeypatch)
+    built = _patch_counting_panels(monkeypatch)
     first = render_preview(project, assets)
     assert opened  # sanity: the first render actually opened art/weapon files
+    assert len(built) == 8  # cold cache: every slot is composited from scratch
 
     opened.clear()
+    built.clear()
     second = render_preview(project, assets)
 
-    assert opened == []  # nothing reopened: every panel/icon was cache hit
+    assert opened == []  # nothing reopened: every icon decode was a cache hit
+    assert built == []  # nothing recomposited: every panel was a cache hit
     assert second.tobytes() == first.tobytes()
 
 
@@ -484,12 +771,15 @@ def test_changing_one_placement_only_recomputes_that_slot(tmp_path, monkeypatch)
     changed_member.offset_x = 0.4  # differs from the Placement default of 0.0
 
     opened = _patch_counting_open(monkeypatch)
+    built = _patch_counting_panels(monkeypatch)
     render_preview(project, assets)
 
-    changed_art_path = str(assets[names[0].casefold()].art_path)
-    untouched_art_paths = {str(assets[name.casefold()].art_path) for name in names[1:]}
-    assert changed_art_path in opened
-    assert not (untouched_art_paths & set(opened))
+    # The decoded art is cached independently of the placement state, so the
+    # recomputed slot resamples from the cache instead of reopening the PNG.
+    assert opened == []
+    # Exactly one of the eight slots was composited again: the one whose fx
+    # changed. The other seven were served from the panel cache.
+    assert built == ["make_panel"]
 
 
 def test_clear_render_cache_forces_full_recompute(tmp_path, monkeypatch) -> None:
@@ -505,8 +795,87 @@ def test_clear_render_cache_forces_full_recompute(tmp_path, monkeypatch) -> None
     opened = _patch_counting_open(monkeypatch)
     render_preview(project, assets)
 
-    all_art_paths = {str(asset.art_path) for asset in assets.values()}
-    assert all_art_paths <= set(opened)
+    all_art_paths = [str(asset.art_path) for asset in assets.values()]
+    assert sorted(path for path in opened if path in set(all_art_paths)) == sorted(all_art_paths)
+
+
+def test_clear_render_cache_empties_the_render_caches(tmp_path: Path) -> None:
+    clear_render_cache()
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)
+
+    render_preview(project, assets)
+    assert renderer._art_cache
+    assert renderer._work_cache  # 1200x900 art downscales for a preview panel
+    assert renderer._mask_cache
+    assert renderer._border_cache
+
+    clear_render_cache()
+    assert not renderer._art_cache
+    assert not renderer._work_cache
+    assert not renderer._mask_cache
+    assert not renderer._border_cache
+
+
+def test_slots_with_identical_badge_state_share_one_cached_tile(tmp_path: Path) -> None:
+    """A badge tile is drawn in tile-local coordinates and positioned only when
+    it is composited, so every slot showing the same build, card colour and
+    weapon icon must resolve to the same cache entry."""
+    clear_render_cache()
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    # One asset for every slot: same constellation, refinement, rarities and
+    # weapon icon. Its element pins the card colour too, which otherwise
+    # differs per slot via the placement colour fallback.
+    assets = create_assets(tmp_path, names[:1], elements={names[0]: "Pyro"})
+    for member in (member for team in project.teams for member in team):
+        member.name = names[0]
+
+    render_preview(project, assets)
+
+    assert len(renderer._badge_cache) == 1
+
+    clear_render_cache()
+    assert not renderer._badge_cache
+
+
+def test_badge_cache_key_separates_builds_differing_only_in_c_and_r(tmp_path: Path) -> None:
+    """Regression test: the badge cache key must include the constellation and
+    the refinement. They are the badge's whole text, yet everything else the
+    key covers (colour, rarities, weapon path, scale, compactness) can stay
+    identical between two builds, so dropping either from the key would serve
+    one build's tile for the other."""
+    clear_render_cache()
+    name = "Character 0"
+    project = Project.blank("abyss")
+    for member in (member for team in project.teams for member in team):
+        member.name = name
+    # A pinned element fixes the card colour across slots, so the only thing
+    # varying below is the badge text itself.
+    assets = create_assets(tmp_path, [name], elements={name: "Pyro"})
+    asset = assets[name.casefold()]
+
+    def render_with(constellation: int, refinement: int) -> Image.Image:
+        # Same tmp_path, hence the same weapon path, and no clear_render_cache()
+        # in between: all three renders share one warm _badge_cache.
+        assets[name.casefold()] = Asset(
+            replace(asset.build, constellation=constellation, refinement=refinement),
+            asset.art_path,
+            asset.weapon_path,
+        )
+        return render_preview(project, assets)
+
+    # Single-digit values throughout, so the badge text keeps its width and a
+    # stale tile would land pixel-for-pixel on top of the fresh one.
+    baseline = render_with(1, 1)
+    other_constellation = render_with(6, 1)
+    other_refinement = render_with(1, 5)
+
+    assert ImageChops.difference(baseline, other_constellation).getbbox() is not None
+    assert ImageChops.difference(baseline, other_refinement).getbbox() is not None
 
 
 def test_swapping_slots_with_warm_cache_matches_fresh_render(tmp_path: Path) -> None:

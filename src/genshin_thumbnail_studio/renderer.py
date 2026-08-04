@@ -7,6 +7,7 @@ import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypeVar
 
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
@@ -52,6 +53,24 @@ RARITY_COLORS = {
 }
 
 
+# The GUI clamps a placement's zoom to 0.70..1.80, so a preview working copy
+# scaled for 1.80 is never upsampled by an edit made through the GUI.
+MAX_PLACEMENT_ZOOM = 1.80
+
+# The panel glow is immediately Gaussian-blurred at a radius far wider than a
+# few pixels, so any detail resampled into it is destroyed anyway. Building it
+# at a quarter of the panel resolution (and blurring at a correspondingly
+# smaller radius) produces the same soft wash for a fraction of the work.
+GLOW_DOWNSCALE = 4
+
+# Pillow's ImageDraw has no antialiasing, so the near-vertical slanted card
+# edges come out stair-stepped. Drawing that geometry at 4x into a
+# single-channel coverage image and box-downsampling it yields proper edge
+# coverage; "L" rather than "RGBA" makes it ~6x cheaper for the same result,
+# and the outcome is cached anyway because it only depends on the layout.
+GEOMETRY_SUPERSAMPLE = 4
+
+
 def rarity_color(rarity: int | None) -> str:
     """The in-game rarity accent color, falling back to the 5-star gold
     when the rarity is unknown so the current look stays the default."""
@@ -81,7 +100,18 @@ def card_color(member: Placement, asset: Asset) -> str:
     return member.color
 
 
+@functools.lru_cache(maxsize=8)
 def find_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    """The bold system font at `size`, memoized: probing the filesystem and
+    loading the TrueType face on every render is pure overhead, since the same
+    handful of sizes (one per scale) is requested over and over.
+
+    Memoizing shares one FreeTypeFont between callers, and Pillow does not
+    document those as thread-safe. It is safe here only because the preview
+    worker thread always renders at scale 1 (sizes 38/54) while export_project()
+    renders on the GUI thread at scale >= 2 (76 and up), so the two threads
+    never ask for the same size. Keep those scale ranges disjoint, or drop the
+    memoization."""
     candidates = [
         Path(r"C:\Windows\Fonts\arialbd.ttf"),
         Path(r"C:\Windows\Fonts\Arial.ttf"),
@@ -163,26 +193,52 @@ def cover_resize_offset(
     offset_x: float,
     offset_y: float,
     zoom: float,
+    resample: Image.Resampling = Image.Resampling.LANCZOS,
 ) -> Image.Image:
     """Cover-fit `image` into `size`, panned by signed offsets.
 
     The offsets are fractions of the target size, positive meaning the visible
     content moves right/down. They are clamped to the reachable range first,
-    which includes `PAN_OVERSCAN`, so the crop box may extend past the resized
-    art by that margin. `Image.crop` pads such a box with zeroed (and hence,
-    for RGBA art, transparent) pixels, letting the panel background and glow
-    show through the overscanned strip without any extra compositing.
+    which includes `PAN_OVERSCAN`, so the crop window may extend past the
+    resized art by that margin. That overscanned strip is left transparent,
+    letting the panel background and glow show through without any extra
+    compositing.
     """
+    source_w, source_h = image.size
     target_w, target_h = size
     image_scale = cover_scale(image.size, size, zoom)
     resized_w, resized_h = _scaled_size(image.size, size, image_scale)
     limit_x, limit_y = _offset_limits((resized_w, resized_h), size)
     offset_x = min(limit_x, max(-limit_x, offset_x))
     offset_y = min(limit_y, max(-limit_y, offset_y))
-    resized = image.resize((resized_w, resized_h), Image.Resampling.LANCZOS)
     left = int(round((resized_w - target_w) / 2 - offset_x * target_w))
     top = int(round((resized_h - target_h) / 2 - offset_y * target_h))
-    return resized.crop((left, top, left + target_w, top + target_h))
+
+    # Resampling only the crop window's source region is far cheaper than
+    # scaling the whole image and throwing most of it away. The window is
+    # mapped back with source_w / resized_w rather than 1 / image_scale
+    # because resized_w/resized_h are rounded integers, and dividing by them
+    # keeps the mapping exact at the right and bottom edges.
+    # It is clipped to the art first, since Image.resize() rejects a box that
+    # leaves the source, which the overscan margin makes possible.
+    visible_left = max(0, left)
+    visible_top = max(0, top)
+    visible_right = min(resized_w, left + target_w)
+    visible_bottom = min(resized_h, top + target_h)
+    box = (
+        visible_left * source_w / resized_w,
+        visible_top * source_h / resized_h,
+        visible_right * source_w / resized_w,
+        visible_bottom * source_h / resized_h,
+    )
+    visible_size = (visible_right - visible_left, visible_bottom - visible_top)
+    visible = image.resize(visible_size, resample, box=box)
+    if visible_size == size:
+        return visible
+
+    panned = Image.new("RGBA", size, (0, 0, 0, 0))
+    panned.paste(visible, (visible_left - left, visible_top - top))
+    return panned
 
 
 @functools.lru_cache(maxsize=64)
@@ -246,6 +302,26 @@ def panel_polygon(
     ]
 
 
+def supersampled_coverage(
+    size: tuple[int, int], points: list[tuple[int, int]], width: int | None = None
+) -> Image.Image:
+    """An antialiased "L" coverage map of `size` for the polygon `points`:
+    filled when `width` is None, otherwise a `width`-pixel outline stroke.
+
+    Points outside `size` are clipped by ImageDraw, which is what lets the
+    slanted card outlines overhang their own layer.
+    """
+    big_size = (size[0] * GEOMETRY_SUPERSAMPLE, size[1] * GEOMETRY_SUPERSAMPLE)
+    big_points = [(x * GEOMETRY_SUPERSAMPLE, y * GEOMETRY_SUPERSAMPLE) for x, y in points]
+    big = Image.new("L", big_size, 0)
+    draw = ImageDraw.Draw(big)
+    if width is None:
+        draw.polygon(big_points, fill=255)
+    else:
+        draw.polygon(big_points, outline=255, width=width * GEOMETRY_SUPERSAMPLE)
+    return big.resize(size, Image.Resampling.BOX)
+
+
 def panel_background(size: tuple[int, int], color: str, compact: bool) -> Image.Image:
     width, height = size
     background = Image.new("RGBA", size, (18, 18, 22, 255))
@@ -270,7 +346,7 @@ def panel_background(size: tuple[int, int], color: str, compact: bool) -> Image.
 
 
 def make_panel(
-    canvas_size: tuple[int, int],
+    canvas_width: int,
     member: Placement,
     asset: Asset,
     index: int,
@@ -282,13 +358,22 @@ def make_panel(
     scale: int,
     compact: bool,
 ) -> Image.Image:
-    art = Image.open(asset.art_path).convert("RGBA")
     target = panel_target_size(compact, scale)
+    art = source_art(asset, target, member.zoom, scale)
     color = card_color(member, asset)
     background = panel_background(target, color, compact)
-    glow = cover_resize_offset(art, target, member.offset_x, member.offset_y, member.zoom * 0.78)
-    glow = glow.filter(ImageFilter.GaussianBlur((14 if compact else 18) * scale))
+    glow_size = (max(1, target[0] // GLOW_DOWNSCALE), max(1, target[1] // GLOW_DOWNSCALE))
+    glow = cover_resize_offset(
+        art,
+        glow_size,
+        member.offset_x,
+        member.offset_y,
+        member.zoom * 0.78,
+        resample=Image.Resampling.BILINEAR,
+    )
+    glow = glow.filter(ImageFilter.GaussianBlur((14 if compact else 18) * scale / GLOW_DOWNSCALE))
     glow = ImageEnhance.Color(glow).enhance(1.20 if compact else 1.25)
+    glow = glow.resize(target, Image.Resampling.BILINEAR)
     background = Image.alpha_composite(background, glow)
 
     crop = cover_resize_offset(art, target, member.offset_x, member.offset_y, member.zoom)
@@ -314,35 +399,49 @@ def make_panel(
             shade_draw.line((0, y, panel.width, y), fill=(0, 0, 0, min(255, alpha_value)))
     panel = Image.alpha_composite(panel, shade)
 
-    return paste_panel_on_canvas(canvas_size, panel, index, row, num_rows, row_height, step, slant, scale)
+    return apply_panel_mask(panel, index, row, num_rows, canvas_width, row_height, step, slant, scale)
 
 
-def paste_panel_on_canvas(
-    canvas_size: tuple[int, int],
+def panel_origin(index: int, row: int, row_height: int, step: float, slant: int) -> tuple[int, int]:
+    """Where a panel-sized layer sits on the canvas. Slot 0's x is negative,
+    because the slant makes the panel overhang the canvas on the left (and
+    slot 3's makes it overhang on the right)."""
+    return int(round(index * step - slant)), row * row_height
+
+
+def apply_panel_mask(
     panel: Image.Image,
     index: int,
     row: int,
     num_rows: int,
+    canvas_width: int,
     row_height: int,
     step: float,
     slant: int,
     scale: int,
 ) -> Image.Image:
-    width, _ = canvas_size
-    gap = CARD_GAP * scale
-    border = CARD_BORDER * scale
-    layer = Image.new("RGBA", canvas_size, (0, 0, 0, 0))
-    layer.paste(panel, (int(round(index * step - slant)), row * row_height), panel)
-    mask = Image.new("L", canvas_size, 0)
-    ImageDraw.Draw(mask).polygon(
-        panel_polygon(index, row, num_rows, width, row_height, step, slant, gap, border), fill=255
-    )
-    layer.putalpha(ImageChops.multiply(layer.getchannel("A"), mask))
-    return layer
+    """Cut the slanted card shape out of `panel`, in place, and return it.
+
+    The polygon is computed in canvas coordinates and then translated into
+    panel-local ones, so the mask depends only on the layout geometry and is
+    shared by every placement that lands in the same slot.
+    """
+    mask_key = (index, row, num_rows, canvas_width, row_height, step, slant, scale, panel.size)
+    mask = _cache_get(_mask_cache, mask_key)
+    if mask is None:
+        gap = CARD_GAP * scale
+        border = CARD_BORDER * scale
+        points = panel_polygon(index, row, num_rows, canvas_width, row_height, step, slant, gap, border)
+        origin_x, origin_y = panel_origin(index, row, row_height, step, slant)
+        local_points = [(x - origin_x, y - origin_y) for x, y in points]
+        mask = supersampled_coverage(panel.size, local_points)
+        _cache_put(_mask_cache, mask_key, mask, _MASK_CACHE_MAX)
+    panel.putalpha(ImageChops.multiply(panel.getchannel("A"), mask))
+    return panel
 
 
 def placeholder_panel(
-    canvas_size: tuple[int, int],
+    canvas_width: int,
     member: Placement,
     index: int,
     row: int,
@@ -353,38 +452,75 @@ def placeholder_panel(
     scale: int,
     compact: bool,
 ) -> Image.Image:
-    """A panel for a slot with no downloaded asset yet: same size/shape and
-    mask/paste logic as make_panel(), but without character art, glow,
-    shadow, or shade, since there is no Asset to read art from."""
+    """A panel for a slot with no downloaded asset yet: same size and mask
+    logic as make_panel(), but without character art, glow, shadow, or shade,
+    since there is no Asset to read art from."""
     target = panel_target_size(compact, scale)
     panel = panel_background(target, member.color, compact)
-    return paste_panel_on_canvas(canvas_size, panel, index, row, num_rows, row_height, step, slant, scale)
+    return apply_panel_mask(panel, index, row, num_rows, canvas_width, row_height, step, slant, scale)
 
 
 # Bounded LRU caches for render output that would otherwise be recomputed
 # on every preview render regardless of what actually changed: one for
 # fully-composited panel layers (make_panel()/placeholder_panel() output),
-# one for decoded/resized weapon icons. Cleared via clear_render_cache(),
-# e.g. between tests that assert on cache hit/miss counts.
+# one for decoded/resized weapon icons, one for decoded character art, and
+# one for preview-sized working copies of that art. Cleared via
+# clear_render_cache(), e.g. between tests that assert on cache hit/miss counts.
+#
+# Cached panels are panel-sized (~0.6 MB each at preview scale, so the bound is
+# ~19 MB) and are composited *into* the canvas rather than being the composite
+# operand, so they must never be mutated once cached; canvas.alpha_composite()
+# only reads them.
 _PANEL_CACHE_MAX = 32
 _panel_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
 
 _WEAPON_ICON_CACHE_MAX = 32
 _weapon_icon_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
 
+_ART_CACHE_MAX = 12
+_art_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
+
+_WORK_CACHE_MAX = 12
+_work_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
+
+# The supersampled card mask and card-border overlay depend on the layout
+# geometry alone (and, for the border, its colour), never on the placement, so
+# after the first frame they are permanent hits even while a portrait is dragged.
+_MASK_CACHE_MAX = 16
+_mask_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
+
+_BORDER_CACHE_MAX = 16
+_border_cache: collections.OrderedDict[tuple, Image.Image] = collections.OrderedDict()
+
+# A slot's C/R + weapon badge depends on the build and the card colour, never
+# on the placement's position or zoom, so it survives a drag untouched. Each
+# entry is the drawn tile plus the coverage mask that says which of its pixels
+# the drawing actually touched (see badge_tile()).
+_BADGE_CACHE_MAX = 16
+_badge_cache: collections.OrderedDict[tuple, tuple[Image.Image, Image.Image]] = collections.OrderedDict()
+
 # Previews render on a background thread while export_project() renders on
-# the GUI thread, so both caches can be touched concurrently.
+# the GUI thread, so all caches can be touched concurrently.
 _cache_lock = threading.Lock()
 
 
 def clear_render_cache() -> None:
-    """Empty the panel and weapon-icon render caches."""
+    """Empty the panel, weapon-icon, character-art, working-copy, card-mask,
+    card-border and badge caches."""
     with _cache_lock:
         _panel_cache.clear()
         _weapon_icon_cache.clear()
+        _art_cache.clear()
+        _work_cache.clear()
+        _mask_cache.clear()
+        _border_cache.clear()
+        _badge_cache.clear()
 
 
-def _cache_get(cache: collections.OrderedDict[tuple, Image.Image], key: tuple) -> Image.Image | None:
+_CacheValue = TypeVar("_CacheValue")
+
+
+def _cache_get(cache: collections.OrderedDict[tuple, _CacheValue], key: tuple) -> _CacheValue | None:
     with _cache_lock:
         if key not in cache:
             return None
@@ -393,13 +529,50 @@ def _cache_get(cache: collections.OrderedDict[tuple, Image.Image], key: tuple) -
 
 
 def _cache_put(
-    cache: collections.OrderedDict[tuple, Image.Image], key: tuple, value: Image.Image, max_size: int
+    cache: collections.OrderedDict[tuple, _CacheValue], key: tuple, value: _CacheValue, max_size: int
 ) -> None:
     with _cache_lock:
         cache[key] = value
         cache.move_to_end(key)
         while len(cache) > max_size:
             cache.popitem(last=False)
+
+
+def source_art(asset: Asset, target: tuple[int, int], zoom: float, scale: int) -> Image.Image:
+    """The image make_panel() should resample its panel art from.
+
+    For a preview render this is a working copy pre-downscaled to what the
+    largest GUI-reachable zoom needs, so a drag resamples a few megapixels
+    less per frame. Exports (and zooms beyond the GUI's clamp, which can only
+    come from a hand-edited project file) resample the full-resolution source
+    so they never lose detail.
+
+    The cached images are shared between the preview render thread and the
+    GUI thread, so they must be treated as read-only. Every consumer produces
+    a new image via resize()/crop(), so no copy is made here.
+    """
+    art_key = (str(asset.art_path),)
+    art = _cache_get(_art_cache, art_key)
+    if art is None:
+        art = Image.open(asset.art_path).convert("RGBA")
+        _cache_put(_art_cache, art_key, art, _ART_CACHE_MAX)
+    if scale != 1 or zoom > MAX_PLACEMENT_ZOOM:
+        return art
+
+    source_w, source_h = art.size
+    # Same cover scale cover_resize_offset() computes, but at the maximum zoom
+    # rather than this placement's, so one working copy serves every zoom.
+    work_scale = cover_scale(art.size, target, MAX_PLACEMENT_ZOOM)
+    work = (round(source_w * work_scale), round(source_h * work_scale))
+    if work[0] >= source_w or work[1] >= source_h:
+        return art
+
+    work_key = (str(asset.art_path), *work)
+    working = _cache_get(_work_cache, work_key)
+    if working is None:
+        working = art.resize(work, Image.Resampling.LANCZOS)
+        _cache_put(_work_cache, work_key, working, _WORK_CACHE_MAX)
+    return working
 
 
 def add_card_borders(
@@ -415,13 +588,30 @@ def add_card_borders(
     gap = CARD_GAP * scale
     border = CARD_BORDER * scale
     num_rows = len(teams)
-    draw = ImageDraw.Draw(image)
+    # A card outline never reaches further than one step plus the slant
+    # overhang on either side of its own origin, so the overlay only needs to
+    # be that wide rather than canvas-wide. The extra pixel absorbs the
+    # rounding of the fractional step and origin plus the half stroke width
+    # that the outline extends past the polygon on the right.
+    overlay_size = (math.ceil(step) + 2 * slant + 1, row_height)
     for row, team in enumerate(teams):
         for index, member in enumerate(team):
             asset = assets.get(member.name.casefold()) if member.name else None
             color = card_color(member, asset) if asset else member.color
-            points = panel_polygon(index, row, num_rows, width, row_height, step, slant, gap, border)
-            draw.polygon(points, outline=hex_to_rgba(color, 255), width=round(border))
+            origin_x, origin_y = panel_origin(index, row, row_height, step, slant)
+            # overlay_size is fully derived from step, slant and row_height.
+            overlay_key = (index, row, num_rows, width, row_height, step, slant, scale, color)
+            overlay = _cache_get(_border_cache, overlay_key)
+            if overlay is None:
+                points = panel_polygon(index, row, num_rows, width, row_height, step, slant, gap, border)
+                local_points = [(x - origin_x, y - origin_y) for x, y in points]
+                overlay = Image.new("RGBA", overlay_size, hex_to_rgba(color, 255))
+                overlay.putalpha(supersampled_coverage(overlay_size, local_points, width=round(border)))
+                _cache_put(_border_cache, overlay_key, overlay, _BORDER_CACHE_MAX)
+            # Same clipping as the panels: slot 0 overhangs the canvas on the
+            # left and needs a source offset, slot 3 overhangs on the right and
+            # is clipped by the in-place composite itself.
+            image.alpha_composite(overlay, (max(0, origin_x), origin_y), (max(0, -origin_x), 0))
 
 
 @dataclass(frozen=True)
@@ -473,6 +663,133 @@ def badge_geometry(
     )
 
 
+def badge_tile_origin(geometry: BadgeGeometry) -> tuple[int, int]:
+    """Where a badge tile sits on the canvas: the top-left of the union of the
+    C/R box and the weapon circle, the latter of which starts slightly above
+    the box."""
+    return geometry.group_x, min(geometry.box[1], geometry.circle[1])
+
+
+def badge_tile(
+    geometry: BadgeGeometry,
+    asset: Asset,
+    color: str,
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+    scale: int,
+    compact: bool,
+) -> tuple[Image.Image, Image.Image]:
+    """Draw one slot's C/R box and weapon circle into a standalone tile.
+
+    Returns the tile and an "L" coverage mask marking the pixels the drawing
+    touched. ImageDraw *replaces* pixels on an RGBA image rather than blending
+    into them, so the badge's semi-transparent fills are opaque once the canvas
+    is flattened to RGB; pasting the tile through its coverage mask reproduces
+    that exactly, while alpha-compositing it would instead let the card art
+    show through the badge.
+
+    Everything is drawn in tile-local coordinates, so the tile depends only on
+    the build, the card colour and the render scale, not on the slot it ends
+    up in.
+
+    The paste reproduces the original RGB exactly, but where a semi-transparent
+    weapon icon pokes out of the circle it writes the icon's own alpha instead
+    of the blended alpha an alpha_composite() would leave behind. That is
+    invisible today because add_badges() is the last step and render_image()
+    flattens to RGB right after; compositing anything on top of the badges
+    would make it a real difference.
+    """
+    origin_x, origin_y = badge_tile_origin(geometry)
+    box = (
+        geometry.box[0] - origin_x,
+        geometry.box[1] - origin_y,
+        geometry.box[2] - origin_x,
+        geometry.box[3] - origin_y,
+    )
+    circle = (
+        geometry.circle[0] - origin_x,
+        geometry.circle[1] - origin_y,
+        geometry.circle[2] - origin_x,
+        geometry.circle[3] - origin_y,
+    )
+    # Pillow's shape coordinates are inclusive, so the tile needs one pixel
+    # more than the raw extent in each direction.
+    size = (max(box[2], circle[2]) + 1, max(box[3], circle[3]) + 1)
+    tile = Image.new("RGBA", size, (0, 0, 0, 0))
+    coverage = Image.new("L", size, 0)
+    draw = ImageDraw.Draw(tile)
+    coverage_draw = ImageDraw.Draw(coverage)
+
+    box_radius = (14 if compact else 18) * scale
+    box_width = 3 * scale
+    draw.rounded_rectangle(
+        box,
+        radius=box_radius,
+        fill=(0, 0, 0, 178),
+        outline=hex_to_rgba(color, 245),
+        width=box_width,
+    )
+    coverage_draw.rounded_rectangle(box, radius=box_radius, fill=255, outline=255, width=box_width)
+
+    stroke_width = (3 if compact else 4) * scale
+    constellation_text = f"C{asset.build.constellation}"
+    refinement_text = f"R{asset.build.refinement}"
+    constellation_left, _, constellation_right, _ = draw.textbbox(
+        (0, 0), constellation_text, font=font, stroke_width=stroke_width
+    )
+    refinement_left, _, refinement_right, _ = draw.textbbox(
+        (0, 0), refinement_text, font=font, stroke_width=stroke_width
+    )
+    constellation_w = constellation_right - constellation_left
+    refinement_w = refinement_right - refinement_left
+    # Two separate bounding boxes each carry the stroke's overhang on
+    # both sides, so summing them double-counts the stroke width at
+    # the seam between the runs; subtract it once to land on the same
+    # combined width (and hence the same centering) as the original
+    # single-string measurement.
+    combined_w = constellation_w + refinement_w - 2 * stroke_width
+    text_x = geometry.text_center[0] - origin_x - combined_w // 2
+    text_y = geometry.text_center[1] - origin_y
+    draw.text(
+        (text_x, text_y),
+        constellation_text,
+        font=font,
+        fill=hex_to_rgba(rarity_color(asset.build.rarity), 255),
+        stroke_width=stroke_width,
+        stroke_fill=(0, 0, 0, 255),
+        anchor="lm",
+    )
+    draw.text(
+        (text_x + constellation_w - stroke_width, text_y),
+        refinement_text,
+        font=font,
+        fill=hex_to_rgba(rarity_color(asset.build.weapon_rarity), 255),
+        stroke_width=stroke_width,
+        stroke_fill=(0, 0, 0, 255),
+        anchor="lm",
+    )
+
+    circle_width = 2 * scale
+    draw.ellipse(circle, fill=(0, 0, 0, 170), outline=hex_to_rgba(color, 240), width=circle_width)
+    coverage_draw.ellipse(circle, fill=255, outline=255, width=circle_width)
+
+    icon_d = (48 if compact else 68) * scale
+    icon_key = (str(asset.weapon_path), icon_d)
+    icon = _cache_get(_weapon_icon_cache, icon_key)
+    if icon is None:
+        icon = Image.open(asset.weapon_path).convert("RGBA")
+        icon.thumbnail((icon_d, icon_d), Image.Resampling.LANCZOS)
+        _cache_put(_weapon_icon_cache, icon_key, icon, _WEAPON_ICON_CACHE_MAX)
+    circle_d = circle[2] - circle[0]
+    icon_pos = (circle[0] + (circle_d - icon.width) // 2, circle[1] + (circle_d - icon.height) // 2)
+    tile.alpha_composite(icon, icon_pos)
+    # The icon's square footprint pokes out of the circle at its corners, where
+    # the tile is blended onto whatever the card shows rather than replacing it.
+    # Coverage set to the icon's own alpha makes the paste do exactly that.
+    icon_box = (icon_pos[0], icon_pos[1], icon_pos[0] + icon.width, icon_pos[1] + icon.height)
+    coverage.paste(ImageChops.lighter(coverage.crop(icon_box), icon.getchannel("A")), icon_pos)
+    return tile, coverage
+
+
 def add_badges(
     image: Image.Image,
     teams: list[list[Placement]],
@@ -484,8 +801,6 @@ def add_badges(
 ) -> None:
     draw = ImageDraw.Draw(image)
     font = find_font((38 if compact else 54) * scale)
-    icon_d = (48 if compact else 68) * scale
-    stroke_width = (3 if compact else 4) * scale
     for row, team in enumerate(teams):
         for index, member in enumerate(team):
             if not member.name or member.name.casefold() not in assets:
@@ -495,64 +810,23 @@ def add_badges(
             top_y = row * row_height + row_height - (68 if compact else 107) * scale
             text = f"C{asset.build.constellation}R{asset.build.refinement}"
             geometry = badge_geometry(draw, text, font, center, top_y, scale, compact)
-            draw.rounded_rectangle(
-                geometry.box,
-                radius=(14 if compact else 18) * scale,
-                fill=(0, 0, 0, 178),
-                outline=hex_to_rgba(card_color(member, asset), 245),
-                width=3 * scale,
+            color = card_color(member, asset)
+            tile_key = (
+                asset.build.constellation,
+                asset.build.refinement,
+                asset.build.rarity,
+                asset.build.weapon_rarity,
+                color,
+                str(asset.weapon_path),
+                scale,
+                compact,
             )
-            constellation_text = f"C{asset.build.constellation}"
-            refinement_text = f"R{asset.build.refinement}"
-            constellation_left, _, constellation_right, _ = draw.textbbox(
-                (0, 0), constellation_text, font=font, stroke_width=stroke_width
-            )
-            refinement_left, _, refinement_right, _ = draw.textbbox(
-                (0, 0), refinement_text, font=font, stroke_width=stroke_width
-            )
-            constellation_w = constellation_right - constellation_left
-            refinement_w = refinement_right - refinement_left
-            # Two separate bounding boxes each carry the stroke's overhang on
-            # both sides, so summing them double-counts the stroke width at
-            # the seam between the runs; subtract it once to land on the same
-            # combined width (and hence the same centering) as the original
-            # single-string measurement.
-            combined_w = constellation_w + refinement_w - 2 * stroke_width
-            text_x = geometry.text_center[0] - combined_w // 2
-            text_y = geometry.text_center[1]
-            draw.text(
-                (text_x, text_y),
-                constellation_text,
-                font=font,
-                fill=hex_to_rgba(rarity_color(asset.build.rarity), 255),
-                stroke_width=stroke_width,
-                stroke_fill=(0, 0, 0, 255),
-                anchor="lm",
-            )
-            draw.text(
-                (text_x + constellation_w - stroke_width, text_y),
-                refinement_text,
-                font=font,
-                fill=hex_to_rgba(rarity_color(asset.build.weapon_rarity), 255),
-                stroke_width=stroke_width,
-                stroke_fill=(0, 0, 0, 255),
-                anchor="lm",
-            )
-            draw.ellipse(
-                geometry.circle,
-                fill=(0, 0, 0, 170),
-                outline=hex_to_rgba(card_color(member, asset), 240),
-                width=2 * scale,
-            )
-            icon_key = (str(asset.weapon_path), icon_d)
-            icon = _cache_get(_weapon_icon_cache, icon_key)
-            if icon is None:
-                icon = Image.open(asset.weapon_path).convert("RGBA")
-                icon.thumbnail((icon_d, icon_d), Image.Resampling.LANCZOS)
-                _cache_put(_weapon_icon_cache, icon_key, icon, _WEAPON_ICON_CACHE_MAX)
-            circle_x, circle_y, circle_x1, _circle_y1 = geometry.circle
-            circle_d = circle_x1 - circle_x
-            image.alpha_composite(icon, (circle_x + (circle_d - icon.width) // 2, circle_y + (circle_d - icon.height) // 2))
+            cached = _cache_get(_badge_cache, tile_key)
+            if cached is None:
+                cached = badge_tile(geometry, asset, color, font, scale, compact)
+                _cache_put(_badge_cache, tile_key, cached, _BADGE_CACHE_MAX)
+            tile, coverage = cached
+            image.paste(tile, badge_tile_origin(geometry), coverage)
 
 
 def render_image(
@@ -597,7 +871,7 @@ def render_image(
             if panel is None:
                 if asset is not None:
                     panel = make_panel(
-                        canvas.size,
+                        width,
                         member,
                         asset,
                         index,
@@ -611,7 +885,7 @@ def render_image(
                     )
                 else:
                     panel = placeholder_panel(
-                        canvas.size,
+                        width,
                         member,
                         index,
                         row,
@@ -623,7 +897,11 @@ def render_image(
                         compact,
                     )
                 _cache_put(_panel_cache, cache_key, panel, _PANEL_CACHE_MAX)
-            canvas = Image.alpha_composite(canvas, panel)
+            # The panel overhangs the canvas on the left for slot 0 and on the
+            # right for slot 3; clipping the left overhang needs a source
+            # offset, while the in-place composite clips the right one itself.
+            origin_x, origin_y = panel_origin(index, row, row_height, step, slant)
+            canvas.alpha_composite(panel, (max(0, origin_x), origin_y), (max(0, -origin_x), 0))
     add_card_borders(canvas, teams, assets, row_height, step, slant, scale)
     add_badges(canvas, teams, assets, row_height, step, scale, compact)
     return canvas.convert("RGB").resize(output_size, Image.Resampling.LANCZOS)

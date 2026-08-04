@@ -1,4 +1,5 @@
 import os
+import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--no-sandbox")
@@ -307,6 +308,60 @@ def test_on_asset_ready_populates_incrementally_and_schedules_render(tmp_path, m
     # already render-able: it does not wait for the whole batch.
     assert set(window.assets) == {"furina"}
     assert window._render_timer.isActive()
+
+    window.close()
+    app.processEvents()
+
+
+def test_schedule_render_throttles_instead_of_restarting_the_timer(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+
+    names = ["Furina", "Nahida"]
+    _fill_window_teams(window, names)
+    window.assets = _create_test_assets(tmp_path / "assets", names)
+
+    window.schedule_render()
+    assert window._render_timer.isActive()
+
+    # Imitate a drag: many calls in quick succession, with a little wall-clock
+    # time between them so a restart would show up as a jump back up.
+    remaining = [window._render_timer.remainingTime()]
+    for _ in range(5):
+        time.sleep(0.005)
+        window.schedule_render()
+        assert window._render_timer.isActive()
+        remaining.append(window._render_timer.remainingTime())
+
+    assert all(later <= earlier for earlier, later in zip(remaining, remaining[1:])), remaining
+    assert remaining[-1] < remaining[0], remaining
+
+    window.close()
+    app.processEvents()
+
+
+def test_schedule_render_without_assets_is_a_noop(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+
+    names = ["Furina", "Nahida"]
+    _fill_window_teams(window, names)
+
+    # With assets, the very same call does start the timer, so the assertion
+    # below really is about the `self.assets` guard and not about some other
+    # reason for the timer to stay idle.
+    window.assets = _create_test_assets(tmp_path / "assets", names)
+    window.schedule_render()
+    assert window._render_timer.isActive()
+
+    window._render_timer.stop()
+    window.assets = {}
+
+    window.schedule_render()
+
+    assert not window._render_timer.isActive()
 
     window.close()
     app.processEvents()

@@ -75,6 +75,10 @@ from .storage import (
 )
 
 
+# Delay between a placement change and the preview render it triggers.
+RENDER_THROTTLE_MS = 80
+
+
 RESOLUTION_OPTIONS = [
     ("720p", 720),
     ("1080p", 1080),
@@ -703,8 +707,10 @@ class MainWindow(QMainWindow):
         self.schedule_render()
 
     def schedule_render(self) -> None:
-        if self.assets:
-            self._render_timer.start(80)
+        # A throttle, not a debounce: restarting the timer on every
+        # mouse-move event would mean it never fires during a drag.
+        if self.assets and not self._render_timer.isActive():
+            self._render_timer.start(RENDER_THROTTLE_MS)
 
     def _show_error(self, title: str, error: Exception | str) -> None:
         QMessageBox.critical(self, title, str(error))
