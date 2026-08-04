@@ -125,11 +125,10 @@ def find_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     handful of sizes (one per scale) is requested over and over.
 
     Memoizing shares one FreeTypeFont between callers, and Pillow does not
-    document those as thread-safe. It is safe here only because the preview
-    worker thread always renders at scale 1 (sizes 38/54) while export_project()
-    renders on the GUI thread at scale >= 2 (76 and up), so the two threads
-    never ask for the same size. Keep those scale ranges disjoint, or drop the
-    memoization."""
+    document those as thread-safe. Sharing is safe because every use of the
+    returned object - the lookup itself, the text measurement and the drawing -
+    happens inside `with _font_lock:` in add_badges(), the only production
+    caller, so no two threads ever touch the same font concurrently."""
     candidates = [
         Path(r"C:\Windows\Fonts\arialbd.ttf"),
         Path(r"C:\Windows\Fonts\Arial.ttf"),
@@ -617,6 +616,13 @@ _badge_cache: collections.OrderedDict[tuple, tuple[Image.Image, Image.Image]] = 
 # the GUI thread, so all caches can be touched concurrently.
 _cache_lock = threading.Lock()
 
+# Guards the shared FreeTypeFont that find_font() memoizes - not the render
+# caches above. Pillow does not document a font object as safe to measure or
+# draw with from two threads at once, so add_badges() serializes its whole
+# font-using span on this lock. It is always taken before _cache_lock (never
+# the other way round), and nothing under it re-enters add_badges().
+_font_lock = threading.Lock()
+
 
 def clear_render_cache() -> None:
     """Empty the panel, weapon-icon, character-art, working-copy, card-mask,
@@ -935,33 +941,37 @@ def add_badges(
     compact: bool,
 ) -> None:
     draw = ImageDraw.Draw(image)
-    font = find_font((38 if compact else 54) * scale)
-    for row, team in enumerate(teams):
-        for index, member in enumerate(team):
-            if not member.name or member.name.casefold() not in assets:
-                continue
-            asset = assets[member.name.casefold()]
-            center = int(round(index * step + step / 2))
-            top_y = row * row_height + row_height - (68 if compact else 107) * scale
-            text = f"C{asset.build.constellation}R{asset.build.refinement}"
-            geometry = badge_geometry(draw, text, font, center, top_y, scale, compact)
-            color = card_color(member, asset)
-            tile_key = (
-                asset.build.constellation,
-                asset.build.refinement,
-                asset.build.rarity,
-                asset.build.weapon_rarity,
-                color,
-                str(asset.weapon_path),
-                scale,
-                compact,
-            )
-            cached = _cache_get(_badge_cache, tile_key)
-            if cached is None:
-                cached = badge_tile(geometry, asset, color, font, scale, compact)
-                _cache_put(_badge_cache, tile_key, cached, _BADGE_CACHE_MAX)
-            tile, coverage = cached
-            image.paste(tile, badge_tile_origin(geometry), coverage)
+    # The font is shared across threads, so hold _font_lock for every use of it,
+    # not just the find_font() lookup: badge_geometry() measures with it and
+    # badge_tile() draws with it.
+    with _font_lock:
+        font = find_font((38 if compact else 54) * scale)
+        for row, team in enumerate(teams):
+            for index, member in enumerate(team):
+                if not member.name or member.name.casefold() not in assets:
+                    continue
+                asset = assets[member.name.casefold()]
+                center = int(round(index * step + step / 2))
+                top_y = row * row_height + row_height - (68 if compact else 107) * scale
+                text = f"C{asset.build.constellation}R{asset.build.refinement}"
+                geometry = badge_geometry(draw, text, font, center, top_y, scale, compact)
+                color = card_color(member, asset)
+                tile_key = (
+                    asset.build.constellation,
+                    asset.build.refinement,
+                    asset.build.rarity,
+                    asset.build.weapon_rarity,
+                    color,
+                    str(asset.weapon_path),
+                    scale,
+                    compact,
+                )
+                cached = _cache_get(_badge_cache, tile_key)
+                if cached is None:
+                    cached = badge_tile(geometry, asset, color, font, scale, compact)
+                    _cache_put(_badge_cache, tile_key, cached, _BADGE_CACHE_MAX)
+                tile, coverage = cached
+                image.paste(tile, badge_tile_origin(geometry), coverage)
 
 
 def render_image(

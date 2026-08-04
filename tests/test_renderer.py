@@ -1,3 +1,5 @@
+import threading
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import NamedTuple
@@ -1070,6 +1072,56 @@ def test_badge_cache_key_separates_builds_differing_only_in_c_and_r(tmp_path: Pa
 
     assert ImageChops.difference(baseline, other_constellation).getbbox() is not None
     assert ImageChops.difference(baseline, other_refinement).getbbox() is not None
+
+
+def test_add_badges_serializes_font_use_across_threads(tmp_path: Path, monkeypatch) -> None:
+    """The FreeTypeFont find_font() memoizes is shared by the preview worker
+    thread and the exporting GUI thread, and Pillow does not document measuring
+    or drawing with one font from two threads at once as safe. add_badges() must
+    therefore hold _font_lock across its whole font-using span, so at most one
+    thread is ever inside it."""
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)
+
+    probe_lock = threading.Lock()
+    inside = 0
+    max_inside = 0
+
+    def probing_find_font(size: int):
+        nonlocal inside, max_inside
+        with probe_lock:
+            inside += 1
+            max_inside = max(max_inside, inside)
+        try:
+            font = find_font(size)
+            # Sleep while still counted as "inside" to widen the window in which
+            # an unserialized second thread would be observed.
+            time.sleep(0.02)
+            return font
+        finally:
+            with probe_lock:
+                inside -= 1
+
+    monkeypatch.setattr(renderer, "find_font", probing_find_font)
+
+    failures: list[BaseException] = []
+
+    def render() -> None:
+        try:
+            render_preview(project, assets)
+        except BaseException as error:  # noqa: BLE001 - re-raised in the main thread
+            failures.append(error)
+
+    threads = [threading.Thread(target=render) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert not failures
+    assert max_inside == 1
 
 
 def test_swapping_slots_with_warm_cache_matches_fresh_render(tmp_path: Path) -> None:
