@@ -8,7 +8,6 @@ from genshin_thumbnail_studio import renderer
 from genshin_thumbnail_studio.models import Asset, Build, Project
 from genshin_thumbnail_studio.renderer import (
     BACKGROUND_COLOR,
-    BASE_H,
     BASE_W,
     CARD_BORDER,
     CARD_GAP,
@@ -46,18 +45,15 @@ class CompactLayout(NamedTuple):
 
 def compact_layout(scale: int = 1) -> CompactLayout:
     """render_image()'s layout numbers for a compact (two-row abyss) canvas,
-    derived from the renderer's own constants so probes follow the layout.
-
-    The slant and the panel width are inline literals in render_image() rather
-    than module constants, so they are repeated here.
-    """
+    taken from the renderer's own helpers so probes follow the layout."""
+    row_height, panel_width, slant = panel_metrics(compact=True, scale=scale)
     return CompactLayout(
-        row_height=BASE_H * scale // 2,
+        row_height=row_height,
         step=BASE_W * scale / 4,
-        slant=38 * scale,
+        slant=slant,
         gap=CARD_GAP * scale,
         border=CARD_BORDER * scale,
-        panel_width=340 * scale,
+        panel_width=panel_width,
     )
 
 
@@ -389,8 +385,7 @@ def test_badge_render_and_geometry_for_long_constellation_string(tmp_path: Path)
     # push past the canvas edge.
     scale = 1
     compact = True
-    row_height = 360
-    step = 320.0
+    row_height, step, *_ = compact_layout(scale)
     font = find_font((38 if compact else 54) * scale)
     canvas = Image.new("RGBA", (1280, 720), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
@@ -439,8 +434,7 @@ def test_badge_constellation_and_refinement_use_distinct_rarity_colors(tmp_path:
     # used in the long-string badge test above.
     scale = 1
     compact = True
-    row_height = 360
-    step = 320.0
+    row_height, step, *_ = compact_layout(scale)
     font = find_font((38 if compact else 54) * scale)
     canvas = Image.new("RGBA", (1280, 720), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
@@ -468,8 +462,8 @@ def test_preview_renders_placeholder_panel_for_missing_asset(tmp_path: Path) -> 
     # the shared-edge gap, mapped from panel-local to canvas coordinates the
     # same way make_panel()/placeholder_panel() paste onto the canvas
     # (index * step - slant, row * row_height).
-    panel_width, slant, row_height = 340, 38, 360
-    target = (panel_width + slant * 2, row_height)
+    slant = compact_layout().slant
+    target = panel_target_size(compact=True)
     placeholder_color = project.teams[0][0].color
     expected = panel_background(target, placeholder_color, compact=True)
     local_point = (188, 180)
@@ -510,9 +504,8 @@ def test_leftmost_slot_is_not_shifted_by_its_negative_panel_origin(tmp_path: Pat
 
     preview = render_preview(project, assets)
 
-    # Preview geometry for a compact (two-row) abyss team, mirroring
-    # render_image()'s own layout constants at scale 1.
-    row_height, step, slant, panel_width = 360, 320.0, 38, 340
+    # Preview geometry for a compact (two-row) abyss team at scale 1.
+    row_height, step, slant, _, _, panel_width = compact_layout()
     first_origin_x, _ = panel_origin(0, row=0, row_height=row_height, step=step, slant=slant)
     second_origin_x, _ = panel_origin(1, row=0, row_height=row_height, step=step, slant=slant)
     # Horizontal centre of the panel: well inside both cards, clear of the
@@ -680,8 +673,7 @@ def test_weapon_circle_outline_uses_element_color(tmp_path: Path) -> None:
     # weapon icon's circle rather than the C/R box.
     scale = 1
     compact = True
-    row_height = 360
-    step = 320.0
+    row_height, step, *_ = compact_layout(scale)
     font = find_font((38 if compact else 54) * scale)
     canvas = Image.new("RGBA", (1280, 720), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
