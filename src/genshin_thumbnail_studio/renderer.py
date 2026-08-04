@@ -150,12 +150,16 @@ def cover_scale(source_size: tuple[int, int], target: tuple[int, int], zoom: flo
     return max(target_w / source_w, target_h / source_h) * zoom
 
 
-def _scaled_size(source_size: tuple[int, int], target: tuple[int, int], image_scale: float) -> tuple[int, int]:
+def _scaled_size(source_size: tuple[int, int], image_scale: float) -> tuple[int, int]:
+    """Both axes multiplied by the same factor, so the zoom never changes the
+    art's aspect ratio.
+
+    The result may end up smaller than the panel, which is intentional: the
+    crop window then overhangs the art and the panel background and glow show
+    through the margin, which is preferable to stretching the portrait.
+    """
     source_w, source_h = source_size
-    return (
-        max(target[0], int(source_w * image_scale + 0.5)),
-        max(target[1], int(source_h * image_scale + 0.5)),
-    )
+    return (max(1, int(source_w * image_scale + 0.5)), max(1, int(source_h * image_scale + 0.5)))
 
 
 def resized_art_size(
@@ -163,14 +167,19 @@ def resized_art_size(
 ) -> tuple[int, int]:
     """Pixel size the art is resized to before it is cropped into one panel."""
     target = panel_target_size(compact, scale)
-    return _scaled_size(art_size, target, cover_scale(art_size, target, zoom))
+    return _scaled_size(art_size, cover_scale(art_size, target, zoom))
 
 
 def _offset_limits(resized: tuple[int, int], target: tuple[int, int]) -> tuple[float, float]:
-    """Largest panel-relative offset per axis that still moves the crop."""
+    """Largest panel-relative offset per axis that still moves the crop.
+
+    Floored at zero because art scaled to less than the panel minus the
+    overscan would otherwise produce a negative limit, which inverts the
+    `min(limit, max(-limit, offset))` clamp in `cover_resize_offset()`.
+    """
     return (
-        (resized[0] - target[0]) / (2 * target[0]) + PAN_OVERSCAN,
-        (resized[1] - target[1]) / (2 * target[1]) + PAN_OVERSCAN,
+        max(0.0, (resized[0] - target[0]) / (2 * target[0]) + PAN_OVERSCAN),
+        max(0.0, (resized[1] - target[1]) / (2 * target[1]) + PAN_OVERSCAN),
     )
 
 
@@ -207,7 +216,7 @@ def cover_resize_offset(
     source_w, source_h = image.size
     target_w, target_h = size
     image_scale = cover_scale(image.size, size, zoom)
-    resized_w, resized_h = _scaled_size(image.size, size, image_scale)
+    resized_w, resized_h = _scaled_size(image.size, image_scale)
     limit_x, limit_y = _offset_limits((resized_w, resized_h), size)
     offset_x = min(limit_x, max(-limit_x, offset_x))
     offset_y = min(limit_y, max(-limit_y, offset_y))
@@ -225,6 +234,8 @@ def cover_resize_offset(
     visible_top = max(0, top)
     visible_right = min(resized_w, left + target_w)
     visible_bottom = min(resized_h, top + target_h)
+    if visible_right <= visible_left or visible_bottom <= visible_top:
+        return Image.new("RGBA", size, (0, 0, 0, 0))
     box = (
         visible_left * source_w / resized_w,
         visible_top * source_h / resized_h,

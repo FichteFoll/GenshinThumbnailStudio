@@ -248,10 +248,10 @@ def reference_cover_resize_offset(
     source_w, source_h = image.size
     target_w, target_h = size
     image_scale = max(target_w / source_w, target_h / source_h) * zoom
-    resized_w = max(target_w, int(source_w * image_scale + 0.5))
-    resized_h = max(target_h, int(source_h * image_scale + 0.5))
-    limit_x = (resized_w - target_w) / (2 * target_w) + PAN_OVERSCAN
-    limit_y = (resized_h - target_h) / (2 * target_h) + PAN_OVERSCAN
+    resized_w = max(1, int(source_w * image_scale + 0.5))
+    resized_h = max(1, int(source_h * image_scale + 0.5))
+    limit_x = max(0.0, (resized_w - target_w) / (2 * target_w) + PAN_OVERSCAN)
+    limit_y = max(0.0, (resized_h - target_h) / (2 * target_h) + PAN_OVERSCAN)
     offset_x = min(limit_x, max(-limit_x, offset_x))
     offset_y = min(limit_y, max(-limit_y, offset_y))
     resized = image.resize((resized_w, resized_h), Image.Resampling.LANCZOS)
@@ -280,6 +280,35 @@ def test_cover_resize_offset_matches_resize_then_crop() -> None:
                     # against resizing everything up front, but on smooth
                     # content the two stay within a couple of levels.
                     assert max(band.getextrema()[1] for band in difference.split()) <= 4, case
+
+
+def test_zoom_scales_both_art_axes_identically() -> None:
+    """Zoom is a real zoom: it never changes the art's aspect ratio, not even
+    where the scaled art no longer covers the panel."""
+    for compact in (True, False):
+        for art_size in (STANDARD_ART_SIZE, (1200, 900)):
+            for zoom in (0.70, 0.85, 1.00, 1.06, 1.80):
+                resized = resized_art_size(art_size, compact=compact, zoom=zoom)
+                case = (compact, art_size, zoom, resized)
+                source_ratio = art_size[0] / art_size[1]
+                # Both axes round independently, so the width may differ from
+                # the ratio-implied width by half a pixel per axis, widened here
+                # by the ratio the height is compared through.
+                assert abs(resized[0] - resized[1] * source_ratio) <= 1 + source_ratio, case
+
+
+def test_zoom_below_cover_leaves_the_panel_uncovered() -> None:
+    """Below zoom 1.0 the 2:1 splash art no longer reaches the panel's top and
+    bottom edges. The uncovered strip stays transparent instead of the art
+    being stretched to fill it."""
+    target = panel_target_size(compact=True)
+    source = Image.new("RGBA", STANDARD_ART_SIZE, (0, 0, 40, 255))
+
+    crop = cover_resize_offset(source, target, 0.0, 0.0, 0.85)
+
+    assert _row_alpha(crop, 0) == {0}
+    assert _row_alpha(crop, target[1] - 1) == {0}
+    assert _row_alpha(crop, target[1] // 2) == {255}
 
 
 def test_abyss_render_and_export(tmp_path: Path) -> None:
