@@ -21,24 +21,29 @@ from .geometry import cover_scale, scaled_size, zoom_offset_limits
 # scaled for 1.80 is never upsampled by an edit made through the GUI.
 MAX_PLACEMENT_ZOOM = 1.80
 
-# How much wider than the character crop the blurred glow layer is framed.
-# A fixed factor rather than a floored one: the glow is derived from the same
-# art as the portrait, so it has to scale with it at every placement zoom, not
-# only above some threshold. This used to be `max(1.0, zoom * GLOW_ZOOM_FACTOR)`,
-# which guaranteed the glow covered the whole panel but froze it over most of
-# the GUI's zoom range (0.70..1.80, with 1 / GLOW_ZOOM_FACTOR around 1.28) -
-# a glow that does not move with the portrait it is derived from is the worse
-# artefact. Below that zoom the glow now leaves a transparent margin, where
-# `panel_background()`'s gradient shows through, the same way the portrait
-# already does below its own cover-fit zoom.
-GLOW_ZOOM_FACTOR = 0.78
+# The glow layer's cover-fit zoom relative to the portrait's own. A fixed
+# factor rather than a floored one: the glow is derived from the same art as
+# the portrait, so it has to scale with it at every placement zoom, not only
+# above some threshold. This used to be `max(1.0, zoom * GLOW_ZOOM_FACTOR)`
+# with a factor of 0.78, framing the glow wider than the crop above zoom
+# ~1.28 while the floor guaranteed the glow covered the whole panel below it -
+# but the floor froze the glow over most of the GUI's zoom range (0.70..1.80),
+# including both default zooms, which is the worse artefact of the two. This
+# is now 1.0: the glow tracks the portrait's own framing exactly (still built
+# from a downscaled, blurred, colour-boosted copy, so it still reads as a
+# distinct wash rather than a sharper duplicate of the portrait), which keeps
+# the glow covering the panel at both default zooms and above. Below zoom 1.0
+# (reachable via the GUI down to `MIN_ZOOM`), the glow leaves the same
+# transparent margin the portrait's own crop already leaves there.
+GLOW_ZOOM_FACTOR = 1.0
 
 
 def glow_zoom(zoom: float) -> float:
     """The zoom the panel glow is cover-fit at, for a placement zoom.
 
-    Strictly proportional to the placement zoom, so the glow's framing tracks
-    the portrait's at every zoom instead of only above some threshold. See the
+    Strictly proportional to the placement zoom (currently equal to it, since
+    `GLOW_ZOOM_FACTOR` is 1.0), so the glow's framing tracks the portrait's at
+    every zoom instead of only above some threshold. See the
     `GLOW_ZOOM_FACTOR` comment for the covering-the-panel trade-off this gives up.
     """
     return zoom * GLOW_ZOOM_FACTOR

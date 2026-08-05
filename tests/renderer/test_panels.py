@@ -9,7 +9,7 @@ from PIL import Image, ImageDraw
 
 import genshin_thumbnail_studio.renderer.art as art_module
 from genshin_thumbnail_studio.models import Asset, Project
-from genshin_thumbnail_studio.renderer.art import cover_resize_offset, glow_zoom
+from genshin_thumbnail_studio.renderer.art import cover_resize_offset
 from genshin_thumbnail_studio.renderer.cache import clear_render_cache
 from genshin_thumbnail_studio.renderer.colors import ELEMENT_COLORS, hex_to_rgba
 from genshin_thumbnail_studio.renderer.compose import render_preview
@@ -232,62 +232,14 @@ def _punch_a_transparent_hole(assets: dict[str, Asset]) -> None:
         art.save(asset.art_path)
 
 
-def test_glow_shows_through_a_transparent_gap_in_the_character_art(tmp_path: Path) -> None:
-    names = [f"Character {index}" for index in range(8)]
-    project = Project.blank("abyss")
-    fill_project(project, names)
-    # The glow is framed wider than the crop by a fixed factor at every zoom,
-    # so zoom in far enough that the two framings clearly differ.
-    for member in (member for team in project.teams for member in team):
-        member.zoom = 1.6
-    assets = create_assets(tmp_path, names)
-    _punch_a_transparent_hole(assets)
-
-    preview = render_preview(project, assets)
-
-    # The glow is framed wider than the crop at this zoom, so its hole is
-    # smaller. Probe where the character art is transparent but the glow is
-    # not, derived from the renderer's own framing rather than from hard-coded
-    # pixels, which would depend on the default offsets.
-    member = project.teams[0][1]
-    target = panel_target_size(compact=True)
-    art = Image.open(assets[member.name.casefold()].art_path).convert("RGBA")
-    crop = cover_resize_offset(art, target, member.offset_x, member.offset_y, member.zoom)
-    glow = cover_resize_offset(
-        art, target, member.offset_x, member.offset_y, glow_zoom(member.zoom)
-    )
-    row = target[1] // 2
-    uncovered = [
-        x
-        for x in range(target[0])
-        if rgba(crop, (x, row))[3] == 0 and rgba(glow, (x, row))[3] == 255
-    ]
-    assert uncovered, "no pixel where the art is transparent but the glow is not"
-    local_point = (uncovered[len(uncovered) // 2], row)
-
-    # Mapped to canvas coordinates the same way the panel is pasted
-    # (index * step - slant, row * row_height).
-    slant = panel_metrics(compact=True)[2]
-    canvas_point = (1 * 320 - slant + local_point[0], local_point[1])
-    plain_background = panel_background(target, member.color, compact=True)
-
-    pixel = preview.getpixel(canvas_point)
-    background_pixel = plain_background.getpixel(local_point)
-    assert isinstance(pixel, tuple)
-    assert isinstance(background_pixel, tuple)
-    assert pixel != background_pixel[:3]
-    # The art's red is the only red in this panel, so it can only have reached
-    # a pixel the character art does not cover via the blurred glow layer.
-    assert pixel[0] > background_pixel[0] + 10
-
-
 def test_glow_reaches_into_a_transparent_gap_at_the_default_zoom(tmp_path: Path) -> None:
     """The default zoom deserves its own probe, since it is what a fresh
-    project renders with. `glow_zoom()` is strictly proportional now, so the
-    glow is framed wider than the crop here too (0.78x rather than 1.00x),
-    and both the wider framing and the glow layer's own softness (it is built
-    at a quarter of the panel resolution, blurred and resampled back up,
-    which carries colour a little way past the gap's rim) reach into the gap.
+    project renders with. `glow_zoom()` now equals the placement zoom exactly
+    (`GLOW_ZOOM_FACTOR` is 1.0), so the glow's framing is identical to the
+    crop's at every zoom; what still reaches into the transparent gap is the
+    glow layer's own softness (it is built at a quarter of the panel
+    resolution, blurred and resampled back up, which carries colour a little
+    way past the gap's rim).
     """
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
