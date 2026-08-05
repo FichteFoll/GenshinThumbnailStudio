@@ -46,8 +46,7 @@ def test_reorder_slots_shifts_placements(tmp_path: Path, monkeypatch: pytest.Mon
     assert window.team_combos[1][3].currentText() == "Furina"
     assert window.selected == (1, 3)
 
-    window.close()
-    app.processEvents()
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
 def test_slot_drag_hover_reorders_live(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -65,8 +64,7 @@ def test_slot_drag_hover_reorders_live(tmp_path: Path, monkeypatch: pytest.Monke
     assert window.selected == (1, 3)
     assert window._render_timer.isActive()
 
-    window.close()
-    app.processEvents()
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
 def test_slot_drag_cancelled_reverts_to_the_original_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -85,8 +83,7 @@ def test_slot_drag_cancelled_reverts_to_the_original_order(tmp_path: Path, monke
     combo_names = [combo.currentText() for row in window.team_combos for combo in row]
     assert combo_names == TEAM_NAMES
 
-    window.close()
-    app.processEvents()
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
 def test_slot_drag_accepted_keeps_the_live_arrangement(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
