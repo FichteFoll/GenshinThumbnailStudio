@@ -81,6 +81,8 @@ class MainWindow(QMainWindow):
         self._presets = PresetStore.load()
         self._placement = PlacementController(self)
         self.selected = (0, 0)
+        self._drag_snapshot: list[list[Placement]] | None = None
+        self._drag_position: tuple[int, int] | None = None
         self._updating_controls = False
         self._render_timer = QTimer(self)
         self._render_timer.setSingleShot(True)
@@ -286,7 +288,9 @@ class MainWindow(QMainWindow):
 
                 combo.currentTextChanged.connect(on_text_changed)
                 slot_widget = TeamSlotWidget(team_index, slot_index, combo)
-                slot_widget.swap_requested.connect(self.reorder_slots_signal)
+                slot_widget.drag_started.connect(self._on_slot_drag_started)
+                slot_widget.drag_hover.connect(self._on_slot_drag_hover)
+                slot_widget.drag_ended.connect(self._on_slot_drag_ended)
                 rows.addWidget(slot_widget)
                 row_combos.append(combo)
             self.team_layout.addLayout(rows)
@@ -303,8 +307,25 @@ class MainWindow(QMainWindow):
                     combo.setCurrentText(name)
                     combo.blockSignals(False)
 
-    def reorder_slots_signal(self, source_team: int, source_slot: int, target_team: int, target_slot: int) -> None:
-        self.reorder_slots((source_team, source_slot), (target_team, target_slot))
+    def _on_slot_drag_started(self, team: int, slot: int) -> None:
+        self._drag_snapshot = copy.deepcopy(self.project.teams)
+        self._drag_position = (team, slot)
+
+    def _on_slot_drag_hover(self, team: int, slot: int) -> None:
+        if self._drag_position is None or (team, slot) == self._drag_position:
+            return
+        self.reorder_slots(self._drag_position, (team, slot))
+        self._drag_position = (team, slot)
+
+    def _on_slot_drag_ended(self, accepted: bool) -> None:
+        if not accepted and self._drag_snapshot is not None:
+            self.project.teams = self._drag_snapshot
+            self._refresh_slot_display()
+            self._sync_controls()
+            if self.assets:
+                self.schedule_render()
+        self._drag_snapshot = None
+        self._drag_position = None
 
     def reorder_slots(self, source: tuple[int, int], target: tuple[int, int]) -> None:
         if source == target:

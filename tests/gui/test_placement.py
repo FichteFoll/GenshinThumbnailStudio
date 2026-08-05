@@ -50,6 +50,61 @@ def test_reorder_slots_shifts_placements(tmp_path: Path, monkeypatch: pytest.Mon
     app.processEvents()
 
 
+def test_slot_drag_hover_reorders_live(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+    fill_window_teams(window, TEAM_NAMES)
+    window.assets = create_test_assets(tmp_path / "assets", TEAM_NAMES)
+
+    window._on_slot_drag_started(0, 0)
+    window._on_slot_drag_hover(1, 3)
+
+    assert window.project.teams[1][3].name == TEAM_NAMES[0]
+    assert window.team_combos[1][3].currentText() == TEAM_NAMES[0]
+    assert window.selected == (1, 3)
+    assert window._render_timer.isActive()
+
+    window.close()
+    app.processEvents()
+
+
+def test_slot_drag_cancelled_reverts_to_the_original_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+    fill_window_teams(window, TEAM_NAMES)
+
+    window._on_slot_drag_started(0, 0)
+    window._on_slot_drag_hover(1, 3)
+    window._on_slot_drag_hover(0, 2)
+    window._on_slot_drag_ended(False)
+
+    names = [member.name for team in window.project.teams for member in team]
+    assert names == TEAM_NAMES
+    combo_names = [combo.currentText() for row in window.team_combos for combo in row]
+    assert combo_names == TEAM_NAMES
+
+    window.close()
+    app.processEvents()
+
+
+def test_slot_drag_accepted_keeps_the_live_arrangement(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+    fill_window_teams(window, TEAM_NAMES)
+
+    window._on_slot_drag_started(0, 0)
+    window._on_slot_drag_hover(1, 3)
+    window._on_slot_drag_ended(True)
+
+    assert window.project.teams[1][3].name == TEAM_NAMES[0]
+
+    window.close()
+    app.processEvents()
+
+
 def test_offset_sliders_are_signed_and_span_the_reachable_range(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
