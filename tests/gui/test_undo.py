@@ -261,6 +261,64 @@ def test_the_undo_and_redo_shortcuts_reach_the_window(tmp_path: Path, monkeypatc
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
+def test_redo_survives_a_baseline_the_sliders_would_requantize(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Restoring re-quantizes the offsets, which must not count as a new edit.
+
+    An unquantized baseline is the normal case, not a contrived one: applying a
+    stored preset writes the raw pan result, so this is the plain
+    load-profile, generate-preview, drag, undo, redo flow.
+    """
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = _window_with_history_baseline()
+    window.current_member().offset_x = 0.0724
+    window._history.reset()
+
+    window.drag_placement(30, 0)
+    window._history.commit_now()
+    dragged_x = window.current_member().offset_x
+
+    window._history.undo()
+    window._history.redo()
+
+    assert window.current_member().offset_x == _approx(dragged_x)
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+def test_no_debounce_is_left_pending_during_a_slot_drag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing may be scheduled mid-gesture, so a lingering drag cannot snapshot.
+
+    A debounce firing while the user rests over a slot would record a
+    half-finished arrangement, which a cancelled drag then reverts around,
+    leaving the aborted reorder one `Ctrl+Z` away.
+    """
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = _window_with_history_baseline()
+
+    # An edit still pending when the drag starts must be settled, not left armed.
+    window.drag_placement(30, 0)
+    assert window._history._timer.isActive() is True
+
+    window._on_slot_drag_started(0, 0)
+    assert window._history._timer.isActive() is False
+
+    window._on_slot_drag_hover(1, 3)
+    assert window._history._timer.isActive() is False
+
+    window._on_slot_drag_ended(False)
+    window._history.undo()
+    names = [member.name for team in window.project.teams for member in team]
+    assert names == TEAM_NAMES
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
 def _activate(window: MainWindow, sequence: str) -> None:
     """Fire the shortcut bound to `sequence` as if the user had pressed it.
 

@@ -77,6 +77,14 @@ class PlacementHistory:
         self._index += 1
         return copy.deepcopy(self._states[self._index])
 
+    def replace_current(self, teams: Teams) -> None:
+        """Overwrite the current state in place, adding none and truncating nothing.
+
+        Whoever restores a state may normalize what it was handed back, and that
+        normalization must not read as a fresh edit the next time around.
+        """
+        self._states[self._index] = copy.deepcopy(teams)
+
     def reset(self, teams: Teams) -> None:
         """Drop the whole history and start over with `teams` as the baseline."""
         self._states = [copy.deepcopy(teams)]
@@ -158,3 +166,8 @@ class HistoryController(QObject):
             return
         self._state.project.teams = teams
         self._on_restored()
+        # `on_restored` normalizes what it was handed: `_sync_controls()` writes
+        # the slider-quantized offsets back onto the members. Recording that
+        # result as the current state keeps the next `commit_now()` from reading
+        # the quantization as a fresh edit and truncating the redo tail.
+        self._history.replace_current(self._state.project.teams)

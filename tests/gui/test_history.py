@@ -121,6 +121,23 @@ def test_stored_states_are_isolated_from_the_live_placements() -> None:
     assert again[0][0].offset_x == 0.1
 
 
+def test_replace_current_rewrites_the_state_in_place_and_keeps_the_redo_tail() -> None:
+    history = PlacementHistory(_teams(0.1))
+    history.commit(_teams(0.2))
+    history.undo()
+
+    history.replace_current(_teams(0.11))
+
+    # The tail survives, so a redo still reaches the committed state.
+    assert history.can_redo is True
+    redone = history.redo()
+    assert redone is not None
+    assert redone[0][0].offset_x == 0.2
+    undone = history.undo()
+    assert undone is not None
+    assert undone[0][0].offset_x == 0.11
+
+
 def test_reset_drops_the_history_and_reseeds_the_baseline() -> None:
     history = PlacementHistory(_teams(0.1))
     history.commit(_teams(0.2))

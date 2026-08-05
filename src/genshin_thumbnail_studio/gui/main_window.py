@@ -314,6 +314,9 @@ class MainWindow(QMainWindow):
                     combo.blockSignals(False)
 
     def _on_slot_drag_started(self, team: int, slot: int) -> None:
+        # Settle any edit still pending from before the drag, so its debounce
+        # cannot fire mid-gesture and snapshot a half-finished reorder.
+        self._history.commit_now()
         self._drag_snapshot = copy.deepcopy(self.project.teams)
         self._drag_position = (team, slot)
 
@@ -354,9 +357,9 @@ class MainWindow(QMainWindow):
             self.schedule_render()
         if self._drag_position is None:
             self._history.commit_now()
-        else:
-            # A drag reorders per hovered slot; the drop commits the gesture.
-            self._history.schedule()
+        # During a drag nothing is scheduled: the drop commits the whole gesture
+        # in one go, and a debounce that fired while the user lingered over a
+        # slot would record an arrangement that a cancelled drag then reverts.
 
     def _populate_combo_items(self) -> None:
         names = [build.name for build in sorted(self.builds.values(), key=lambda item: item.name.casefold())]
