@@ -259,3 +259,38 @@ def test_the_undo_and_redo_shortcuts_reach_the_window(tmp_path: Path, monkeypatc
     assert QKeySequence("Ctrl+Shift+Z") in sequences
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+def _activate(window: MainWindow, sequence: str) -> None:
+    """Fire the shortcut bound to `sequence` as if the user had pressed it.
+
+    `activated` is emitted directly rather than posting a key event, because an
+    offscreen window never gains the focus real key delivery would need. It
+    still proves which handler each binding is connected to, which asserting
+    over the installed key sequences alone does not.
+    """
+    shortcut = next(s for s in window.findChildren(QShortcut) if s.key() == QKeySequence(sequence))
+    shortcut.activated.emit()
+
+
+@pytest.mark.parametrize("redo_sequence", ["Ctrl+Y", "Ctrl+Shift+Z"])
+def test_each_shortcut_is_connected_to_the_direction_it_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, redo_sequence: str
+) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = _window_with_history_baseline()
+    start_x = window.current_member().offset_x
+
+    window.drag_placement(30, 0)
+    window._history.commit_now()
+    dragged_x = window.current_member().offset_x
+    assert dragged_x > start_x
+
+    _activate(window, "Ctrl+Z")
+    assert window.current_member().offset_x == _approx(start_x)
+
+    _activate(window, redo_sequence)
+    assert window.current_member().offset_x == _approx(dragged_x)
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
