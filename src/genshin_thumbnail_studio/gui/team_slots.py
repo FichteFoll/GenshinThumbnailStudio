@@ -18,7 +18,7 @@ class _SlotDragHandle(QLabel):
         self.setFixedWidth(18)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
-        self.setToolTip("Drag to swap slots")
+        self.setToolTip("Drag to reorder")
         self._drag_start: QPoint | None = None
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
