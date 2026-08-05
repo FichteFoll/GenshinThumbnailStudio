@@ -8,7 +8,7 @@ from PySide6.QtCore import QEventLoop, QTimer
 
 from genshin_thumbnail_studio.gui import MainWindow
 
-from .helpers import qapp
+from .helpers import close_ignoring_unsaved_changes, qapp
 
 
 def test_closing_window_does_not_warn_about_webengine_profile_teardown(
@@ -64,5 +64,4 @@ def test_editing_a_placement_marks_the_project_dirty(tmp_path: Path, monkeypatch
     window = MainWindow()
     window.project.teams[0][0].offset_x = 0.3
     assert window.is_dirty()
-    window.close()
-    app.processEvents()
+    close_ignoring_unsaved_changes(window, app, monkeypatch)

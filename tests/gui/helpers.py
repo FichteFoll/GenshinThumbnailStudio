@@ -2,10 +2,11 @@
 
 from pathlib import Path
 
+import pytest
 from PIL import Image, ImageDraw
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
-from genshin_thumbnail_studio.gui import MainWindow
+from genshin_thumbnail_studio.gui import MainWindow, main_window
 from genshin_thumbnail_studio.models import Asset, Build
 
 
@@ -57,6 +58,48 @@ def fill_window_teams(window: MainWindow, names: list[str]) -> None:
     members = [member for team in window.project.teams for member in team]
     for member, name in zip(members, names, strict=False):
         member.name = name
+
+
+class DiscardMessageBox:
+    """Minimal `QMessageBox` stub that always reports the Discard button clicked.
+
+    Lets `window.close()` proceed past the unsaved-changes prompt in tests
+    that dirty the project incidentally and don't otherwise care about the
+    save/discard/cancel choice.
+    """
+
+    ButtonRole = QMessageBox.ButtonRole
+    StandardButton = QMessageBox.StandardButton
+
+    def __init__(self, parent: object = None) -> None:
+        self._discard_button = object()
+
+    def setWindowTitle(self, title: str) -> None:
+        pass
+
+    def setText(self, text: str) -> None:
+        pass
+
+    def addButton(self, *args: object) -> object:
+        button = object()
+        if args and isinstance(args[0], str) and "discard" in args[0].casefold():
+            self._discard_button = button
+        return button
+
+    def exec(self) -> None:
+        return None
+
+    def clickedButton(self) -> object:
+        return self._discard_button
+
+
+def close_ignoring_unsaved_changes(window: MainWindow, app: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Close `window`, auto-discarding any unsaved changes so the confirmation
+    dialog added by `closeEvent` doesn't block a headless test that doesn't
+    care about that prompt."""
+    monkeypatch.setattr(main_window, "QMessageBox", DiscardMessageBox)
+    window.close()
+    app.processEvents()
 
 
 def wait_for_render(window: MainWindow, app: QApplication) -> None:

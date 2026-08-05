@@ -9,7 +9,7 @@ from genshin_thumbnail_studio.gui import MainWindow
 from genshin_thumbnail_studio.models import Placement
 from genshin_thumbnail_studio.renderer import art_pixel_size, max_offset, panel_target_size
 
-from .helpers import TEAM_NAMES, create_test_assets, fill_window_teams, qapp
+from .helpers import TEAM_NAMES, close_ignoring_unsaved_changes, create_test_assets, fill_window_teams, qapp
 
 
 def _approx(expected: float, abs: float) -> Any:
@@ -101,8 +101,7 @@ def test_slot_drag_accepted_keeps_the_live_arrangement(tmp_path: Path, monkeypat
 
     assert window.project.teams[1][3].name == TEAM_NAMES[0]
 
-    window.close()
-    app.processEvents()
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
 def test_offset_sliders_are_signed_and_span_the_reachable_range(
@@ -137,8 +136,7 @@ def test_offset_sliders_are_signed_and_span_the_reachable_range(
     assert window.current_member().offset_x == 0.0
     assert window.x_value.text() == "+0%"
 
-    window.close()
-    app.processEvents()
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
 def _window_with_assets(tmp_path: Path, names: list[str]) -> MainWindow:
@@ -172,8 +170,7 @@ def test_drag_moves_the_offsets_by_one_canvas_pixel_per_mouse_pixel(
     assert member.offset_x - before_x == _approx(30 / target_w, OFFSET_TOLERANCE)
     assert member.offset_y - before_y == _approx(30 / target_h, OFFSET_TOLERANCE)
 
-    window.close()
-    app.processEvents()
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
 def test_drag_displaces_the_portrait_equally_on_both_axes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -195,8 +192,7 @@ def test_drag_displaces_the_portrait_equally_on_both_axes(tmp_path: Path, monkey
     assert pixels_x == _approx(pixels_y, tolerance)
     assert pixels_x == _approx(30, tolerance)
 
-    window.close()
-    app.processEvents()
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
 def test_drag_past_the_reachable_range_stops_at_the_bounds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -218,8 +214,7 @@ def test_drag_past_the_reachable_range_stops_at_the_bounds(tmp_path: Path, monke
     assert member.offset_x == _approx(-max_x, OFFSET_TOLERANCE)
     assert member.offset_y == _approx(-max_y, OFFSET_TOLERANCE)
 
-    window.close()
-    app.processEvents()
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
 def test_flip_check_toggles_the_selected_member(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -235,8 +230,7 @@ def test_flip_check_toggles_the_selected_member(tmp_path: Path, monkeypatch: pyt
     window.flip_check.setChecked(False)
     assert window.current_member().flip is False
 
-    window.close()
-    app.processEvents()
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
 def test_sync_controls_shows_the_flip_without_writing_it_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -256,8 +250,7 @@ def test_sync_controls_shows_the_flip_without_writing_it_back(tmp_path: Path, mo
     assert window.current_member().flip is True
     assert writes == []
 
-    window.close()
-    app.processEvents()
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
 def test_selecting_another_slot_shows_that_slots_flip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -274,8 +267,7 @@ def test_selecting_another_slot_shows_that_slots_flip(tmp_path: Path, monkeypatc
     window.select_slot(0, 0)
     assert window.flip_check.isChecked() is True
 
-    window.close()
-    app.processEvents()
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
 def test_flip_round_trips_through_the_presets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -290,8 +282,7 @@ def test_flip_round_trips_through_the_presets(tmp_path: Path, monkeypatch: pytes
     window._presets.apply_to(window, fresh)
     assert fresh.flip is True
 
-    window.close()
-    app.processEvents()
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
 def test_reset_placement_clears_the_flip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -306,5 +297,4 @@ def test_reset_placement_clears_the_flip(tmp_path: Path, monkeypatch: pytest.Mon
     assert window.current_member().flip is False
     assert window.flip_check.isChecked() is False
 
-    window.close()
-    app.processEvents()
+    close_ignoring_unsaved_changes(window, app, monkeypatch)

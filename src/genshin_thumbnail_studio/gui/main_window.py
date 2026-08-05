@@ -101,7 +101,36 @@ class MainWindow(QMainWindow):
     def _icon(self, standard: QStyle.StandardPixmap):
         return self.style().standardIcon(standard)
 
+    def _confirm_discard_changes(self, action: str) -> bool:
+        """Ask whether to save unsaved changes before `action` proceeds.
+
+        Returns True when it is safe to proceed: there were no unsaved
+        changes, the user chose to discard them, or the user chose to save
+        and the save completed. Returns False when the caller must abort,
+        either because the user chose Cancel or the save dialog was itself
+        cancelled.
+        """
+        if not self.is_dirty():
+            return True
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Unsaved changes")
+        dialog.setText(f"This project has unsaved changes. Save before you {action}?")
+        save_button = dialog.addButton("Save", QMessageBox.ButtonRole.AcceptRole)
+        discard_button = dialog.addButton("Discard", QMessageBox.ButtonRole.DestructiveRole)
+        dialog.addButton(QMessageBox.StandardButton.Cancel)
+        dialog.exec()
+        clicked = dialog.clickedButton()
+        if clicked == discard_button:
+            return True
+        if clicked == save_button:
+            self.save_project()
+            return not self.is_dirty()
+        return False
+
     def closeEvent(self, event: QCloseEvent) -> None:
+        if not self._confirm_discard_changes("exit"):
+            event.ignore()
+            return
         self.client.close()
         super().closeEvent(event)
 
@@ -361,6 +390,10 @@ class MainWindow(QMainWindow):
         mode = "abyss" if abyss_checked else "stygian"
         if self.project.mode == mode:
             return
+        if not self._confirm_discard_changes("switch modes"):
+            self.abyss_radio.setChecked(self.project.mode == "abyss")
+            self.stygian_radio.setChecked(self.project.mode == "stygian")
+            return
         uid = self.uid_edit.text().strip()
         self.project = Project.blank(mode, uid)
         self.project_path = None
@@ -370,6 +403,7 @@ class MainWindow(QMainWindow):
         self._rebuild_team_fields()
         self._sync_controls()
         self.preview.set_preview(QPixmap())
+        self._saved_snapshot = copy.deepcopy(self.project)
 
     def _output_name_changed(self, value: str) -> None:
         self.project.output_name = value
