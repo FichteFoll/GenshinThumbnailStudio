@@ -96,11 +96,41 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self._rebuild_team_fields()
         self._sync_controls()
+        self._saved_snapshot = copy.deepcopy(self.project)
 
     def _icon(self, standard: QStyle.StandardPixmap):
         return self.style().standardIcon(standard)
 
+    def _confirm_discard_changes(self, action: str) -> bool:
+        """Ask whether to save unsaved changes before `action` proceeds.
+
+        Returns True when it is safe to proceed: there were no unsaved
+        changes, the user chose to discard them, or the user chose to save
+        and the save completed. Returns False when the caller must abort,
+        either because the user chose Cancel or the save dialog was itself
+        cancelled.
+        """
+        if not self.is_dirty():
+            return True
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Unsaved changes")
+        dialog.setText(f"This project has unsaved changes. Save before you {action}?")
+        save_button = dialog.addButton("Save", QMessageBox.ButtonRole.AcceptRole)
+        discard_button = dialog.addButton("Discard", QMessageBox.ButtonRole.DestructiveRole)
+        dialog.addButton(QMessageBox.StandardButton.Cancel)
+        dialog.exec()
+        clicked = dialog.clickedButton()
+        if clicked == discard_button:
+            return True
+        if clicked == save_button:
+            self.save_project()
+            return not self.is_dirty()
+        return False
+
     def closeEvent(self, event: QCloseEvent) -> None:
+        if not self._confirm_discard_changes("exit"):
+            event.ignore()
+            return
         self.client.close()
         super().closeEvent(event)
 
@@ -360,6 +390,10 @@ class MainWindow(QMainWindow):
         mode = "abyss" if abyss_checked else "stygian"
         if self.project.mode == mode:
             return
+        if not self._confirm_discard_changes("switch modes"):
+            self.abyss_radio.setChecked(self.project.mode == "abyss")
+            self.stygian_radio.setChecked(self.project.mode == "stygian")
+            return
         uid = self.uid_edit.text().strip()
         self.project = Project.blank(mode, uid)
         self.project_path = None
@@ -369,6 +403,7 @@ class MainWindow(QMainWindow):
         self._rebuild_team_fields()
         self._sync_controls()
         self.preview.set_preview(QPixmap())
+        self._saved_snapshot = copy.deepcopy(self.project)
 
     def _output_name_changed(self, value: str) -> None:
         self.project.output_name = value
@@ -666,6 +701,10 @@ class MainWindow(QMainWindow):
         finally:
             QApplication.restoreOverrideCursor()
 
+    def is_dirty(self) -> bool:
+        """Whether the project differs from what was last saved, loaded, or started blank."""
+        return self.project != self._saved_snapshot
+
     def save_project(self) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "Save project", "thumbnail-project.json", "JSON (*.json)")
         if not path:
@@ -676,6 +715,7 @@ class MainWindow(QMainWindow):
         self.project.output_name = self.output_name.text().strip() or "genshin_thumbnail"
         save_project(self.project, Path(path))
         self.project_path = Path(path)
+        self._saved_snapshot = copy.deepcopy(self.project)
         self.statusBar().showMessage("Project saved", 5000)
 
     def open_project(self) -> None:
@@ -705,6 +745,7 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage(
                     "Project opened \u00b7 no cached profile found for this UID", 8000
                 )
+                self._saved_snapshot = copy.deepcopy(self.project)
                 return
             builds, last_update = cached
             self.builds = {build.name.casefold(): build for build in builds}
@@ -717,6 +758,7 @@ class MainWindow(QMainWindow):
             self._auto_preview()
             if age_minutes > 60:
                 self._offer_cache_refresh(age_minutes)
+            self._saved_snapshot = copy.deepcopy(self.project)
             self.statusBar().showMessage("Project opened", 5000)
         except Exception as error:
             self._show_error("Could not open project", error)

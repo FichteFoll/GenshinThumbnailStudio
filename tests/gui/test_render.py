@@ -10,7 +10,7 @@ from PIL import Image
 from genshin_thumbnail_studio.gui import MainWindow
 from genshin_thumbnail_studio.gui.render_job import RenderJob
 
-from .helpers import create_test_assets, fill_window_teams, qapp, wait_for_render
+from .helpers import close_ignoring_unsaved_changes, create_test_assets, fill_window_teams, qapp, wait_for_render
 
 
 def test_dispatch_render_marks_stale_while_job_running(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -79,8 +79,7 @@ def test_dispatch_render_end_to_end_sets_preview_pixmap(tmp_path: Path, monkeypa
     assert window.preview._pixmap is not None
     assert not window.preview._pixmap.isNull()
 
-    window.close()
-    app.processEvents()
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
 def test_on_asset_ready_populates_incrementally_and_schedules_render(
@@ -104,8 +103,7 @@ def test_on_asset_ready_populates_incrementally_and_schedules_render(
     assert set(window.assets) == {"furina"}
     assert window._render_timer.isActive()
 
-    window.close()
-    app.processEvents()
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
 def test_schedule_render_throttles_instead_of_restarting_the_timer(
@@ -134,8 +132,7 @@ def test_schedule_render_throttles_instead_of_restarting_the_timer(
     assert all(later <= earlier for earlier, later in itertools.pairwise(remaining)), remaining
     assert remaining[-1] < remaining[0], remaining
 
-    window.close()
-    app.processEvents()
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
 def test_schedule_render_without_assets_is_a_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -160,5 +157,4 @@ def test_schedule_render_without_assets_is_a_noop(tmp_path: Path, monkeypatch: p
 
     assert not window._render_timer.isActive()
 
-    window.close()
-    app.processEvents()
+    close_ignoring_unsaved_changes(window, app, monkeypatch)

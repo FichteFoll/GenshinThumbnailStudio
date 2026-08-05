@@ -11,7 +11,14 @@ from genshin_thumbnail_studio.gui import MainWindow, main_window
 from genshin_thumbnail_studio.models import Asset, Build, Project
 from genshin_thumbnail_studio.storage import load_profile_cache, save_profile_cache, save_project
 
-from .helpers import TEAM_NAMES, create_test_assets, fill_window_teams, qapp, wait_for_render
+from .helpers import (
+    TEAM_NAMES,
+    close_ignoring_unsaved_changes,
+    create_test_assets,
+    fill_window_teams,
+    qapp,
+    wait_for_render,
+)
 
 
 def make_build(name: str) -> Build:
@@ -197,8 +204,7 @@ def test_load_profile_persists_profile_cache(tmp_path: Path, monkeypatch: pytest
     assert cached_builds == builds
     assert cached_last_update == last_update
 
-    window.close()
-    app.processEvents()
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
 def _prepare_export_window(window: MainWindow, tmp_path: Path, names: list[str]) -> None:
@@ -241,8 +247,7 @@ def test_export_abyss_writes_the_file_chosen_in_the_save_dialog(
     assert window.output_name.text() == "chosen"
     assert window.project.output_name == "chosen"
 
-    window.close()
-    app.processEvents()
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
 def test_export_stygian_still_asks_for_a_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -304,6 +309,48 @@ def test_export_defaults_to_the_opened_project_folder(tmp_path: Path, monkeypatc
 
     assert default_paths == [str(project_dir / "prefilled.png")]
 
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+def test_saving_project_clears_the_dirty_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+    window.project.teams[0][0].offset_x = 0.3
+    assert window.is_dirty()
+
+    monkeypatch.setattr(
+        main_window.QFileDialog,
+        "getSaveFileName",
+        staticmethod(lambda *args, **kwargs: (str(tmp_path / "thumbnail-project.json"), "")),
+    )
+    window.save_project()
+
+    assert not window.is_dirty()
+
+    window.close()
+    app.processEvents()
+
+
+def test_opening_a_project_settles_before_the_dirty_baseline_is_taken(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    monkeypatch.setattr(main_window, "QMessageBox", ForbiddenMessageBox)
+    window, _ = prepare_cached_open(tmp_path, monkeypatch, datetime.now(timezone.utc) - timedelta(minutes=5))
+
+    def fake_apply_to(editor: MainWindow, member: Any) -> None:
+        member.offset_x = 0.42
+
+    monkeypatch.setattr(window._presets, "apply_to", fake_apply_to)
+
+    window.open_project()
+    wait_for_render(window, app)
+
+    assert window.project.teams[0][0].offset_x == 0.42
+    assert not window.is_dirty()
+
     window.close()
     app.processEvents()
 
@@ -337,5 +384,4 @@ def test_export_defaults_to_the_saved_project_folder(tmp_path: Path, monkeypatch
 
     assert default_paths == [str(project_dir / "prefilled.png")]
 
-    window.close()
-    app.processEvents()
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
