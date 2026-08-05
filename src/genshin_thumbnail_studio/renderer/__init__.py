@@ -77,6 +77,7 @@ from .geometry import (
     panel_target_size,
     resized_art_size,
     scaled_size,
+    zoom_offset_limits,
 )
 from .panels import (
     GLOW_DOWNSCALE,
@@ -162,4 +163,5 @@ __all__ = [
     "supersampled_coverage_for",
     "weapon_icon_cache",
     "work_cache",
+    "zoom_offset_limits",
 ]

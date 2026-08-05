@@ -91,6 +91,27 @@ def test_default_offsets_still_center_the_crop() -> None:
     assert abs(_marker_center_x(centered) - target[0] / 2) <= 1
 
 
+def test_explicit_limits_override_the_self_computed_clamp() -> None:
+    """A caller passing `limits` gets that clamp instead of the one
+    `cover_resize_offset()` would compute from `zoom`, which is how a second,
+    differently zoomed layer is made to pan exactly like the first one."""
+    source = _horizontally_marked_source()
+    target = panel_target_size(compact=True)
+    zoom = 1.06
+    tiny_limit = 0.05
+    requested_offset = 0.5
+    assert requested_offset > max_offset(STANDARD_ART_SIZE, compact=True, zoom=zoom)[1]
+
+    centered = cover_resize_offset(source, target, 0.0, 0.0, zoom)
+    clamped_to_tiny_limit = cover_resize_offset(
+        source, target, requested_offset, requested_offset, zoom, limits=(tiny_limit, tiny_limit)
+    )
+
+    assert abs(
+        _marker_center_y(clamped_to_tiny_limit) - _marker_center_y(centered) - tiny_limit * target[1]
+    ) <= 1
+
+
 def gradient_image(width: int, height: int) -> Image.Image:
     # Smooth and different along both axes, so a swapped or inverted axis in
     # the crop mapping changes the output. Deliberately not noise: LANCZOS
