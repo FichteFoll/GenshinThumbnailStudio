@@ -45,6 +45,7 @@ EXPECTED_MODULES = {
     "gui/app.py",
     "gui/style.py",
     "gui/main_window.py",
+    "gui/dialogs.py",
     "gui/state.py",
     "gui/placement.py",
     "gui/presets.py",
@@ -64,8 +65,9 @@ TEST_PACKAGES = ("akasha", "renderer", "gui")
 RETIRED_TEST_FILES = ("test_akasha.py", "test_renderer.py", "test_gui_smoke.py", "test_lineup.py")
 
 # A regression tripwire, not a design target. `gui/main_window.py` is the largest
-# module at 703 lines because its dialog flows (`load_profile`, `open_project`,
-# `export`) are Qt-bound throughout and were deliberately not decomposed further.
+# module because its remaining flows (`load_profile`, `open_project`, `export`)
+# are Qt-bound throughout; the blocking dialogs they put up live in
+# `gui/dialogs.py`.
 # A module crossing this bound is a signal to split it, not to raise the bound.
 MAX_MODULE_LINES = 750
 

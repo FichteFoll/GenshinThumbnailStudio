@@ -3,6 +3,15 @@
 from __future__ import annotations
 
 from .app import run
+from .dialogs import (
+    ask_export_target,
+    ask_lineup_text,
+    choose_stale_profile_action,
+    confirm_cache_refresh,
+    confirm_discard_changes,
+    show_error,
+    show_export_finished,
+)
 from .history import HISTORY_DEBOUNCE_MS, HISTORY_LIMIT, HistoryController, PlacementHistory
 from .lineup import parse_lineup
 from .main_window import RENDER_THROTTLE_MS, RESOLUTION_OPTIONS, MainWindow
@@ -31,7 +40,14 @@ __all__ = [
     "RenderJob",
     "RenderJobSignals",
     "TeamSlotWidget",
+    "ask_export_target",
+    "ask_lineup_text",
+    "choose_stale_profile_action",
+    "confirm_cache_refresh",
+    "confirm_discard_changes",
     "parse_lineup",
     "preset_key",
     "run",
+    "show_error",
+    "show_export_finished",
 ]

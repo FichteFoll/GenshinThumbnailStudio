@@ -6,7 +6,7 @@ import pytest
 from PIL import Image, ImageDraw
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from genshin_thumbnail_studio.gui import MainWindow, main_window
+from genshin_thumbnail_studio.gui import MainWindow, dialogs
 from genshin_thumbnail_studio.models import Asset, Build
 
 
@@ -97,7 +97,7 @@ def close_ignoring_unsaved_changes(window: MainWindow, app: QApplication, monkey
     """Close `window`, auto-discarding any unsaved changes so the confirmation
     dialog added by `closeEvent` doesn't block a headless test that doesn't
     care about that prompt."""
-    monkeypatch.setattr(main_window, "QMessageBox", DiscardMessageBox)
+    monkeypatch.setattr(dialogs, "QMessageBox", DiscardMessageBox)
     window.close()
     app.processEvents()
 
