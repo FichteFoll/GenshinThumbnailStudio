@@ -236,8 +236,8 @@ def test_glow_shows_through_a_transparent_gap_in_the_character_art(tmp_path: Pat
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
     fill_project(project, names)
-    # Below 1 / GLOW_ZOOM_FACTOR the glow's floor keeps it near the crop's own
-    # framing, so zoom in far enough that the two framings clearly differ.
+    # The glow is framed wider than the crop by a fixed factor at every zoom,
+    # so zoom in far enough that the two framings clearly differ.
     for member in (member for team in project.teams for member in team):
         member.zoom = 1.6
     assets = create_assets(tmp_path, names)
@@ -282,13 +282,12 @@ def test_glow_shows_through_a_transparent_gap_in_the_character_art(tmp_path: Pat
 
 
 def test_glow_reaches_into_a_transparent_gap_at_the_default_zoom(tmp_path: Path) -> None:
-    """The floored glow zoom deserves its own probe, since it is what a fresh
-    project renders with. There the glow is framed exactly like the crop, so a
-    gap in the art is a gap in the glow as well, and only the glow layer's own
-    softness reaches into it: it is built at a quarter of the panel resolution,
-    blurred and resampled back up, which carries colour a little way past the
-    gap's rim without filling its middle. Filling it is what the wider framing
-    above 1 / GLOW_ZOOM_FACTOR is for.
+    """The default zoom deserves its own probe, since it is what a fresh
+    project renders with. `glow_zoom()` is strictly proportional now, so the
+    glow is framed wider than the crop here too (0.78x rather than 1.00x),
+    and both the wider framing and the glow layer's own softness (it is built
+    at a quarter of the panel resolution, blurred and resampled back up,
+    which carries colour a little way past the gap's rim) reach into the gap.
     """
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
@@ -297,7 +296,6 @@ def test_glow_reaches_into_a_transparent_gap_at_the_default_zoom(tmp_path: Path)
     _punch_a_transparent_hole(assets)
 
     member = project.teams[0][1]
-    assert glow_zoom(member.zoom) == 1.0, "the default zoom has to exercise the floor"
 
     preview = render_preview(project, assets)
 

@@ -24,6 +24,7 @@ from .geometry import (
     panel_origin,
     panel_polygon,
     panel_target_size,
+    zoom_offset_limits,
 )
 
 # The panel glow is immediately Gaussian-blurred at a radius far wider than a
@@ -71,6 +72,11 @@ def make_panel(
 ) -> Image.Image:
     target = panel_target_size(compact, scale)
     art = source_art(asset, target, member.zoom, scale)
+    # Both layers below are crops of the same art at different zooms; sharing
+    # the portrait's own reachable range clamps them to the same offsets, so
+    # the glow stops panning at the same moment the portrait does instead of
+    # sticking at its own, narrower limit.
+    limits = zoom_offset_limits(art.size, target, member.zoom)
     color = card_color(member, asset)
     background = panel_background(target, color, compact)
     glow_size = (max(1, target[0] // GLOW_DOWNSCALE), max(1, target[1] // GLOW_DOWNSCALE))
@@ -80,6 +86,7 @@ def make_panel(
         member,
         glow_zoom(member.zoom),
         resample=Image.Resampling.BILINEAR,
+        limits=limits,
     )
     glow = glow.filter(ImageFilter.GaussianBlur((14 if compact else 18) * scale / GLOW_DOWNSCALE))
     glow = ImageEnhance.Color(glow).enhance(1.20 if compact else 1.25)
@@ -87,7 +94,7 @@ def make_panel(
     glow = glow.resize(target, Image.Resampling.BILINEAR)  # pyright: ignore[reportUnknownMemberType]
     background = Image.alpha_composite(background, glow)
 
-    crop = panel_art(art, target, member, member.zoom)
+    crop = panel_art(art, target, member, member.zoom, limits=limits)
     crop = ImageEnhance.Color(crop).enhance(1.09 if compact else 1.10)
     crop = ImageEnhance.Contrast(crop).enhance(1.06 if compact else 1.07)
     alpha = crop.getchannel("A")

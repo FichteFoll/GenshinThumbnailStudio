@@ -22,22 +22,26 @@ from .geometry import cover_scale, scaled_size, zoom_offset_limits
 MAX_PLACEMENT_ZOOM = 1.80
 
 # How much wider than the character crop the blurred glow layer is framed.
+# A fixed factor rather than a floored one: the glow is derived from the same
+# art as the portrait, so it has to scale with it at every placement zoom, not
+# only above some threshold. This used to be `max(1.0, zoom * GLOW_ZOOM_FACTOR)`,
+# which guaranteed the glow covered the whole panel but froze it over most of
+# the GUI's zoom range (0.70..1.80, with 1 / GLOW_ZOOM_FACTOR around 1.28) -
+# a glow that does not move with the portrait it is derived from is the worse
+# artefact. Below that zoom the glow now leaves a transparent margin, where
+# `panel_background()`'s gradient shows through, the same way the portrait
+# already does below its own cover-fit zoom.
 GLOW_ZOOM_FACTOR = 0.78
 
 
 def glow_zoom(zoom: float) -> float:
     """The zoom the panel glow is cover-fit at, for a placement zoom.
 
-    The glow is deliberately framed wider than the crop, so the wash around the
-    portrait shows a different part of the art, but it must still cover the
-    whole panel. Since both art axes scale by the same factor, zoom 1.0 is the
-    smallest factor that still covers the panel, so the floor wins for every
-    placement zoom up to `1 / GLOW_ZOOM_FACTOR` and the factor itself only
-    applies above that. Below a placement zoom of 1.0 the floor even leaves the
-    glow more zoomed in than the crop, which is what keeps the panel covered
-    while the portrait shrinks inside it.
+    Strictly proportional to the placement zoom, so the glow's framing tracks
+    the portrait's at every zoom instead of only above some threshold. See the
+    `GLOW_ZOOM_FACTOR` comment for the covering-the-panel trade-off this gives up.
     """
-    return max(1.0, zoom * GLOW_ZOOM_FACTOR)
+    return zoom * GLOW_ZOOM_FACTOR
 
 
 def cover_resize_offset(
