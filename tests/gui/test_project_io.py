@@ -7,7 +7,7 @@ from typing import Any, ClassVar
 import pytest
 from PySide6.QtWidgets import QMessageBox
 
-from genshin_thumbnail_studio.gui import MainWindow, main_window
+from genshin_thumbnail_studio.gui import MainWindow, dialogs, main_window
 from genshin_thumbnail_studio.models import Asset, Build, Project
 from genshin_thumbnail_studio.storage import load_profile_cache, save_profile_cache, save_project
 
@@ -117,7 +117,7 @@ def prepare_cached_open(
 def test_open_project_loads_cached_profile_and_previews(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    monkeypatch.setattr(main_window, "QMessageBox", ForbiddenMessageBox)
+    monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
     window, uid = prepare_cached_open(tmp_path, monkeypatch, datetime.now(timezone.utc) - timedelta(minutes=5))
 
     window.open_project()
@@ -135,7 +135,7 @@ def test_open_project_with_stale_cache_offers_refresh(tmp_path: Path, monkeypatc
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
     StubMessageBox.instances = []
-    monkeypatch.setattr(main_window, "QMessageBox", StubMessageBox)
+    monkeypatch.setattr(dialogs, "QMessageBox", StubMessageBox)
     window, _ = prepare_cached_open(tmp_path, monkeypatch, datetime.now(timezone.utc) - timedelta(hours=2))
     refreshed: list[bool] = []
 
@@ -164,7 +164,7 @@ def test_open_project_with_stale_cache_offers_refresh(tmp_path: Path, monkeypatc
 def test_open_project_without_cache_shows_hint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    monkeypatch.setattr(main_window, "QMessageBox", ForbiddenMessageBox)
+    monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
     project_path = tmp_path / "project.json"
     write_project(project_path, "900000099")
     monkeypatch.setattr(
@@ -224,7 +224,7 @@ def test_export_abyss_writes_the_file_chosen_in_the_save_dialog(
     _prepare_export_window(window, tmp_path, TEAM_NAMES)
     window.output_name.setText("prefilled")
 
-    monkeypatch.setattr(main_window, "QMessageBox", StubMessageBox)
+    monkeypatch.setattr(dialogs, "QMessageBox", StubMessageBox)
     monkeypatch.setattr(
         main_window.QFileDialog,
         "getExistingDirectory",
@@ -260,7 +260,7 @@ def test_export_stygian_still_asks_for_a_folder(tmp_path: Path, monkeypatch: pyt
     _prepare_export_window(window, tmp_path, names)
     window.output_name.setText("bosses")
 
-    monkeypatch.setattr(main_window, "QMessageBox", StubMessageBox)
+    monkeypatch.setattr(dialogs, "QMessageBox", StubMessageBox)
     monkeypatch.setattr(
         main_window.QFileDialog,
         "getSaveFileName",
@@ -289,7 +289,7 @@ def test_export_defaults_to_the_opened_project_folder(tmp_path: Path, monkeypatc
     write_project(project_file, "700000042")
 
     window = MainWindow()
-    monkeypatch.setattr(main_window, "QMessageBox", StubMessageBox)
+    monkeypatch.setattr(dialogs, "QMessageBox", StubMessageBox)
     monkeypatch.setattr(
         main_window.QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(project_file), ""))
     )
@@ -337,7 +337,7 @@ def test_opening_a_project_settles_before_the_dirty_baseline_is_taken(
 ) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    monkeypatch.setattr(main_window, "QMessageBox", ForbiddenMessageBox)
+    monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
     window, _ = prepare_cached_open(tmp_path, monkeypatch, datetime.now(timezone.utc) - timedelta(minutes=5))
 
     def fake_apply_to(editor: MainWindow, member: Any) -> None:
@@ -366,7 +366,7 @@ def test_export_defaults_to_the_saved_project_folder(tmp_path: Path, monkeypatch
     _prepare_export_window(window, tmp_path, TEAM_NAMES)
     window.output_name.setText("prefilled")
 
-    monkeypatch.setattr(main_window, "QMessageBox", StubMessageBox)
+    monkeypatch.setattr(dialogs, "QMessageBox", StubMessageBox)
     monkeypatch.setattr(
         main_window.QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(project_file), ""))
     )

@@ -6,7 +6,7 @@ from typing import ClassVar
 import pytest
 from PySide6.QtWidgets import QMessageBox
 
-from genshin_thumbnail_studio.gui import MainWindow, main_window
+from genshin_thumbnail_studio.gui import MainWindow, dialogs, main_window
 
 from .helpers import qapp
 
@@ -59,7 +59,7 @@ class ForbiddenMessageBox(DecisionMessageBox):
 def test_closing_a_clean_window_does_not_prompt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    monkeypatch.setattr(main_window, "QMessageBox", ForbiddenMessageBox)
+    monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
     window = MainWindow()
 
     assert window.close() is True
@@ -74,7 +74,7 @@ def test_closing_a_dirty_window_and_cancelling_keeps_it_open(
     app = qapp()
     DecisionMessageBox.instances = []
     DecisionMessageBox.choice = "cancel"
-    monkeypatch.setattr(main_window, "QMessageBox", DecisionMessageBox)
+    monkeypatch.setattr(dialogs, "QMessageBox", DecisionMessageBox)
     window = MainWindow()
     window.project.teams[0][0].offset_x = 0.3
 
@@ -92,7 +92,7 @@ def test_closing_a_dirty_window_and_discarding_closes_without_saving(
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
     DecisionMessageBox.choice = "discard"
-    monkeypatch.setattr(main_window, "QMessageBox", DecisionMessageBox)
+    monkeypatch.setattr(dialogs, "QMessageBox", DecisionMessageBox)
     monkeypatch.setattr(
         main_window.QFileDialog,
         "getSaveFileName",
@@ -112,7 +112,7 @@ def test_closing_a_dirty_window_and_saving_writes_the_project_then_closes(
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
     DecisionMessageBox.choice = "save"
-    monkeypatch.setattr(main_window, "QMessageBox", DecisionMessageBox)
+    monkeypatch.setattr(dialogs, "QMessageBox", DecisionMessageBox)
     path = tmp_path / "thumbnail-project.json"
     monkeypatch.setattr(
         main_window.QFileDialog, "getSaveFileName", staticmethod(lambda *args, **kwargs: (str(path), ""))
@@ -132,7 +132,7 @@ def test_closing_and_choosing_save_but_cancelling_the_file_dialog_keeps_the_wind
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
     DecisionMessageBox.choice = "save"
-    monkeypatch.setattr(main_window, "QMessageBox", DecisionMessageBox)
+    monkeypatch.setattr(dialogs, "QMessageBox", DecisionMessageBox)
     monkeypatch.setattr(
         main_window.QFileDialog, "getSaveFileName", staticmethod(lambda *args, **kwargs: ("", ""))
     )
@@ -149,7 +149,7 @@ def test_closing_and_choosing_save_but_cancelling_the_file_dialog_keeps_the_wind
 def test_switching_mode_on_a_clean_window_does_not_prompt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    monkeypatch.setattr(main_window, "QMessageBox", ForbiddenMessageBox)
+    monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
     window = MainWindow()
 
     window.stygian_radio.setChecked(True)
@@ -166,7 +166,7 @@ def test_switching_mode_with_unsaved_changes_and_cancelling_keeps_the_previous_m
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
     DecisionMessageBox.choice = "cancel"
-    monkeypatch.setattr(main_window, "QMessageBox", DecisionMessageBox)
+    monkeypatch.setattr(dialogs, "QMessageBox", DecisionMessageBox)
     window = MainWindow()
     window.project.teams[0][0].offset_x = 0.3
     original_project = window.project
@@ -189,7 +189,7 @@ def test_switching_mode_with_unsaved_changes_and_discarding_switches(
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
     DecisionMessageBox.choice = "discard"
-    monkeypatch.setattr(main_window, "QMessageBox", DecisionMessageBox)
+    monkeypatch.setattr(dialogs, "QMessageBox", DecisionMessageBox)
     window = MainWindow()
     window.project.teams[0][0].offset_x = 0.3
 
@@ -208,7 +208,7 @@ def test_switching_mode_with_unsaved_changes_and_saving_saves_then_switches(
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
     DecisionMessageBox.choice = "save"
-    monkeypatch.setattr(main_window, "QMessageBox", DecisionMessageBox)
+    monkeypatch.setattr(dialogs, "QMessageBox", DecisionMessageBox)
     path = tmp_path / "thumbnail-project.json"
     monkeypatch.setattr(
         main_window.QFileDialog, "getSaveFileName", staticmethod(lambda *args, **kwargs: (str(path), ""))

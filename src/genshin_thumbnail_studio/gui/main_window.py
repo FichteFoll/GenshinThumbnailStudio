@@ -22,12 +22,10 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QFrame,
     QHBoxLayout,
-    QInputDialog,
     QLabel,
     QLayout,
     QLineEdit,
     QMainWindow,
-    QMessageBox,
     QPushButton,
     QRadioButton,
     QScrollArea,
@@ -41,13 +39,9 @@ from PySide6.QtWidgets import (
 from ..akasha import AkashaError, AkashaWebClient, Build, StaleProfileError, download_assets
 from ..models import Asset, Placement, Project
 from ..renderer import export_project, safe_name
-from ..storage import (
-    cache_dir,
-    load_profile_cache,
-    load_project,
-    save_profile_cache,
-    save_project,
-)
+from ..storage import cache_dir, load_profile_cache, load_project, save_profile_cache, save_project
+from . import dialogs
+from .history import HistoryController
 from .lineup import parse_lineup
 from .placement import PlacementController
 from .presets import PresetStore
@@ -80,6 +74,7 @@ class MainWindow(QMainWindow):
         self.assets: dict[str, Asset] = {}
         self._presets = PresetStore.load()
         self._placement = PlacementController(self)
+        self._history = HistoryController(self, self, self._history_restored)
         self.selected = (0, 0)
         self._drag_snapshot: list[list[Placement]] | None = None
         self._drag_position: tuple[int, int] | None = None
@@ -101,34 +96,15 @@ class MainWindow(QMainWindow):
     def _icon(self, standard: QStyle.StandardPixmap):
         return self.style().standardIcon(standard)
 
-    def _confirm_discard_changes(self, action: str) -> bool:
-        """Ask whether to save unsaved changes before `action` proceeds.
-
-        Returns True when it is safe to proceed: there were no unsaved
-        changes, the user chose to discard them, or the user chose to save
-        and the save completed. Returns False when the caller must abort,
-        either because the user chose Cancel or the save dialog was itself
-        cancelled.
-        """
-        if not self.is_dirty():
-            return True
-        dialog = QMessageBox(self)
-        dialog.setWindowTitle("Unsaved changes")
-        dialog.setText(f"This project has unsaved changes. Save before you {action}?")
-        save_button = dialog.addButton("Save", QMessageBox.ButtonRole.AcceptRole)
-        discard_button = dialog.addButton("Discard", QMessageBox.ButtonRole.DestructiveRole)
-        dialog.addButton(QMessageBox.StandardButton.Cancel)
-        dialog.exec()
-        clicked = dialog.clickedButton()
-        if clicked == discard_button:
-            return True
-        if clicked == save_button:
-            self.save_project()
-            return not self.is_dirty()
-        return False
+    def _history_restored(self) -> None:
+        """Show the teams an undo or redo just put back on the project."""
+        self._rebuild_team_fields()
+        self._sync_controls()
+        self._save_current_preset()
+        self.schedule_render()
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        if not self._confirm_discard_changes("exit"):
+        if not dialogs.confirm_discard_changes(self, "exit", self.is_dirty, self.save_project):
             event.ignore()
             return
         self.client.close()
@@ -338,6 +314,9 @@ class MainWindow(QMainWindow):
                     combo.blockSignals(False)
 
     def _on_slot_drag_started(self, team: int, slot: int) -> None:
+        # Settle any edit still pending from before the drag, so its debounce
+        # cannot fire mid-gesture and snapshot a half-finished reorder.
+        self._history.commit_now()
         self._drag_snapshot = copy.deepcopy(self.project.teams)
         self._drag_position = (team, slot)
 
@@ -356,6 +335,8 @@ class MainWindow(QMainWindow):
                 self.schedule_render()
         self._drag_snapshot = None
         self._drag_position = None
+        # A no-op after a cancelled drag, whose revert restored the last state.
+        self._history.commit_now()
 
     def reorder_slots(self, source: tuple[int, int], target: tuple[int, int]) -> None:
         if source == target:
@@ -374,6 +355,11 @@ class MainWindow(QMainWindow):
         self._sync_controls()
         if self.assets:
             self.schedule_render()
+        if self._drag_position is None:
+            self._history.commit_now()
+        # During a drag nothing is scheduled: the drop commits the whole gesture
+        # in one go, and a debounce that fired while the user lingered over a
+        # slot would record an arrangement that a cancelled drag then reverts.
 
     def _populate_combo_items(self) -> None:
         names = [build.name for build in sorted(self.builds.values(), key=lambda item: item.name.casefold())]
@@ -390,7 +376,7 @@ class MainWindow(QMainWindow):
         mode = "abyss" if abyss_checked else "stygian"
         if self.project.mode == mode:
             return
-        if not self._confirm_discard_changes("switch modes"):
+        if not dialogs.confirm_discard_changes(self, "switch modes", self.is_dirty, self.save_project):
             self.abyss_radio.setChecked(self.project.mode == "abyss")
             self.stygian_radio.setChecked(self.project.mode == "stygian")
             return
@@ -403,6 +389,7 @@ class MainWindow(QMainWindow):
         self._rebuild_team_fields()
         self._sync_controls()
         self.preview.set_preview(QPixmap())
+        self._history.reset()
         self._saved_snapshot = copy.deepcopy(self.project)
 
     def _output_name_changed(self, value: str) -> None:
@@ -430,6 +417,7 @@ class MainWindow(QMainWindow):
             self._presets.apply_to(self, member)
         self.assets = {key: value for key, value in self.assets.items() if key in self._selected_name_keys()}
         self._sync_controls()
+        self._history.schedule()
 
     def _selected_name_keys(self) -> set[str]:
         return {member.name.casefold() for team in self.project.teams for member in team if member.name}
@@ -486,6 +474,7 @@ class MainWindow(QMainWindow):
         self._save_current_preset()
         self._sync_controls()
         self.schedule_render()
+        self._history.schedule()
 
     def _flip_toggled(self, checked: bool) -> None:
         if self._updating_controls:
@@ -494,6 +483,7 @@ class MainWindow(QMainWindow):
         self._save_current_preset()
         self._sync_controls()
         self.schedule_render()
+        self._history.schedule()
 
     def drag_placement(self, dx: float, dy: float) -> None:
         """Pan the selected portrait by a drag delta given in canvas pixels."""
@@ -501,28 +491,27 @@ class MainWindow(QMainWindow):
         self._save_current_preset()
         self._sync_controls()
         self.schedule_render()
+        self._history.schedule()
 
     def change_zoom(self, delta: float) -> None:
         self._placement.zoom_by(self.current_member(), delta)
         self._save_current_preset()
         self._sync_controls()
         self.schedule_render()
+        self._history.schedule()
 
     def reset_placement(self) -> None:
         self._placement.reset(self.current_member())
         self._save_current_preset()
         self._sync_controls()
         self.schedule_render()
+        self._history.commit_now()
 
     def schedule_render(self) -> None:
         # A throttle, not a debounce: restarting the timer on every
         # mouse-move event would mean it never fires during a drag.
         if self.assets and not self._render_timer.isActive():
             self._render_timer.start(RENDER_THROTTLE_MS)
-
-    def _show_error(self, title: str, error: Exception | str) -> None:
-        QMessageBox.critical(self, title, str(error))
-        self.statusBar().showMessage(str(error), 10000)
 
     def load_profile(self) -> None:
         uid = self.uid_edit.text().strip()
@@ -533,21 +522,15 @@ class MainWindow(QMainWindow):
             try:
                 builds, age, last = self.client.load_profile(uid)
             except StaleProfileError as stale:
-                dialog = QMessageBox(self)
-                dialog.setWindowTitle("Akasha profile is older than one hour")
-                dialog.setText(f"Last updated {stale.age_minutes / 60:.1f} hours ago.")
-                refresh_button = dialog.addButton("Refresh now", QMessageBox.ButtonRole.AcceptRole)
-                stale_button = dialog.addButton("Load anyway", QMessageBox.ButtonRole.ActionRole)
-                dialog.addButton(QMessageBox.StandardButton.Cancel)
-                dialog.exec()
-                if dialog.clickedButton() == refresh_button:
+                choice = dialogs.choose_stale_profile_action(self, stale.age_minutes)
+                if choice == "refresh":
                     self.statusBar().showMessage("Refreshing Akasha ...")
                     QApplication.restoreOverrideCursor()
                     if not self.client.refresh_profile(uid, progress=lambda text: self.statusBar().showMessage(text)):
                         raise AkashaError("Akasha refresh did not finish within 90 seconds.") from None
                     QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
                     builds, age, last = self.client.load_profile(uid)
-                elif dialog.clickedButton() == stale_button:
+                elif choice == "stale":
                     builds, age, last = self.client.load_profile(uid, allow_stale=True)
                 else:
                     return
@@ -559,24 +542,19 @@ class MainWindow(QMainWindow):
             self.profile_status.setText(f"{len(builds)} builds \u00b7 last updated {local} \u00b7 {age:.0f} min ago")
             self.statusBar().showMessage("Akasha profile loaded", 5000)
         except Exception as error:
-            self._show_error("Could not load profile", error)
+            dialogs.show_error(self, "Could not load profile", error)
         finally:
             QApplication.restoreOverrideCursor()
             self.load_button.setEnabled(True)
 
     def paste_teams(self) -> None:
         expected = 8 if self.project.mode == "abyss" else 12
-        text, ok = QInputDialog.getMultiLineText(
-            self,
-            "Lineup",
-            f"{expected} character names in order, separated by comma, semicolon, "
-            "pipe (|), or newline:",
-        )
-        if not ok:
+        text = dialogs.ask_lineup_text(self, expected)
+        if text is None:
             return
         names = parse_lineup(text)
         if len(names) != expected:
-            self._show_error("Invalid lineup", f"Expected {expected} names, found {len(names)}.")
+            dialogs.show_error(self, "Invalid lineup", f"Expected {expected} names, found {len(names)}.")
             return
         for index, name in enumerate(names):
             team, slot = divmod(index, 4)
@@ -615,7 +593,7 @@ class MainWindow(QMainWindow):
             self._generate_preview_from_builds(builds)
             self.statusBar().showMessage("Preview ready", 5000)
         except Exception as error:
-            self._show_error("Could not generate preview", error)
+            dialogs.show_error(self, "Could not generate preview", error)
         finally:
             QApplication.restoreOverrideCursor()
             self.preview_button.setEnabled(True)
@@ -636,6 +614,9 @@ class MainWindow(QMainWindow):
             for member in team:
                 self._presets.apply_to(self, member)
         self._dispatch_render()
+        # The presets reframed every member outside any edit handler; its own
+        # undo step keeps the next edit from folding that in.
+        self._history.commit_now()
 
     def _dispatch_render(self) -> None:
         self._render_token += 1
@@ -676,28 +657,19 @@ class MainWindow(QMainWindow):
                 return
             stem = safe_name(self.output_name.text().strip() or "genshin_thumbnail")
             default_dir = self.project_path.parent if self.project_path else Path.cwd()
-            if self.project.mode == "abyss":
-                default_path = str(default_dir / f"{stem}.png")
-                path, _ = QFileDialog.getSaveFileName(self, "Export PNG", default_path, "PNG (*.png)")
-                if not path:
-                    return
-                target = Path(path)
-                directory = target.parent
-                stem = safe_name(target.stem)
-            else:
-                # Stygian writes three files at once, so only the folder can be chosen.
-                directory_str = QFileDialog.getExistingDirectory(self, "Choose output folder", str(default_dir))
-                if not directory_str:
-                    return
-                directory = Path(directory_str)
+            target = dialogs.ask_export_target(self, self.project.mode, default_dir, stem)
+            if target is None:
+                return
+            directory, chosen_stem = target
+            stem = safe_name(chosen_stem)
             self.output_name.setText(stem)
             self.project.output_name = stem
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
             written = export_project(self.project, self.assets, directory)
-            QMessageBox.information(self, "Export finished", "\n".join(str(path) for path in written))
+            dialogs.show_export_finished(self, written)
             self.statusBar().showMessage(f"Exported {len(written)} thumbnail(s)", 7000)
         except Exception as error:
-            self._show_error("Export failed", error)
+            dialogs.show_error(self, "Export failed", error)
         finally:
             QApplication.restoreOverrideCursor()
 
@@ -745,6 +717,7 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage(
                     "Project opened \u00b7 no cached profile found for this UID", 8000
                 )
+                self._history.reset()
                 self._saved_snapshot = copy.deepcopy(self.project)
                 return
             builds, last_update = cached
@@ -756,29 +729,19 @@ class MainWindow(QMainWindow):
                 f"{len(builds)} builds · from cache · last updated {local} · {age_minutes:.0f} min ago"
             )
             self._auto_preview()
-            if age_minutes > 60:
-                self._offer_cache_refresh(age_minutes)
+            if age_minutes > 60 and dialogs.confirm_cache_refresh(self, age_minutes):
+                self.load_profile()
+                if self.builds:
+                    self._auto_preview()
+            self._history.reset()
             self._saved_snapshot = copy.deepcopy(self.project)
             self.statusBar().showMessage("Project opened", 5000)
         except Exception as error:
-            self._show_error("Could not open project", error)
+            dialogs.show_error(self, "Could not open project", error)
 
     def _auto_preview(self) -> None:
         """Render a preview from already loaded builds, reporting failures without aborting the caller."""
         try:
             self._generate_preview_from_builds(self._validate_team())
         except Exception as error:
-            self._show_error("Could not generate preview", error)
-
-    def _offer_cache_refresh(self, age_minutes: float) -> None:
-        dialog = QMessageBox(self)
-        dialog.setWindowTitle("Cached profile is older than one hour")
-        dialog.setText(f"Last updated {age_minutes / 60:.1f} hours ago.")
-        refresh_button = dialog.addButton("Refresh now", QMessageBox.ButtonRole.AcceptRole)
-        dialog.addButton(QMessageBox.StandardButton.Cancel)
-        dialog.exec()
-        if dialog.clickedButton() != refresh_button:
-            return
-        self.load_profile()
-        if self.builds:
-            self._auto_preview()
+            dialogs.show_error(self, "Could not generate preview", error)
