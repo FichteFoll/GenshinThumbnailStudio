@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .app import run
-from .history import HISTORY_LIMIT, PlacementHistory
+from .history import HISTORY_DEBOUNCE_MS, HISTORY_LIMIT, HistoryController, PlacementHistory
 from .lineup import parse_lineup
 from .main_window import RENDER_THROTTLE_MS, RESOLUTION_OPTIONS, MainWindow
 from .placement import MAX_ZOOM, MIN_ZOOM, PlacementController
@@ -14,6 +14,7 @@ from .state import EditorState
 from .team_slots import SLOT_MIME_TYPE, TeamSlotWidget
 
 __all__ = [
+    "HISTORY_DEBOUNCE_MS",
     "HISTORY_LIMIT",
     "MAX_ZOOM",
     "MIN_ZOOM",
@@ -21,6 +22,7 @@ __all__ = [
     "RESOLUTION_OPTIONS",
     "SLOT_MIME_TYPE",
     "EditorState",
+    "HistoryController",
     "MainWindow",
     "PlacementController",
     "PlacementHistory",
