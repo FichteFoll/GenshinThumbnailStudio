@@ -1,3 +1,5 @@
+"""Decoding, resizing and cropping the source character art."""
+
 from __future__ import annotations
 
 import functools

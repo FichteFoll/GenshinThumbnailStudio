@@ -1,3 +1,5 @@
+"""Tests for `akasha.rarities.load_enka_rarities()`."""
+
 import os
 import time
 import urllib.error

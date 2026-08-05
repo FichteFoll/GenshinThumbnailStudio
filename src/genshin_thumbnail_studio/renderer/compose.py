@@ -1,3 +1,5 @@
+"""The whole canvas: panel layout, borders, badges, and the preview/export entry points."""
+
 from __future__ import annotations
 
 import math

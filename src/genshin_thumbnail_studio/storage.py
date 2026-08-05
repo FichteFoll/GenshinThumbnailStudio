@@ -1,3 +1,9 @@
+"""Project JSON save/load, app data dir resolution, and preset persistence.
+
+Also migrates pre-v3 project files and presets, whose placements stored an
+`fx`/`fy` focal point, into the current panel-relative offsets.
+"""
+
 from __future__ import annotations
 
 import json

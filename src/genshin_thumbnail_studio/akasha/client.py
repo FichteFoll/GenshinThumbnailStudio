@@ -1,3 +1,8 @@
+"""`AkashaWebClient`, which drives an offscreen `QWebEnginePage` to load
+`akasha.cv` API endpoints and read back JSON, because Akasha requires a real
+browser context rather than a plain HTTP request.
+"""
+
 from __future__ import annotations
 
 import json

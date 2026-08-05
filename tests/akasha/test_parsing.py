@@ -1,3 +1,5 @@
+"""Tests for `akasha.parsing`."""
+
 from genshin_thumbnail_studio.akasha.parsing import (
     character_element,
     character_rarity,

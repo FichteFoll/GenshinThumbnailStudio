@@ -1,3 +1,5 @@
+"""Tests for `MainWindow`'s webengine teardown on close."""
+
 import gc
 from pathlib import Path
 

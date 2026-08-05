@@ -1,3 +1,5 @@
+"""Splitting pasted lineup text into character names."""
+
 from __future__ import annotations
 
 import re

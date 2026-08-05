@@ -1,3 +1,10 @@
+"""Turning Akasha's raw JSON payloads into `Build`s.
+
+`exact_art_url()` reconstructs the exact Enka asset stem (including
+costume/skin IDs) from the Akasha character icon URL; it is the part most
+likely to break if Akasha or Enka change their asset naming.
+"""
+
 from __future__ import annotations
 
 import re

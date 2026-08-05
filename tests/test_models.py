@@ -1,3 +1,5 @@
+"""Tests for `genshin_thumbnail_studio.models`."""
+
 from genshin_thumbnail_studio.models import Build, Placement, Project
 
 

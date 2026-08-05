@@ -1,3 +1,5 @@
+"""Plain `urllib` HTTP helpers shared by the rest of the package."""
+
 from __future__ import annotations
 
 import json

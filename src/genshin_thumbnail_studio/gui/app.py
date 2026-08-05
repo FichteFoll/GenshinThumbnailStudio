@@ -1,3 +1,5 @@
+"""The GUI entry point behind `pyproject.toml`'s `gui-scripts`."""
+
 from __future__ import annotations
 
 from PySide6.QtWidgets import QApplication

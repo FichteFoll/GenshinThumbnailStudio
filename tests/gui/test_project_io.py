@@ -1,3 +1,5 @@
+"""Tests for `MainWindow`'s profile loading and project save/open flows."""
+
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, ClassVar

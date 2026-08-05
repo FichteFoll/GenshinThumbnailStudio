@@ -1,3 +1,6 @@
+"""`PreviewWidget`, the canvas that renders the preview pixmap and emits
+selection, drag and zoom signals."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import QPoint, QRect, Qt, Signal

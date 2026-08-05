@@ -1,3 +1,5 @@
+"""Downloading and validating character art and weapon icons into a local cache."""
+
 from __future__ import annotations
 
 import hashlib

@@ -1,3 +1,5 @@
+"""One character panel end to end: background glow, art, shading and card mask."""
+
 from __future__ import annotations
 
 import math

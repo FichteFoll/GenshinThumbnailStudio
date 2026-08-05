@@ -1,3 +1,9 @@
+"""Plain dataclasses for a build, a downloaded asset, a placement and a project.
+
+No dependency on the rest of the package or on Qt, so every other module can
+import these without pulling in the network or GUI stack.
+"""
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field

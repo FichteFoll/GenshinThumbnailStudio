@@ -1,3 +1,5 @@
+"""The C/R and weapon badges drawn onto each character panel."""
+
 from __future__ import annotations
 
 import functools

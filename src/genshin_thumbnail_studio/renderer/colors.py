@@ -1,3 +1,5 @@
+"""Element and rarity color tables, and the accent color a card is drawn with."""
+
 from __future__ import annotations
 
 import re

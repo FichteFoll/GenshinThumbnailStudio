@@ -1,3 +1,9 @@
+"""The panel geometry and the reachable pan range.
+
+Single source of the panel layout: the GUI's placement sliders and the
+renderer's own crop both read their bounds from here, so they cannot disagree.
+"""
+
 from __future__ import annotations
 
 import math

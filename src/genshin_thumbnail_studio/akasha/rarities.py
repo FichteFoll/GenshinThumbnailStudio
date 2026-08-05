@@ -1,3 +1,5 @@
+"""Enka rarity lookups, over a local cache of `avatars.json`/`weapons.json`."""
+
 from __future__ import annotations
 
 import json

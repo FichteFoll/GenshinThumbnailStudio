@@ -1,3 +1,5 @@
+"""Helpers shared by more than one of the gui test modules."""
+
 from pathlib import Path
 
 from PIL import Image, ImageDraw

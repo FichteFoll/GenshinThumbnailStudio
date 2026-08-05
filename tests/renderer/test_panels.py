@@ -1,3 +1,5 @@
+"""Tests for `renderer.panels`."""
+
 from pathlib import Path
 
 from PIL import Image, ImageDraw

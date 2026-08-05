@@ -1,3 +1,5 @@
+"""Tests for `akasha.assets.download_assets()`."""
+
 from pathlib import Path
 
 import pytest

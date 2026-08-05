@@ -1,3 +1,5 @@
+"""Tests for `genshin_thumbnail_studio.storage`."""
+
 import json
 from datetime import datetime, timezone
 from pathlib import Path

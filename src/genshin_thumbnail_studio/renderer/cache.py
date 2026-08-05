@@ -1,3 +1,5 @@
+"""The bounded LRU caches render output is kept in, and their access helpers."""
+
 from __future__ import annotations
 
 import collections

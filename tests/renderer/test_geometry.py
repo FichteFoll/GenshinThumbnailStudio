@@ -1,3 +1,5 @@
+"""Tests for `renderer.geometry`."""
+
 from genshin_thumbnail_studio.renderer.art import cover_resize_offset
 from genshin_thumbnail_studio.renderer.geometry import (
     PAN_OVERSCAN,

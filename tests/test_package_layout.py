@@ -1,4 +1,4 @@
-"""Guard the sub-package layout established by `plans/done/2026-08-04-module-layout-split.md`.
+"""Guard the sub-package layout described in this repo's CLAUDE.md.
 
 The assertions here are structural on purpose: they say which modules exist,
 that sibling modules are reached by relative import, that each package's facade

@@ -1,3 +1,5 @@
+"""Tests for `gui.lineup.parse_lineup()`."""
+
 from genshin_thumbnail_studio.gui.lineup import parse_lineup
 
 

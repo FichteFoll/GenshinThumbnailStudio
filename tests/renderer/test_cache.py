@@ -1,3 +1,5 @@
+"""Tests for `renderer.cache`."""
+
 from dataclasses import replace
 from pathlib import Path
 from typing import Any

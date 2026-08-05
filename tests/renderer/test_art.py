@@ -1,3 +1,5 @@
+"""Tests for `renderer.art`."""
+
 from PIL import Image, ImageChops, ImageDraw
 
 from genshin_thumbnail_studio.models import Placement

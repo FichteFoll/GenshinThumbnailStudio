@@ -1,3 +1,5 @@
+"""`TeamSlotWidget`, one draggable combo box row in the team overview."""
+
 from __future__ import annotations
 
 from PySide6.QtCore import QMimeData, QPoint, Qt, Signal

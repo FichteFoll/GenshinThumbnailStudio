@@ -1,3 +1,5 @@
+"""Exceptions raised by the `akasha` package."""
+
 from __future__ import annotations
 
 from datetime import datetime

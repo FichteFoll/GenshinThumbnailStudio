@@ -1,3 +1,5 @@
+"""Tests for `MainWindow`'s throttled preview rendering."""
+
 import itertools
 import time
 from pathlib import Path

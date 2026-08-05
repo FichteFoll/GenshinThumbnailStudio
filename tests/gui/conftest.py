@@ -1,3 +1,5 @@
+"""The offscreen Qt/QtWebEngine environment, set before PySide6 is imported."""
+
 import os
 
 # These must run before PySide6 is imported anywhere in the process, which is

@@ -1,3 +1,5 @@
+"""Tests for `MainWindow`'s placement editing (drag, wheel, slider, reset)."""
+
 from pathlib import Path
 from typing import Any
 

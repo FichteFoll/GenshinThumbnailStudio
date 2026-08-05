@@ -1,3 +1,7 @@
+"""`MainWindow`, the application window wiring UID entry, mode selection and
+drag/wheel/slider placement editing to fetching, preview/export, and persistence.
+"""
+
 from __future__ import annotations
 
 import contextlib

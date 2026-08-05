@@ -1,3 +1,5 @@
+"""`RenderJob`, which renders a `Project` snapshot on a `QThreadPool` worker."""
+
 from __future__ import annotations
 
 from PIL import Image

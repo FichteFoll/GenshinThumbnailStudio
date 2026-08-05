@@ -1,3 +1,5 @@
+"""Tests for `renderer.compose`."""
+
 from pathlib import Path
 
 from PIL import Image

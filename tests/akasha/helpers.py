@@ -1,3 +1,5 @@
+"""Helpers shared by more than one of the akasha test modules."""
+
 from typing import Any
 
 from genshin_thumbnail_studio.models import Build
