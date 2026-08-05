@@ -52,6 +52,7 @@ EXPECTED_MODULES = {
     "gui/team_slots.py",
     "gui/render_job.py",
     "gui/lineup.py",
+    "gui/history.py",
 }
 
 PACKAGE_NAME = "genshin_thumbnail_studio"
