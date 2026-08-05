@@ -1,9 +1,13 @@
 """Tests for `renderer.panels`."""
 
+import inspect
 from pathlib import Path
+from typing import Any
 
+import pytest
 from PIL import Image, ImageDraw
 
+import genshin_thumbnail_studio.renderer.art as art_module
 from genshin_thumbnail_studio.models import Asset, Project
 from genshin_thumbnail_studio.renderer.art import cover_resize_offset, glow_zoom
 from genshin_thumbnail_studio.renderer.cache import clear_render_cache
@@ -355,3 +359,49 @@ def test_flip_mirrors_the_panel_art(tmp_path: Path) -> None:
     flipped = render_preview(project, assets)
     assert not _reddish(rgb(flipped, left_probe))
     assert _reddish(rgb(flipped, right_probe))
+
+
+def test_the_glow_and_the_crop_are_clamped_alike_in_a_rendered_panel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The wiring test: the unit-level tests in `test_art.py` cannot tell
+    whether `make_panel()` actually shares one clamp between its two
+    `panel_art()` calls, since they call `cover_resize_offset()` directly.
+    This one intercepts every real call `make_panel()` makes while rendering a
+    preview, and asserts the glow's and the crop's calls agree on `limits`.
+
+    Today `make_panel()` never passes `limits` to either call (both are
+    `None`, each layer clamping itself independently), so this fails on the
+    `is not None` half of the assertion.
+    """
+    clear_render_cache()
+    names = [f"Character {index}" for index in range(8)]
+    project = Project.blank("abyss")
+    fill_project(project, names)
+    assets = create_assets(tmp_path, names)
+    for member in (member for team in project.teams for member in team):
+        member.zoom = 1.80
+        member.offset_y = 0.3
+
+    recorded: list[tuple[float, float] | None] = []
+    original = art_module.cover_resize_offset
+    signature = inspect.signature(original)
+
+    def recording_cover_resize_offset(*args: Any, **kwargs: Any) -> Image.Image:
+        # panel_art() forwards `limits` positionally, so bind against the
+        # real signature rather than only inspecting `kwargs`.
+        bound = signature.bind(*args, **kwargs)
+        bound.apply_defaults()
+        recorded.append(bound.arguments["limits"])
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(art_module, "cover_resize_offset", recording_cover_resize_offset)
+
+    render_preview(project, assets)
+
+    # Two panel_art() calls (glow, then crop) per member.
+    assert len(recorded) == 2 * sum(len(team) for team in project.teams)
+    for glow_limits, crop_limits in zip(recorded[0::2], recorded[1::2], strict=True):
+        assert glow_limits is not None
+        assert crop_limits is not None
+        assert glow_limits == crop_limits
