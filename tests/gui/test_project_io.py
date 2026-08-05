@@ -308,6 +308,49 @@ def test_export_defaults_to_the_opened_project_folder(tmp_path: Path, monkeypatc
     app.processEvents()
 
 
+def test_saving_project_clears_the_dirty_flag(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+    window.project.teams[0][0].offset_x = 0.3
+    assert window.is_dirty()
+
+    monkeypatch.setattr(
+        main_window.QFileDialog,
+        "getSaveFileName",
+        staticmethod(lambda *args, **kwargs: (str(tmp_path / "thumbnail-project.json"), "")),
+    )
+    window.save_project()
+
+    assert not window.is_dirty()
+
+    window.close()
+    app.processEvents()
+
+
+def test_opening_a_project_settles_before_the_dirty_baseline_is_taken(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    monkeypatch.setattr(main_window, "QMessageBox", ForbiddenMessageBox)
+    window, _ = prepare_cached_open(tmp_path, monkeypatch, datetime.now(timezone.utc) - timedelta(minutes=5))
+
+    def fake_apply_to(editor: MainWindow, member: Any) -> None:
+        member.offset_x = 0.42
+
+    monkeypatch.setattr(window._presets, "apply_to", fake_apply_to)
+
+    window.open_project()
+    wait_for_render(window, app)
+
+    assert window.project.teams[0][0].offset_x == 0.42
+    assert not window.is_dirty()
+
+    window.close()
+    app.processEvents()
+
+
 def test_export_defaults_to_the_saved_project_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
