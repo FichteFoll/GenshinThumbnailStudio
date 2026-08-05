@@ -81,6 +81,8 @@ class MainWindow(QMainWindow):
         self._presets = PresetStore.load()
         self._placement = PlacementController(self)
         self.selected = (0, 0)
+        self._drag_snapshot: list[list[Placement]] | None = None
+        self._drag_position: tuple[int, int] | None = None
         self._updating_controls = False
         self._render_timer = QTimer(self)
         self._render_timer.setSingleShot(True)
@@ -286,7 +288,9 @@ class MainWindow(QMainWindow):
 
                 combo.currentTextChanged.connect(on_text_changed)
                 slot_widget = TeamSlotWidget(team_index, slot_index, combo)
-                slot_widget.swap_requested.connect(self.swap_slots_signal)
+                slot_widget.drag_started.connect(self._on_slot_drag_started)
+                slot_widget.drag_hover.connect(self._on_slot_drag_hover)
+                slot_widget.drag_ended.connect(self._on_slot_drag_ended)
                 rows.addWidget(slot_widget)
                 row_combos.append(combo)
             self.team_layout.addLayout(rows)
@@ -294,18 +298,49 @@ class MainWindow(QMainWindow):
         self.team_layout.addStretch(1)
         self._populate_combo_items()
 
-    def swap_slots_signal(self, team_a: int, slot_a: int, team_b: int, slot_b: int) -> None:
-        self.swap_slots((team_a, slot_a), (team_b, slot_b))
+    def _refresh_slot_display(self) -> None:
+        for team_index, row in enumerate(self.team_combos):
+            for slot_index, combo in enumerate(row):
+                name = self.project.teams[team_index][slot_index].name
+                if combo.currentText() != name:
+                    combo.blockSignals(True)
+                    combo.setCurrentText(name)
+                    combo.blockSignals(False)
 
-    def swap_slots(self, a: tuple[int, int], b: tuple[int, int]) -> None:
-        team_a, slot_a = a
-        team_b, slot_b = b
-        if (team_a, slot_a) == (team_b, slot_b):
+    def _on_slot_drag_started(self, team: int, slot: int) -> None:
+        self._drag_snapshot = copy.deepcopy(self.project.teams)
+        self._drag_position = (team, slot)
+
+    def _on_slot_drag_hover(self, team: int, slot: int) -> None:
+        if self._drag_position is None or (team, slot) == self._drag_position:
             return
-        teams = self.project.teams
-        teams[team_a][slot_a], teams[team_b][slot_b] = teams[team_b][slot_b], teams[team_a][slot_a]
-        self._rebuild_team_fields()
-        self.selected = (team_b, slot_b)
+        self.reorder_slots(self._drag_position, (team, slot))
+        self._drag_position = (team, slot)
+
+    def _on_slot_drag_ended(self, accepted: bool) -> None:
+        if not accepted and self._drag_snapshot is not None:
+            self.project.teams = self._drag_snapshot
+            self._refresh_slot_display()
+            self._sync_controls()
+            if self.assets:
+                self.schedule_render()
+        self._drag_snapshot = None
+        self._drag_position = None
+
+    def reorder_slots(self, source: tuple[int, int], target: tuple[int, int]) -> None:
+        if source == target:
+            return
+        per_team = len(self.project.teams[0])
+        members = [member for team in self.project.teams for member in team]
+        source_index = source[0] * per_team + source[1]
+        target_index = target[0] * per_team + target[1]
+        moved = members.pop(source_index)
+        members.insert(target_index, moved)
+        for team_index, team in enumerate(self.project.teams):
+            for slot_index in range(len(team)):
+                team[slot_index] = members[team_index * per_team + slot_index]
+        self._refresh_slot_display()
+        self.selected = target
         self._sync_controls()
         if self.assets:
             self.schedule_render()

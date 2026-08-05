@@ -18,7 +18,7 @@ class _SlotDragHandle(QLabel):
         self.setFixedWidth(18)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
-        self.setToolTip("Drag to swap slots")
+        self.setToolTip("Drag to reorder")
         self._drag_start: QPoint | None = None
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -29,12 +29,14 @@ class _SlotDragHandle(QLabel):
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if self._drag_start is not None and (event.buttons() & Qt.MouseButton.LeftButton):
             self._drag_start = None
+            self._slot_widget.drag_started.emit(self._slot_widget.team, self._slot_widget.slot)
             drag = QDrag(self)
             mime = QMimeData()
             payload = f"{self._slot_widget.team}:{self._slot_widget.slot}"
             mime.setData(SLOT_MIME_TYPE, payload.encode("utf-8"))
             drag.setMimeData(mime)
-            drag.exec(Qt.DropAction.MoveAction)
+            action = drag.exec(Qt.DropAction.MoveAction)
+            self._slot_widget.drag_ended.emit(action != Qt.DropAction.IgnoreAction)
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
@@ -45,7 +47,9 @@ class _SlotDragHandle(QLabel):
 class TeamSlotWidget(QWidget):
     """One combo box row in the team overview, draggable via its handle."""
 
-    swap_requested = Signal(int, int, int, int)
+    drag_started = Signal(int, int)  # source team, slot
+    drag_hover = Signal(int, int)  # this widget's team, slot
+    drag_ended = Signal(bool)  # accepted
 
     def __init__(self, team: int, slot: int, combo: QComboBox) -> None:
         super().__init__()
@@ -68,13 +72,11 @@ class TeamSlotWidget(QWidget):
         if event.mimeData().hasFormat(SLOT_MIME_TYPE):
             event.acceptProposedAction()
             self._set_drop_target(True)
+            self.drag_hover.emit(self.team, self.slot)
 
     def dragLeaveEvent(self, event) -> None:  # type: ignore[no-untyped-def]
         self._set_drop_target(False)
 
     def dropEvent(self, event: QDropEvent) -> None:
         self._set_drop_target(False)
-        payload = bytes(event.mimeData().data(SLOT_MIME_TYPE).data()).decode("utf-8")
-        team_str, slot_str = payload.split(":")
         event.acceptProposedAction()
-        self.swap_requested.emit(int(team_str), int(slot_str), self.team, self.slot)
