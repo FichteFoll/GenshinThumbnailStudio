@@ -18,7 +18,7 @@ def _approx(expected: float, abs: float) -> Any:
     return pytest.approx(expected, abs=abs)  # pyright: ignore[reportUnknownMemberType]
 
 
-def test_swap_slots_exchanges_placements(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_reorder_slots_shifts_placements(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
     window = MainWindow()
@@ -32,16 +32,19 @@ def test_swap_slots_exchanges_placements(tmp_path: Path, monkeypatch: pytest.Mon
     second.offset_x = -0.08
     second.zoom = 0.95
 
-    window.swap_slots((0, 0), (1, 3))
+    window.reorder_slots((0, 0), (1, 3))
 
-    swapped_first = window.project.teams[0][0]
-    swapped_second = window.project.teams[1][3]
-    assert swapped_first.name == "Nahida"
-    assert swapped_first.offset_x == -0.08
-    assert swapped_first.zoom == 0.95
-    assert swapped_second.name == "Furina"
-    assert swapped_second.offset_x == 0.10
-    assert swapped_second.zoom == 1.20
+    shifted = window.project.teams[1][2]
+    moved = window.project.teams[1][3]
+    assert shifted.name == "Nahida"
+    assert shifted.offset_x == -0.08
+    assert shifted.zoom == 0.95
+    assert moved.name == "Furina"
+    assert moved.offset_x == 0.10
+    assert moved.zoom == 1.20
+    assert window.team_combos[1][2].currentText() == "Nahida"
+    assert window.team_combos[1][3].currentText() == "Furina"
+    assert window.selected == (1, 3)
 
     window.close()
     app.processEvents()

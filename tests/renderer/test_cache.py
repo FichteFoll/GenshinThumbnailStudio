@@ -241,7 +241,7 @@ def test_swapping_slots_with_warm_cache_matches_fresh_render(tmp_path: Path) -> 
     """Regression test: the panel cache key must include the slot's
     position (index/row/num_rows), not just the placement's own fields.
     Otherwise swapping two placements within a team (as the drag-and-drop
-    swap_slots GUI feature does) would reuse the other slot's stale,
+    reorder_slots GUI feature does) would reuse the other slot's stale,
     already-positioned cached layer instead of re-rendering at the new
     position."""
     clear_render_cache()
