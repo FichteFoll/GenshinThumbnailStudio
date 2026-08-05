@@ -1,16 +1,26 @@
 """Tests for `renderer.art`."""
 
+import itertools
+
+import pytest
 from PIL import Image, ImageChops, ImageDraw
 
 from genshin_thumbnail_studio.models import Placement
-from genshin_thumbnail_studio.renderer.art import cover_resize_offset, glow_zoom, panel_art
+from genshin_thumbnail_studio.renderer.art import (
+    GLOW_ZOOM_FACTOR,
+    cover_resize_offset,
+    glow_zoom,
+    panel_art,
+)
 from genshin_thumbnail_studio.renderer.geometry import (
     PAN_OVERSCAN,
     STANDARD_ART_SIZE,
     max_offset,
     panel_target_size,
     resized_art_size,
+    zoom_offset_limits,
 )
+from genshin_thumbnail_studio.renderer.panels import GLOW_DOWNSCALE
 
 from .helpers import marked_source, rgba, two_tone_art
 
@@ -89,6 +99,27 @@ def test_default_offsets_still_center_the_crop() -> None:
     target = panel_target_size(compact=True)
     centered = cover_resize_offset(source, target, 0.0, 0.0, 1.06)
     assert abs(_marker_center_x(centered) - target[0] / 2) <= 1
+
+
+def test_explicit_limits_override_the_self_computed_clamp() -> None:
+    """A caller passing `limits` gets that clamp instead of the one
+    `cover_resize_offset()` would compute from `zoom`, which is how a second,
+    differently zoomed layer is made to pan exactly like the first one."""
+    source = _horizontally_marked_source()
+    target = panel_target_size(compact=True)
+    zoom = 1.06
+    tiny_limit = 0.05
+    requested_offset = 0.5
+    assert requested_offset > max_offset(STANDARD_ART_SIZE, compact=True, zoom=zoom)[1]
+
+    centered = cover_resize_offset(source, target, 0.0, 0.0, zoom)
+    clamped_to_tiny_limit = cover_resize_offset(
+        source, target, requested_offset, requested_offset, zoom, limits=(tiny_limit, tiny_limit)
+    )
+
+    assert abs(
+        _marker_center_y(clamped_to_tiny_limit) - _marker_center_y(centered) - tiny_limit * target[1]
+    ) <= 1
 
 
 def gradient_image(width: int, height: int) -> Image.Image:
@@ -217,14 +248,152 @@ def test_a_zoom_below_the_cover_fit_can_be_panned_to_the_panel_edges() -> None:
         assert _row_alpha(flush_top, target[1] - 1) == {0}, compact
 
 
-def test_glow_never_leaves_the_panel_uncovered() -> None:
-    for zoom in (0.70, 1.00, 1.28, 1.80):
-        assert glow_zoom(zoom) >= 1.0
-        for compact in (True, False):
-            target = panel_target_size(compact)
-            resized = resized_art_size(STANDARD_ART_SIZE, compact, glow_zoom(zoom))
-            assert resized[0] >= target[0], (zoom, compact, resized, target)
-            assert resized[1] >= target[1], (zoom, compact, resized, target)
+def test_glow_zoom_scales_with_the_placement_zoom() -> None:
+    # The glow is derived from the same art as the portrait, so a zoom change
+    # that moves the portrait has to move the glow too, at every zoom, not
+    # only above the old floor's threshold.
+    zooms = (0.70, 1.00, 1.18, 1.28, 1.50, 1.80)
+    glow_zooms = [glow_zoom(zoom) for zoom in zooms]
+    for zoom, gz in zip(zooms, glow_zooms, strict=True):
+        assert gz == pytest.approx(zoom * GLOW_ZOOM_FACTOR)  # pyright: ignore[reportUnknownMemberType]
+    assert all(a < b for a, b in itertools.pairwise(glow_zooms))
+
+
+def test_the_glow_layer_scales_with_the_placement_zoom() -> None:
+    """The behavioural counterpart of the zoom formula above: a higher
+    placement zoom must produce a visibly taller marker stripe in the glow
+    layer itself, not just a higher number from `glow_zoom()`."""
+    source = _horizontally_marked_source()
+    target = panel_target_size(compact=True)
+    glow_size = (target[0] // GLOW_DOWNSCALE, target[1] // GLOW_DOWNSCALE)
+
+    def stripe_height(zoom: float) -> float:
+        # The glow layer is only a few dozen pixels tall, so the stripe spans
+        # a handful of rows; a hard >200 threshold quantizes that down to one
+        # or two whole pixels and loses the difference between the two zooms.
+        # Summing the red channel (BILINEAR blends the stripe's edge into
+        # neighbouring rows) gives a sub-pixel-accurate stand-in for its
+        # height instead.
+        crop = cover_resize_offset(
+            source, glow_size, 0.0, 0.0, glow_zoom(zoom), resample=Image.Resampling.BILINEAR
+        )
+        column = crop.width // 2
+        return sum(rgba(crop, (column, y))[0] for y in range(crop.height)) / 255
+
+    low = stripe_height(0.70)
+    high = stripe_height(1.20)
+    assert high > low + 1
+
+
+def test_the_glow_pans_with_the_portrait_up_to_the_shared_cap() -> None:
+    """The y-axis requirement: panning to the portrait's own cap must move the
+    glow layer by the same panel-relative distance, not stop at the glow's own
+    (narrower) limit.
+
+    Both crops are rendered with the portrait's own `limits` passed explicitly,
+    the same shared clamp `make_panel()` now computes once and hands to both
+    layers, since a self-computed clamp can never agree between two differently
+    zoomed layers by construction.
+    """
+    zoom = 1.80
+    compact = True
+    source = _horizontally_marked_source()
+    target = panel_target_size(compact)
+    glow_size = (target[0] // GLOW_DOWNSCALE, target[1] // GLOW_DOWNSCALE)
+    limits = max_offset(STANDARD_ART_SIZE, compact=compact, zoom=zoom)
+    offset_y = limits[1]
+    # A wide marker panned all the way to the cap has part of its width
+    # clipped by the frame edge (the cap is defined to reach exactly there,
+    # via PAN_OVERSCAN), which biases a naive centre measurement by up to
+    # half the marker's width. This tolerance absorbs that clipping, while
+    # staying far tighter than the ~18px gap the bug below produces.
+    clipping_tolerance = 8
+
+    for signed_offset in (offset_y, -offset_y):
+        portrait_centered = cover_resize_offset(source, target, 0.0, 0.0, zoom, limits=limits)
+        portrait_panned = cover_resize_offset(source, target, 0.0, signed_offset, zoom, limits=limits)
+        portrait_travel = _marker_center_y(portrait_panned) - _marker_center_y(portrait_centered)
+        assert abs(portrait_travel - signed_offset * target[1]) <= clipping_tolerance
+
+        glow_centered = cover_resize_offset(
+            source,
+            glow_size,
+            0.0,
+            0.0,
+            glow_zoom(zoom),
+            resample=Image.Resampling.BILINEAR,
+            limits=limits,
+        )
+        glow_panned = cover_resize_offset(
+            source,
+            glow_size,
+            0.0,
+            signed_offset,
+            glow_zoom(zoom),
+            resample=Image.Resampling.BILINEAR,
+            limits=limits,
+        )
+        glow_travel = _marker_center_y(glow_panned) - _marker_center_y(glow_centered)
+        # With the portrait's limits shared, both layers pan by the same
+        # panel-relative distance instead of the glow capping at its own,
+        # narrower self-computed clamp.
+        assert abs(glow_travel - signed_offset * glow_size[1]) <= clipping_tolerance
+
+
+def test_the_glow_and_the_portrait_are_clamped_by_the_same_limits() -> None:
+    """The 'one shared range' property, on both axes: whenever the portrait's
+    and the glow's own self-computed clamps disagree, a crop requested between
+    the two must still land at the same panel-relative position in each layer,
+    since both are clamped by the portrait's `limits`.
+
+    The offset probed per axis is the midpoint between the two self-computed
+    limits, so it is guaranteed to sit on the disagreeing side of at least one
+    of them (or, at zoom 1.00, on the one point in the table where both
+    agree, which must not falsely register as a mismatch). Combinations whose
+    midpoint would place a centred marker outside the crop entirely (limits
+    past roughly half the layer's width/height, which happens on the x-axis
+    for several zoom/compact combinations, per the plan's Context table) are
+    skipped, since no centred-marker measurement can observe them; the
+    y-axis limits stay within range for every zoom and `compact` value.
+    """
+    max_visible_offset = 0.48
+
+    for compact in (True, False):
+        target = panel_target_size(compact)
+        glow_size = (target[0] // GLOW_DOWNSCALE, target[1] // GLOW_DOWNSCALE)
+        for zoom in (0.70, 1.00, 1.80):
+            portrait_limits = max_offset(STANDARD_ART_SIZE, compact=compact, zoom=zoom)
+            glow_limits = zoom_offset_limits(STANDARD_ART_SIZE, glow_size, glow_zoom(zoom))
+
+            for axis, source, size_index in (
+                ("x", marked_source(), 0),
+                ("y", _horizontally_marked_source(), 1),
+            ):
+                request = (portrait_limits[size_index] + glow_limits[size_index]) / 2
+                if abs(request) > max_visible_offset:
+                    continue
+
+                offset_x, offset_y = (request, 0.0) if axis == "x" else (0.0, request)
+                portrait_crop = cover_resize_offset(
+                    source, target, offset_x, offset_y, zoom, limits=portrait_limits
+                )
+                glow_crop = cover_resize_offset(
+                    source,
+                    glow_size,
+                    offset_x,
+                    offset_y,
+                    glow_zoom(zoom),
+                    resample=Image.Resampling.BILINEAR,
+                    limits=portrait_limits,
+                )
+                if axis == "x":
+                    portrait_position = _marker_center_x(portrait_crop) / target[0]
+                    glow_position = _marker_center_x(glow_crop) / glow_size[0]
+                else:
+                    portrait_position = _marker_center_y(portrait_crop) / target[1]
+                    glow_position = _marker_center_y(glow_crop) / glow_size[1]
+
+                assert abs(portrait_position - glow_position) <= 0.02, (compact, zoom, axis)
 
 
 def _tone_boundary_x(crop: Image.Image) -> float:

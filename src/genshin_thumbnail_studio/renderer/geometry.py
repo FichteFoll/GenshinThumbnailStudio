@@ -88,6 +88,14 @@ def offset_limits(resized: tuple[int, int], target: tuple[int, int]) -> tuple[fl
     )
 
 
+def zoom_offset_limits(
+    source_size: tuple[int, int], target: tuple[int, int], zoom: float
+) -> tuple[float, float]:
+    """Reachable +/- offset per axis for source art cover-fit into `target`
+    at `zoom`, in fractions of the target size."""
+    return offset_limits(scaled_size(source_size, cover_scale(source_size, target, zoom)), target)
+
+
 def max_offset(
     art_size: tuple[int, int], compact: bool, zoom: float, scale: int = 1
 ) -> tuple[float, float]:
@@ -96,9 +104,7 @@ def max_offset(
     Shares its formula with the clamp in `cover_resize_offset()`, so the GUI
     slider bounds and the renderer can never disagree about the reachable range.
     """
-    return offset_limits(
-        resized_art_size(art_size, compact, zoom, scale), panel_target_size(compact, scale)
-    )
+    return zoom_offset_limits(art_size, panel_target_size(compact, scale), zoom)
 
 
 def panel_polygon(

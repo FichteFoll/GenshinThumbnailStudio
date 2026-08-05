@@ -15,29 +15,38 @@ from .cache import (
     cache_put,
     work_cache,
 )
-from .geometry import cover_scale, offset_limits, scaled_size
+from .geometry import cover_scale, scaled_size, zoom_offset_limits
 
 # The GUI clamps a placement's zoom to 0.70..1.80, so a preview working copy
 # scaled for 1.80 is never upsampled by an edit made through the GUI.
 MAX_PLACEMENT_ZOOM = 1.80
 
-# How much wider than the character crop the blurred glow layer is framed.
-GLOW_ZOOM_FACTOR = 0.78
+# The glow layer's cover-fit zoom relative to the portrait's own. A fixed
+# factor rather than a floored one: the glow is derived from the same art as
+# the portrait, so it has to scale with it at every placement zoom, not only
+# above some threshold. This used to be `max(1.0, zoom * GLOW_ZOOM_FACTOR)`
+# with a factor of 0.78, framing the glow wider than the crop above zoom
+# ~1.28 while the floor guaranteed the glow covered the whole panel below it -
+# but the floor froze the glow over most of the GUI's zoom range (0.70..1.80),
+# including both default zooms, which is the worse artefact of the two. This
+# is now 1.0: the glow tracks the portrait's own framing exactly (still built
+# from a downscaled, blurred, colour-boosted copy, so it still reads as a
+# distinct wash rather than a sharper duplicate of the portrait), which keeps
+# the glow covering the panel at both default zooms and above. Below zoom 1.0
+# (reachable via the GUI down to `MIN_ZOOM`), the glow leaves the same
+# transparent margin the portrait's own crop already leaves there.
+GLOW_ZOOM_FACTOR = 1.0
 
 
 def glow_zoom(zoom: float) -> float:
     """The zoom the panel glow is cover-fit at, for a placement zoom.
 
-    The glow is deliberately framed wider than the crop, so the wash around the
-    portrait shows a different part of the art, but it must still cover the
-    whole panel. Since both art axes scale by the same factor, zoom 1.0 is the
-    smallest factor that still covers the panel, so the floor wins for every
-    placement zoom up to `1 / GLOW_ZOOM_FACTOR` and the factor itself only
-    applies above that. Below a placement zoom of 1.0 the floor even leaves the
-    glow more zoomed in than the crop, which is what keeps the panel covered
-    while the portrait shrinks inside it.
+    Strictly proportional to the placement zoom (currently equal to it, since
+    `GLOW_ZOOM_FACTOR` is 1.0), so the glow's framing tracks the portrait's at
+    every zoom instead of only above some threshold. See the
+    `GLOW_ZOOM_FACTOR` comment for the covering-the-panel trade-off this gives up.
     """
-    return max(1.0, zoom * GLOW_ZOOM_FACTOR)
+    return zoom * GLOW_ZOOM_FACTOR
 
 
 def cover_resize_offset(
@@ -47,6 +56,7 @@ def cover_resize_offset(
     offset_y: float,
     zoom: float,
     resample: Image.Resampling = Image.Resampling.LANCZOS,
+    limits: tuple[float, float] | None = None,
 ) -> Image.Image:
     """Cover-fit `image` into `size`, panned by signed offsets.
 
@@ -56,12 +66,17 @@ def cover_resize_offset(
     resized art by that margin. That overscanned strip is left transparent,
     letting the panel background and glow show through without any extra
     compositing.
+
+    `limits` overrides the self-computed clamp when given. A caller passes it
+    to make a second, differently zoomed layer (the panel glow, cover-fit at
+    `glow_zoom()`) clamp exactly like the first one (the sharp portrait), so
+    the two stop panning at the same offset instead of each capping at its own
+    zoom's range.
     """
     source_w, source_h = image.size
     target_w, target_h = size
-    image_scale = cover_scale(image.size, size, zoom)
-    resized_w, resized_h = scaled_size(image.size, image_scale)
-    limit_x, limit_y = offset_limits((resized_w, resized_h), size)
+    resized_w, resized_h = scaled_size(image.size, cover_scale(image.size, size, zoom))
+    limit_x, limit_y = limits if limits is not None else zoom_offset_limits(image.size, size, zoom)
     offset_x = min(limit_x, max(-limit_x, offset_x))
     offset_y = min(limit_y, max(-limit_y, offset_y))
     left = round((resized_w - target_w) / 2 - offset_x * target_w)
@@ -103,6 +118,7 @@ def panel_art(
     member: Placement,
     zoom: float,
     resample: Image.Resampling = Image.Resampling.LANCZOS,
+    limits: tuple[float, float] | None = None,
 ) -> Image.Image:
     """One panel's crop of the character art, mirrored when the placement is
     flipped.
@@ -114,9 +130,11 @@ def panel_art(
     center:
     ``mirror(crop(art, -offset_x)) == crop(mirror(art), offset_x)``.
     Mirroring the crop also keeps the shared, read-only art cache untouched.
+
+    `limits` is forwarded to `cover_resize_offset()` unchanged.
     """
     offset_x = -member.offset_x if member.flip else member.offset_x
-    crop = cover_resize_offset(art, target, offset_x, member.offset_y, zoom, resample)
+    crop = cover_resize_offset(art, target, offset_x, member.offset_y, zoom, resample, limits)
     if member.flip:
         crop = crop.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
     return crop
