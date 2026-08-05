@@ -2,36 +2,13 @@ from __future__ import annotations
 
 import contextlib
 import copy
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 
 from PIL import Image
 from PIL.ImageQt import ImageQt
-from PySide6.QtCore import (
-    QMimeData,
-    QObject,
-    QPoint,
-    QRect,
-    QRunnable,
-    Qt,
-    QThreadPool,
-    QTimer,
-    Signal,
-)
-from PySide6.QtGui import (
-    QCloseEvent,
-    QColor,
-    QDrag,
-    QDragEnterEvent,
-    QDropEvent,
-    QMouseEvent,
-    QPainter,
-    QPaintEvent,
-    QPen,
-    QPixmap,
-    QWheelEvent,
-)
+from PySide6.QtCore import Qt, QThreadPool, QTimer
+from PySide6.QtGui import QCloseEvent, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -57,26 +34,23 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .akasha import AkashaError, AkashaWebClient, Build, StaleProfileError, download_assets
-from .models import DEFAULT_ZOOM, Asset, Placement, Project
-from .renderer import (
-    STANDARD_ART_SIZE,
-    art_pixel_size,
-    export_project,
-    max_offset,
-    panel_target_size,
-    render_preview,
-    safe_name,
-)
-from .storage import (
+from ..akasha import AkashaError, AkashaWebClient, Build, StaleProfileError, download_assets
+from ..models import Asset, Placement, Project
+from ..renderer import export_project, safe_name
+from ..storage import (
     cache_dir,
-    load_presets,
     load_profile_cache,
     load_project,
-    save_presets,
     save_profile_cache,
     save_project,
 )
+from .lineup import parse_lineup
+from .placement import PlacementController
+from .presets import PresetStore
+from .preview import PreviewWidget
+from .render_job import RenderJob
+from .style import MAIN_STYLESHEET
+from .team_slots import TeamSlotWidget
 
 # Delay between a placement change and the preview render it triggers.
 RENDER_THROTTLE_MS = 80
@@ -90,229 +64,6 @@ RESOLUTION_OPTIONS = [
 ]
 
 
-def parse_lineup(text: str) -> list[str]:
-    """Split pasted lineup text into character names.
-
-    Accepts comma, semicolon, pipe, and newline as separators (and any
-    mix/repetition thereof), stripping whitespace and dropping empty
-    fragments (e.g. from trailing or doubled separators).
-    """
-    return [value.strip() for value in re.split(r"[,;|\n]+", text) if value.strip()]
-
-
-class PreviewWidget(QFrame):
-    slot_selected = Signal(int, int)
-    # Carries the drag delta in canvas pixels (not placement offsets); the
-    # receiver converts it against the panel size it is placing into.
-    placement_dragged = Signal(float, float)
-    zoom_requested = Signal(float)
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.setMinimumSize(640, 360)
-        self.setMouseTracking(True)
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setCursor(Qt.CursorShape.OpenHandCursor)
-        self._pixmap: QPixmap | None = None
-        self._mode = "abyss"
-        self._active_team = 0
-        self._selected = (0, 0)
-        self._drag_last: QPoint | None = None
-
-    def set_preview(self, pixmap: QPixmap) -> None:
-        self._pixmap = pixmap
-        self.update()
-
-    def set_context(self, mode: str, active_team: int, selected: tuple[int, int]) -> None:
-        self._mode = mode
-        self._active_team = active_team
-        self._selected = selected
-        self.update()
-
-    def _image_rect(self) -> QRect:
-        if not self._pixmap:
-            return QRect()
-        fitted = self._pixmap.size().scaled(self.size(), Qt.AspectRatioMode.KeepAspectRatio)
-        return QRect(
-            (self.width() - fitted.width()) // 2,
-            (self.height() - fitted.height()) // 2,
-            fitted.width(),
-            fitted.height(),
-        )
-
-    def _image_point(self, point: QPoint) -> tuple[float, float] | None:
-        rect = self._image_rect()
-        if rect.isEmpty() or not rect.contains(point):
-            return None
-        return (
-            (point.x() - rect.x()) * 1280 / rect.width(),
-            (point.y() - rect.y()) * 720 / rect.height(),
-        )
-
-    def paintEvent(self, event: QPaintEvent) -> None:
-        super().paintEvent(event)
-        painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("#111216"))
-        rect = self._image_rect()
-        if not self._pixmap or rect.isEmpty():
-            painter.setPen(QColor("#8f96a3"))
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Load a profile and generate a preview")
-            return
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        painter.drawPixmap(rect, self._pixmap)
-
-        team, slot = self._selected
-        visible_team = team if self._mode == "abyss" else 0
-        if self._mode == "stygian" and team != self._active_team:
-            return
-        cell_w = rect.width() / 4
-        cell_h = rect.height() / (2 if self._mode == "abyss" else 1)
-        highlight = QRect(
-            int(rect.x() + slot * cell_w),
-            int(rect.y() + visible_team * cell_h),
-            int(cell_w),
-            int(cell_h),
-        ).adjusted(3, 3, -3, -3)
-        painter.setPen(QPen(QColor("#ffd95d"), 3))
-        painter.drawRect(highlight)
-
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() != Qt.MouseButton.LeftButton:
-            return
-        point = self._image_point(event.position().toPoint())
-        if point is None:
-            return
-        x, y = point
-        slot = min(3, max(0, int(x // 320)))
-        team = min(1, max(0, int(y // 360))) if self._mode == "abyss" else self._active_team
-        self._selected = (team, slot)
-        self._drag_last = event.position().toPoint()
-        self.setCursor(Qt.CursorShape.ClosedHandCursor)
-        self.slot_selected.emit(team, slot)
-        self.update()
-
-    def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        if self._drag_last is None or not (event.buttons() & Qt.MouseButton.LeftButton):
-            return
-        rect = self._image_rect()
-        if rect.isEmpty():
-            return
-        current = event.position().toPoint()
-        delta = current - self._drag_last
-        self._drag_last = current
-        image_dx = delta.x() * 1280 / rect.width()
-        image_dy = delta.y() * 720 / rect.height()
-        self.placement_dragged.emit(image_dx, image_dy)
-
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_last = None
-            self.setCursor(Qt.CursorShape.OpenHandCursor)
-
-    def wheelEvent(self, event: QWheelEvent) -> None:
-        if self._image_point(event.position().toPoint()) is None:
-            return
-        self.zoom_requested.emit(0.04 if event.angleDelta().y() > 0 else -0.04)
-        event.accept()
-
-
-SLOT_MIME_TYPE = "application/x-genshin-slot"
-
-
-class _SlotDragHandle(QLabel):
-    """Small grip label; the only part of a team slot that starts a drag."""
-
-    def __init__(self, slot_widget: TeamSlotWidget) -> None:
-        super().__init__("☰")
-        self._slot_widget = slot_widget
-        self.setFixedWidth(18)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setCursor(Qt.CursorShape.OpenHandCursor)
-        self.setToolTip("Drag to swap slots")
-        self._drag_start: QPoint | None = None
-
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_start = event.position().toPoint()
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        if self._drag_start is not None and (event.buttons() & Qt.MouseButton.LeftButton):
-            self._drag_start = None
-            drag = QDrag(self)
-            mime = QMimeData()
-            payload = f"{self._slot_widget.team}:{self._slot_widget.slot}"
-            mime.setData(SLOT_MIME_TYPE, payload.encode("utf-8"))
-            drag.setMimeData(mime)
-            drag.exec(Qt.DropAction.MoveAction)
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        self._drag_start = None
-        super().mouseReleaseEvent(event)
-
-
-class TeamSlotWidget(QWidget):
-    """One combo box row in the team overview, draggable via its handle."""
-
-    swap_requested = Signal(int, int, int, int)
-
-    def __init__(self, team: int, slot: int, combo: QComboBox) -> None:
-        super().__init__()
-        self.team = team
-        self.slot = slot
-        self.setAcceptDrops(True)
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
-        self.handle = _SlotDragHandle(self)
-        layout.addWidget(self.handle)
-        layout.addWidget(combo, 1)
-
-    def _set_drop_target(self, active: bool) -> None:
-        self.setProperty("dropTarget", active)
-        self.style().unpolish(self)
-        self.style().polish(self)
-
-    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if event.mimeData().hasFormat(SLOT_MIME_TYPE):
-            event.acceptProposedAction()
-            self._set_drop_target(True)
-
-    def dragLeaveEvent(self, event) -> None:  # type: ignore[no-untyped-def]
-        self._set_drop_target(False)
-
-    def dropEvent(self, event: QDropEvent) -> None:
-        self._set_drop_target(False)
-        payload = bytes(event.mimeData().data(SLOT_MIME_TYPE).data()).decode("utf-8")
-        team_str, slot_str = payload.split(":")
-        event.acceptProposedAction()
-        self.swap_requested.emit(int(team_str), int(slot_str), self.team, self.slot)
-
-
-class RenderJobSignals(QObject):
-    finished = Signal(int, object, object)
-
-
-class RenderJob(QRunnable):
-    """Renders a `Project` snapshot on a worker thread via `QThreadPool`."""
-
-    def __init__(self, token: int, project_snapshot: Project, assets_snapshot: dict[str, Asset]) -> None:
-        super().__init__()
-        self.token = token
-        self._project_snapshot = project_snapshot
-        self._assets_snapshot = assets_snapshot
-        self.signals = RenderJobSignals()
-
-    def run(self) -> None:  # type: ignore[no-untyped-def]
-        try:
-            image: Image.Image | None = render_preview(self._project_snapshot, self._assets_snapshot)
-        except Exception as error:  # reported back to the GUI thread
-            self.signals.finished.emit(self.token, None, error)
-            return
-        self.signals.finished.emit(self.token, image, None)
-
-
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
@@ -323,7 +74,8 @@ class MainWindow(QMainWindow):
         self.project_path: Path | None = None
         self.builds: dict[str, Build] = {}
         self.assets: dict[str, Asset] = {}
-        self.presets = load_presets()
+        self._presets = PresetStore.load()
+        self._placement = PlacementController(self)
         self.selected = (0, 0)
         self._updating_controls = False
         self._render_timer = QTimer(self)
@@ -484,21 +236,7 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 1)
         self.statusBar().showMessage("Ready")
 
-        self.setStyleSheet(
-            """
-            QMainWindow, QWidget { background: #1a1b20; color: #f1f2f4; }
-            QLineEdit, QComboBox { background: #26282f; border: 1px solid #484b55; padding: 6px; min-height: 22px; }
-            QPushButton { background: #30333b; border: 1px solid #515561; padding: 7px 10px; }
-            QPushButton:hover { background: #3a3e48; border-color: #777d8b; }
-            QPushButton:pressed { background: #25272d; }
-            QRadioButton { spacing: 6px; }
-            QSlider::groove:horizontal { height: 4px; background: #454954; }
-            QSlider::handle:horizontal { width: 14px; margin: -5px 0; background: #ffd95d; border-radius: 7px; }
-            QLabel#secondary { color: #aeb3bf; }
-            QScrollArea { background: transparent; }
-            TeamSlotWidget[dropTarget="true"] { background: #3a3e48; border: 1px solid #ffd95d; }
-            """
-        )
+        self.setStyleSheet(MAIN_STYLESHEET)
 
     @staticmethod
     def _slider(minimum: int, maximum: int, value: int) -> QSlider:
@@ -615,41 +353,15 @@ class MainWindow(QMainWindow):
         old_name = member.name
         member.name = name.strip()
         if member.name and member.name.casefold() != old_name.casefold():
-            self._apply_preset(member)
+            self._presets.apply_to(self, member)
         self.assets = {key: value for key, value in self.assets.items() if key in self._selected_name_keys()}
         self._sync_controls()
 
     def _selected_name_keys(self) -> set[str]:
         return {member.name.casefold() for team in self.project.teams for member in team if member.name}
 
-    def _preset_key(self, member: Placement) -> str:
-        build = self.builds.get(member.name.casefold())
-        identity = (
-            build.costume_id
-            if build and build.costume_id
-            else (build.build_id if build else member.name.casefold())
-        )
-        return f"{self.project.mode}|{identity}"
-
-    def _apply_preset(self, member: Placement) -> None:
-        preset = self.presets.get(self._preset_key(member))
-        if preset:
-            member.offset_x = float(preset.get("offset_x", member.offset_x))
-            member.offset_y = float(preset.get("offset_y", member.offset_y))
-            member.zoom = float(preset.get("zoom", member.zoom))
-            member.flip = bool(preset.get("flip", member.flip))
-
     def _save_current_preset(self) -> None:
-        member = self.current_member()
-        if not member.name:
-            return
-        self.presets[self._preset_key(member)] = {
-            "offset_x": member.offset_x,
-            "offset_y": member.offset_y,
-            "zoom": member.zoom,
-            "flip": member.flip,
-        }
-        save_presets(self.presets)
+        self._presets.remember(self, self.current_member())
 
     def current_member(self) -> Placement:
         team, slot = self.selected
@@ -659,12 +371,6 @@ class MainWindow(QMainWindow):
         self.selected = (team, slot)
         self._sync_controls()
 
-    def _offset_bounds(self, member: Placement) -> tuple[float, float]:
-        """Reachable +/- offset per axis for the member's art and zoom."""
-        asset = self.assets.get(member.name.casefold()) if member.name else None
-        art_size = art_pixel_size(str(asset.art_path)) if asset else STANDARD_ART_SIZE
-        return max_offset(art_size, self.project.mode == "abyss", member.zoom)
-
     def _sync_controls(self) -> None:
         team, slot = self.selected
         team = min(team, len(self.project.teams) - 1)
@@ -672,7 +378,7 @@ class MainWindow(QMainWindow):
         self.selected = (team, slot)
         member = self.current_member()
         self._updating_controls = True
-        max_x, max_y = self._offset_bounds(member)
+        max_x, max_y = self._placement.offset_bounds(member)
         # Truncate rather than round, so the slider end stays inside the range
         # the renderer can reach and no travel is left dead at the ends.
         limit_x, limit_y = int(max_x * 1000), int(max_y * 1000)
@@ -717,32 +423,19 @@ class MainWindow(QMainWindow):
 
     def drag_placement(self, dx: float, dy: float) -> None:
         """Pan the selected portrait by a drag delta given in canvas pixels."""
-        member = self.current_member()
-        # Offsets are fractions of the panel, and panels are pasted 1:1 onto the
-        # canvas, so dividing by the panel size pans one canvas pixel per mouse
-        # pixel on both axes.
-        target_w, target_h = panel_target_size(self.project.mode == "abyss")
-        max_x, max_y = self._offset_bounds(member)
-        member.offset_x = min(max_x, max(-max_x, member.offset_x + dx / target_w))
-        member.offset_y = min(max_y, max(-max_y, member.offset_y + dy / target_h))
+        self._placement.pan(self.current_member(), dx, dy)
         self._save_current_preset()
         self._sync_controls()
         self.schedule_render()
 
     def change_zoom(self, delta: float) -> None:
-        member = self.current_member()
-        member.zoom = min(1.80, max(0.70, member.zoom + delta))
+        self._placement.zoom_by(self.current_member(), delta)
         self._save_current_preset()
         self._sync_controls()
         self.schedule_render()
 
     def reset_placement(self) -> None:
-        member = self.current_member()
-        defaults = Placement()
-        member.offset_x = defaults.offset_x
-        member.offset_y = defaults.offset_y
-        member.zoom = DEFAULT_ZOOM[self.project.mode]
-        member.flip = defaults.flip
+        self._placement.reset(self.current_member())
         self._save_current_preset()
         self._sync_controls()
         self.schedule_render()
@@ -837,7 +530,7 @@ class MainWindow(QMainWindow):
         for team in self.project.teams:
             for member in team:
                 if member.name.casefold() == key:
-                    self._apply_preset(member)
+                    self._presets.apply_to(self, member)
         self.schedule_render()
 
     def prepare_preview(self) -> None:
@@ -867,7 +560,7 @@ class MainWindow(QMainWindow):
         )
         for team in self.project.teams:
             for member in team:
-                self._apply_preset(member)
+                self._presets.apply_to(self, member)
         self._dispatch_render()
 
     def _dispatch_render(self) -> None:
@@ -1008,17 +701,3 @@ class MainWindow(QMainWindow):
         self.load_profile()
         if self.builds:
             self._auto_preview()
-
-
-def run() -> int:
-    app = QApplication.instance()
-    if not isinstance(app, QApplication):
-        # QApplication.instance() is typed as QCoreApplication | None, which
-        # lacks setStyle; a fresh QApplication is always the concrete subtype.
-        app = QApplication([])
-    app.setStyle("Fusion")
-    app.setApplicationName("Genshin Thumbnail Studio")
-    app.setOrganizationName("GenshinThumbnailStudio")
-    window = MainWindow()
-    window.show()
-    return app.exec()

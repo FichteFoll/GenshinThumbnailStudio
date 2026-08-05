@@ -1,9 +1,4 @@
-import os
-
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-os.environ.setdefault("QTWEBENGINE_CHROMIUM_FLAGS", "--no-sandbox")
-
-from genshin_thumbnail_studio.gui import parse_lineup
+from genshin_thumbnail_studio.gui.lineup import parse_lineup
 
 
 def test_parse_lineup_comma_separated() -> None:
