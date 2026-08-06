@@ -232,8 +232,8 @@ class MainWindow(QMainWindow):
         self.flip_check = QCheckBox("Flip")
         self.flip_check.setToolTip("Mirror this character horizontally")
         self.flip_check.toggled.connect(self._flip_toggled)
-        reset_button = QPushButton("Reset")
-        reset_button.clicked.connect(self.reset_placement)
+        self.reset_button = QPushButton("Reset")
+        self.reset_button.clicked.connect(self.reset_placement)
         placement_row.addWidget(self.selected_label)
         placement_row.addSpacing(12)
         placement_row.addWidget(QLabel("X"))
@@ -246,7 +246,7 @@ class MainWindow(QMainWindow):
         placement_row.addWidget(self.zoom_slider, 1)
         placement_row.addWidget(self.zoom_value)
         placement_row.addWidget(self.flip_check)
-        placement_row.addWidget(reset_button)
+        placement_row.addWidget(self.reset_button)
         right_layout.addLayout(placement_row)
 
         splitter.addWidget(controls)
@@ -435,6 +435,15 @@ class MainWindow(QMainWindow):
         team, slot = self.selected
         return self.project.teams[team][slot]
 
+    def _filled_slots(self) -> set[tuple[int, int]]:
+        """The `(team, slot)` pairs whose art is downloaded; the rest are placeholders."""
+        return {
+            (team_index, slot_index)
+            for team_index, team in enumerate(self.project.teams)
+            for slot_index, member in enumerate(team)
+            if member.name and member.name.casefold() in self.assets
+        }
+
     def select_slot(self, team: int, slot: int) -> None:
         self.selected = (team, slot)
         self._sync_controls()
@@ -468,7 +477,11 @@ class MainWindow(QMainWindow):
         self.x_value.setText(f"{member.offset_x * 100:+.0f}%")
         self.y_value.setText(f"{member.offset_y * 100:+.0f}%")
         self.zoom_value.setText(f"{member.zoom * 100:.0f}%")
-        self.preview.set_context(self.project.mode, self.project.active_team, self.selected)
+        filled = self._filled_slots()
+        editable = self.selected in filled
+        for control in (self.x_slider, self.y_slider, self.zoom_slider, self.flip_check, self.reset_button):
+            control.setEnabled(editable)
+        self.preview.set_context(self.project.mode, self.project.active_team, self.selected, filled)
 
     def _placement_slider_changed(self) -> None:
         if self._updating_controls:
@@ -493,6 +506,8 @@ class MainWindow(QMainWindow):
 
     def drag_placement(self, dx: float, dy: float) -> None:
         """Pan the selected portrait by a drag delta given in canvas pixels."""
+        if self.selected not in self._filled_slots():
+            return
         self._placement.pan(self.current_member(), dx, dy)
         self._save_current_preset()
         self._sync_controls()
@@ -500,6 +515,9 @@ class MainWindow(QMainWindow):
         self._history.schedule()
 
     def change_zoom(self, delta: float) -> None:
+        # A placeholder has no framing to edit, and the no-op would still snapshot.
+        if self.selected not in self._filled_slots():
+            return
         self._placement.zoom_by(self.current_member(), delta)
         self._save_current_preset()
         self._sync_controls()
