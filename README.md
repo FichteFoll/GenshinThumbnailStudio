@@ -10,7 +10,8 @@ Standalone desktop application for creating the established 1280x720 Genshin tea
 - Uses the exact Enka asset stem and costume ID returned by Akasha, including equipped skins.
 - Downloads original character artwork and weapon icons into a local cache.
 - Shows C/R labels and weapon icons without additional thumbnail text.
-- Lets users select and drag every character directly in the preview. The mouse wheel and X/Y/zoom sliders provide fine control, and a "Flip" toggle mirrors a character horizontally so one facing out of the thumbnail can face into it.
+- Renders the preview continuously, showing placeholder panels for slots that have no character yet, and swapping in portraits as soon as their art has finished downloading in the background.
+- Lets users select and drag every character that has art directly in the preview. The mouse wheel, the X/Y/zoom sliders, and a "Flip" toggle that mirrors a character horizontally, so one facing out of the thumbnail can face into it, all apply to those slots as well.
 - Saves reusable placement presets and JSON project files.
 - Exports supersampled PNG files at 1280x720.
 
