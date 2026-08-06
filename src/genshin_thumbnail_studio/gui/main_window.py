@@ -92,6 +92,7 @@ class MainWindow(QMainWindow):
         self._rebuild_team_fields()
         self._sync_controls()
         self._saved_snapshot = copy.deepcopy(self.project)
+        self.schedule_render()  # Through the throttle, so no render runs in the constructor.
 
     def _icon(self, standard: QStyle.StandardPixmap):
         return self.style().standardIcon(standard)
@@ -107,6 +108,10 @@ class MainWindow(QMainWindow):
         if not dialogs.confirm_discard_changes(self, "exit", self.is_dirty, self.save_project):
             event.ignore()
             return
+        # The preview renders on its own now, so a job may well be in flight;
+        # let it finish rather than have it emit into a window already gone.
+        self._render_timer.stop()
+        self._thread_pool.waitForDone(2000)
         self.client.close()
         super().closeEvent(event)
 
@@ -331,8 +336,7 @@ class MainWindow(QMainWindow):
             self.project.teams = self._drag_snapshot
             self._refresh_slot_display()
             self._sync_controls()
-            if self.assets:
-                self.schedule_render()
+            self.schedule_render()
         self._drag_snapshot = None
         self._drag_position = None
         # A no-op after a cancelled drag, whose revert restored the last state.
@@ -353,8 +357,7 @@ class MainWindow(QMainWindow):
         self._refresh_slot_display()
         self.selected = target
         self._sync_controls()
-        if self.assets:
-            self.schedule_render()
+        self.schedule_render()
         if self._drag_position is None:
             self._history.commit_now()
         # During a drag nothing is scheduled: the drop commits the whole gesture
@@ -388,7 +391,7 @@ class MainWindow(QMainWindow):
         self.boss_combo.setVisible(mode == "stygian")
         self._rebuild_team_fields()
         self._sync_controls()
-        self.preview.set_preview(QPixmap())
+        self.schedule_render()
         self._history.reset()
         self._saved_snapshot = copy.deepcopy(self.project)
 
@@ -406,8 +409,7 @@ class MainWindow(QMainWindow):
         self.project.active_team = max(0, index)
         self.selected = (self.project.active_team, self.selected[1])
         self._sync_controls()
-        if self.assets:
-            self.schedule_render()
+        self.schedule_render()
 
     def _member_changed(self, team: int, slot: int, name: str) -> None:
         member = self.project.teams[team][slot]
@@ -510,7 +512,7 @@ class MainWindow(QMainWindow):
     def schedule_render(self) -> None:
         # A throttle, not a debounce: restarting the timer on every
         # mouse-move event would mean it never fires during a drag.
-        if self.assets and not self._render_timer.isActive():
+        if not self._render_timer.isActive():
             self._render_timer.start(RENDER_THROTTLE_MS)
 
     def load_profile(self) -> None:

@@ -94,6 +94,9 @@ def test_on_asset_ready_populates_incrementally_and_schedules_render(
     window.assets = {}
     all_assets = create_test_assets(tmp_path / "assets", names)
 
+    # The window schedules its own placeholder render on construction; clear
+    # that one so the timer below can only have been started by the asset.
+    window._render_timer.stop()
     assert not window._render_timer.isActive()
 
     window._on_asset_ready("furina", all_assets["furina"])
@@ -135,26 +138,65 @@ def test_schedule_render_throttles_instead_of_restarting_the_timer(
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
-def test_schedule_render_without_assets_is_a_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_schedule_render_without_assets_starts_the_timer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
     window = MainWindow()
 
-    names = ["Furina", "Nahida"]
-    fill_window_teams(window, names)
+    # A window that has downloaded nothing at all still renders: every slot
+    # becomes a placeholder panel rather than nothing being drawn.
+    window.assets = {}
+    window._render_timer.stop()
 
-    # With assets, the very same call does start the timer, so the assertion
-    # below really is about the `self.assets` guard and not about some other
-    # reason for the timer to stay idle.
-    window.assets = create_test_assets(tmp_path / "assets", names)
     window.schedule_render()
+
     assert window._render_timer.isActive()
 
-    window._render_timer.stop()
-    window.assets = {}
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
 
-    window.schedule_render()
 
-    assert not window._render_timer.isActive()
+def test_fresh_window_renders_a_placeholder_preview(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+
+    assert window.builds == {}
+    assert window.assets == {}
+
+    window._dispatch_render()
+    wait_for_render(window, app)
+
+    assert window.preview._pixmap is not None
+    assert not window.preview._pixmap.isNull()
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+def test_render_mixes_portraits_and_placeholders(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+
+    names = [
+        "Furina",
+        "Nahida",
+        "Bennett",
+        "Xingqiu",
+        "Raiden Shogun",
+        "Kazuha",
+        "Ganyu",
+        "Zhongli",
+    ]
+    fill_window_teams(window, names)
+    window.assets = create_test_assets(tmp_path / "assets", names[:1])
+
+    window._dispatch_render()
+    wait_for_render(window, app)
+
+    # The per-panel pixels are asserted in tests/renderer/test_panels.py; what
+    # matters here is that a partially filled team renders at all, which is
+    # what the manual preview step used to refuse.
+    assert window.preview._pixmap is not None
+    assert not window.preview._pixmap.isNull()
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)

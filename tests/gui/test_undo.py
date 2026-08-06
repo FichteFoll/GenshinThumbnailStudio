@@ -32,8 +32,9 @@ def _window_with_history_baseline() -> MainWindow:
 
     The names are written straight onto the placements, which bypasses the edit
     handlers, so the history is re-seeded afterwards exactly as opening a
-    project does. No assets are attached: undo needs none, and without them
-    `schedule_render()` no-ops, so no background render outlives the window.
+    project does. No assets are attached: undo needs none, and the renders the
+    window schedules anyway render placeholder panels, which
+    `close_ignoring_unsaved_changes()` then drains through `closeEvent`.
     """
     window = MainWindow()
     fill_window_teams(window, TEAM_NAMES)

@@ -72,7 +72,7 @@ class PreviewWidget(QFrame):
         rect = self._image_rect()
         if not self._pixmap or rect.isEmpty():
             painter.setPen(QColor("#8f96a3"))
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Load a profile and generate a preview")
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Rendering ...")
             return
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         painter.drawPixmap(rect, self._pixmap)
