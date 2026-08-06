@@ -36,11 +36,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..akasha import AkashaError, AkashaWebClient, Build, StaleProfileError, download_assets
+from ..akasha import AkashaError, AkashaWebClient, Build, StaleProfileError
 from ..models import Asset, Placement, Project
 from ..renderer import export_project, safe_name
 from ..storage import cache_dir, load_profile_cache, load_project, save_profile_cache, save_project
 from . import dialogs
+from .asset_loader import AssetLoader
 from .history import HistoryController
 from .lineup import parse_lineup
 from .placement import PlacementController
@@ -83,6 +84,10 @@ class MainWindow(QMainWindow):
         self._render_timer.setSingleShot(True)
         self._render_timer.timeout.connect(self._dispatch_render)
         self._thread_pool = QThreadPool(self)
+        self._asset_loader = AssetLoader(self, cache_dir() / "assets", self._thread_pool, self)
+        self._asset_loader.asset_ready.connect(self._on_asset_ready)
+        self._asset_loader.progress.connect(self.statusBar().showMessage)
+        self._asset_loader.failed.connect(self._on_asset_download_failed)
         self._render_token = 0
         self._render_job_running = False
         self._render_stale = False
@@ -187,11 +192,8 @@ class MainWindow(QMainWindow):
         project_row.addWidget(save_button)
         controls_layout.addLayout(project_row)
 
-        self.preview_button = QPushButton("Generate preview")
-        self.preview_button.clicked.connect(self.prepare_preview)
         self.export_button = QPushButton(self._icon(QStyle.StandardPixmap.SP_DialogSaveButton), "Export PNG")
         self.export_button.clicked.connect(self.export)
-        controls_layout.addWidget(self.preview_button)
         controls_layout.addWidget(self.export_button)
 
         right = QWidget()
@@ -420,6 +422,8 @@ class MainWindow(QMainWindow):
         self.assets = {key: value for key, value in self.assets.items() if key in self._selected_name_keys()}
         self._sync_controls()
         self._history.schedule()
+        self._asset_loader.ensure()
+        self.schedule_render()
 
     def _selected_name_keys(self) -> set[str]:
         return {member.name.casefold() for team in self.project.teams for member in team if member.name}
@@ -543,6 +547,8 @@ class MainWindow(QMainWindow):
             local = last.astimezone().strftime("%Y-%m-%d %H:%M")
             self.profile_status.setText(f"{len(builds)} builds \u00b7 last updated {local} \u00b7 {age:.0f} min ago")
             self.statusBar().showMessage("Akasha profile loaded", 5000)
+            self._asset_loader.ensure()
+            self.schedule_render()
         except Exception as error:
             dialogs.show_error(self, "Could not load profile", error)
         finally:
@@ -586,39 +592,14 @@ class MainWindow(QMainWindow):
                 if member.name.casefold() == key:
                     self._presets.apply_to(self, member)
         self.schedule_render()
+        # Debounced, so a batch of arriving assets reframing their members
+        # collapses into one undo step instead of one per character.
+        self._history.schedule()
 
-    def prepare_preview(self) -> None:
-        try:
-            builds = self._validate_team()
-            self.preview_button.setEnabled(False)
-            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            self._generate_preview_from_builds(builds)
-            self.statusBar().showMessage("Preview ready", 5000)
-        except Exception as error:
-            dialogs.show_error(self, "Could not generate preview", error)
-        finally:
-            QApplication.restoreOverrideCursor()
-            self.preview_button.setEnabled(True)
-
-    def _report_download_progress(self, current: int, total: int, name: str) -> None:
-        self.statusBar().showMessage(f"Downloading {name} ({current}/{total}) ...")
-        QApplication.processEvents()
-
-    def _generate_preview_from_builds(self, builds: list[Build]) -> None:
-        self.assets = {}
-        self.assets = download_assets(
-            builds,
-            cache_dir() / "assets",
-            progress=self._report_download_progress,
-            on_asset=self._on_asset_ready,
-        )
-        for team in self.project.teams:
-            for member in team:
-                self._presets.apply_to(self, member)
-        self._dispatch_render()
-        # The presets reframed every member outside any edit handler; its own
-        # undo step keeps the next edit from folding that in.
-        self._history.commit_now()
+    def _on_asset_download_failed(self, error: Exception) -> None:
+        # In the status bar rather than a dialog: a download running in the
+        # background must not interrupt what the user is typing.
+        self.statusBar().showMessage(str(error), 8000)
 
     def _dispatch_render(self) -> None:
         self._render_token += 1
@@ -654,8 +635,12 @@ class MainWindow(QMainWindow):
         try:
             self._validate_team()
             if set(self._selected_name_keys()) - set(self.assets):
-                self.prepare_preview()
-            if set(self._selected_name_keys()) - set(self.assets):
+                # The download can no longer be awaited here, so start it and
+                # let the user come back once the preview has filled in.
+                self._asset_loader.ensure()
+                dialogs.show_error(
+                    self, "Character art is still downloading", "Try the export again in a moment."
+                )
                 return
             stem = safe_name(self.output_name.text().strip() or "genshin_thumbnail")
             default_dir = self.project_path.parent if self.project_path else Path.cwd()
@@ -730,20 +715,14 @@ class MainWindow(QMainWindow):
             self.profile_status.setText(
                 f"{len(builds)} builds · from cache · last updated {local} · {age_minutes:.0f} min ago"
             )
-            self._auto_preview()
+            self._asset_loader.ensure()
+            self.schedule_render()
             if age_minutes > 60 and dialogs.confirm_cache_refresh(self, age_minutes):
                 self.load_profile()
                 if self.builds:
-                    self._auto_preview()
+                    self._asset_loader.ensure()
             self._history.reset()
             self._saved_snapshot = copy.deepcopy(self.project)
             self.statusBar().showMessage("Project opened", 5000)
         except Exception as error:
             dialogs.show_error(self, "Could not open project", error)
-
-    def _auto_preview(self) -> None:
-        """Render a preview from already loaded builds, reporting failures without aborting the caller."""
-        try:
-            self._generate_preview_from_builds(self._validate_team())
-        except Exception as error:
-            dialogs.show_error(self, "Could not generate preview", error)

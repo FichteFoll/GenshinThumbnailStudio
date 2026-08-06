@@ -7,8 +7,9 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from genshin_thumbnail_studio.gui import MainWindow
+from genshin_thumbnail_studio.gui import MainWindow, asset_loader
 from genshin_thumbnail_studio.gui.render_job import RenderJob
+from genshin_thumbnail_studio.models import Asset, Build
 
 from .helpers import close_ignoring_unsaved_changes, create_test_assets, fill_window_teams, qapp, wait_for_render
 
@@ -168,6 +169,42 @@ def test_fresh_window_renders_a_placeholder_preview(tmp_path: Path, monkeypatch:
 
     assert window.preview._pixmap is not None
     assert not window.preview._pixmap.isNull()
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+def test_typing_a_member_name_downloads_its_art_in_the_background(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+
+    assets = create_test_assets(tmp_path / "assets", ["Furina"])
+    window.builds = {"furina": assets["furina"].build}
+    requested: list[list[str]] = []
+
+    def fake_download_assets(
+        builds: list[Build],
+        root: Path,
+        progress: object = None,
+        on_asset: object = None,
+    ) -> dict[str, Asset]:
+        requested.append([build.name for build in builds])
+        if callable(on_asset):
+            on_asset("furina", assets["furina"])
+        return assets
+
+    monkeypatch.setattr(asset_loader, "download_assets", fake_download_assets)
+
+    window._member_changed(0, 0, "Furina")
+    # The download runs on the window's own pool, and its `asset_ready` crosses
+    # back to the GUI thread as a queued signal.
+    window._thread_pool.waitForDone(5000)
+    app.processEvents()
+
+    assert requested == [["Furina"]]
+    assert set(window.assets) == {"furina"}
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
