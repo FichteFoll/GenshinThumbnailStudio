@@ -288,10 +288,13 @@ and `storage.py` for persistence.
   the entry point behind `pyproject.toml`'s `gui-scripts`, `__main__.py` and `launch.py`.
 - `style.py` — `MAIN_STYLESHEET`, the whole application's QSS, applied once to the main window.
 - `main_window.py` — `RENDER_THROTTLE_MS`, `RESOLUTION_OPTIONS` and `MainWindow`.
-  At 765 lines this is still the largest module,
+  At 680 lines this is still the largest module,
   and the one most of `tests/gui/` exercises:
-  its remaining flows (`load_profile`, `open_project`, `export`) are Qt-bound throughout,
-  so they were not decomposed further beyond moving their blocking dialogs to `dialogs.py`.
+  what is left of it (`load_profile`, the placement editing, the render throttle)
+  is Qt-bound throughout,
+  so it was not decomposed further
+  beyond moving the blocking dialogs to `dialogs.py`
+  and the project file flows to `project_io.py`.
   The preview renders continuously rather than on demand:
   `schedule_render()` starts its throttle timer whether or not any art has been downloaded,
   `__init__` schedules the first render itself,
@@ -308,15 +311,11 @@ and `storage.py` for persistence.
   `ensure()` is called wherever the set of named characters or loaded builds can have changed:
   the success path of `load_profile`,
   the end of `_member_changed` (which is also what `paste_teams` goes through, since it writes via the combos),
-  both of `open_project`'s profile paths,
+  both of `project_io.open_project`'s profile paths,
   and `_history_restored()`,
   because an undo can bring back a name whose art `_member_changed` pruned
   and it writes the combos before their signals are connected,
   so it reaches neither that handler nor the `ensure()` at its end.
-  `export()` still runs `validate_team()`,
-  so an unresolved slot refuses to export;
-  when the art is merely still missing it starts `ensure()` and asks the user to retry,
-  because it can no longer wait for the download.
   `_filled_slots()` returns the `(team, slot)` pairs
   whose member name is non-empty and casefolds into `self.assets`,
   i.e. the slots that render a portrait rather than a placeholder;
@@ -354,9 +353,11 @@ and `storage.py` for persistence.
   and a whole batch of arrivals coalesces into one undo step
   (skipped mid slot-drag, where nothing may be scheduled at all);
   immediate (`commit_now()`) from the discrete `reset_placement` and from `_on_slot_drag_ended`;
-  and history-clearing (`reset()`) in `_mode_changed` and at both of `open_project`'s exits,
+  and history-clearing (`reset()`) in `_mode_changed`
+  and at both of `project_io.open_project`'s exits,
   since both replace `self.project` wholesale
-  and an older snapshot would let `Ctrl+Z` resurrect a lineup from a different document.
+  and an older snapshot would let `Ctrl+Z` resurrect a lineup from a different document;
+  that clearing is why the window hands its controller to that function as an argument.
   `_history_restored()` is the callback the controller invokes after a restore:
   it rebuilds the team fields,
   syncs the controls,
@@ -392,7 +393,43 @@ and `storage.py` for persistence.
   This is where the `QMessageBox`/`QInputDialog` construction lives,
   and therefore what the gui tests monkeypatch
   (`monkeypatch.setattr(dialogs, "QMessageBox", ...)`);
-  the `QFileDialog` calls in `save_project`/`open_project` stayed in the window.
+  the `QFileDialog` calls in `save_project`/`open_project` live in `project_io.py`,
+  so the tests name that module in the lookup instead
+  (`monkeypatch.setattr(project_io.QFileDialog, "getSaveFileName", ...)`);
+  the patch itself lands on `QFileDialog`'s class attribute either way.
+- `project_io.py` — reading and writing the project's files:
+  the JSON project itself and the exported PNGs.
+  `save_project()`, `open_project()` and `export()`,
+  as free functions rather than `MainWindow` methods,
+  so nothing here imports the window and the package stays acyclic,
+  the same reason `dialogs.py` gives.
+  A Protocol cannot inherit from `QWidget`,
+  so each takes the window twice,
+  as `parent: QMainWindow` for the dialogs and the status bar
+  and as `editor: ProjectEditor` for everything else;
+  `open_project()` additionally takes the window's `HistoryController`,
+  since it is that function's alone
+  and passing it keeps `MainWindow._history` private.
+  `ProjectEditor(EditorState, Protocol)` extends `EditorState`
+  with the widgets and members these flows touch
+  (`project_path`, `saved_snapshot`, `selected`, `asset_loader`,
+  `uid_edit`, `output_name`, `profile_status`,
+  `abyss_radio`, `stygian_radio`, `boss_combo`,
+  and the `validate_team`/`selected_name_keys`/`rebuild_team_fields`/
+  `sync_controls`/`populate_combo_items`/`schedule_render`/`load_profile` methods);
+  it lives here rather than in `state.py`,
+  which is Qt-free and must stay that way.
+  `export()` still runs `validate_team()`,
+  so an unresolved slot refuses to export;
+  when the art is merely still missing it starts `asset_loader.ensure()`
+  and asks the user to retry,
+  because it can no longer wait for the download.
+  `MainWindow` keeps thin same-named methods delegating here,
+  so every caller and test still goes through the window;
+  the functions are deliberately not on `gui/__init__.py`'s `__all__`,
+  since nothing outside the package calls them
+  and `save_project`/`export` would collide conceptually with
+  `storage.save_project` and `renderer.export_project` on a shared facade.
 - `state.py` — the `EditorState` Protocol (`project`, `builds`, `assets`),
   which `MainWindow` satisfies structurally.
 - `placement.py` — `MIN_ZOOM`, `MAX_ZOOM` and `PlacementController`:
@@ -476,7 +513,7 @@ and `storage.py` for persistence.
 `placement.py`, `presets.py`, `state.py` and `lineup.py` are Qt-free and unit-testable on their own;
 so is `history.py`'s `PlacementHistory`,
 though `HistoryController` in the same module is Qt-bound,
-as is all of `dialogs.py` and all of `asset_loader.py`.
+as is all of `dialogs.py`, `project_io.py` and `asset_loader.py`.
 `PlacementController`, `PresetStore` and `AssetLoader` read the window's `project`/`builds`/`assets`
 through `EditorState` on *every* call instead of capturing them at construction time,
 because `_mode_changed`, `open_project`, `load_profile` and `_member_changed`
@@ -491,10 +528,13 @@ Import direction: `lineup`, `style`, `state` and `dialogs` import nothing from t
 and `asset_loader` reaches `download_assets` through `..akasha`);
 `preview`, `team_slots` and `render_job` import nothing from the package
 (`render_job` reaches the renderer through `..renderer`);
+`project_io` imports `state`, `dialogs`, `history` and `asset_loader`,
+and reaches `..models`, `..storage` and `..renderer` outside the package;
 `main_window` imports every sibling except `state`,
 which it satisfies structurally rather than importing,
-and reaches `dialogs` as a module (`from . import dialogs`)
-so the dialog constructors stay patchable in one place;
+and reaches `dialogs` and `project_io` as modules
+(`from . import dialogs, project_io`)
+so the dialog and file-dialog constructors stay patchable in one place;
 `app` imports `main_window`.
 `TeamSlotWidget`'s three drag signals and the `_on_slot_drag_*` handlers that consume them
 are new signals and methods on classes already listed here,

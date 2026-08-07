@@ -4,9 +4,7 @@ drag/wheel/slider placement editing to fetching, preview/export, and persistence
 
 from __future__ import annotations
 
-import contextlib
 import copy
-from datetime import datetime, timezone
 from pathlib import Path
 
 from PIL import Image
@@ -18,7 +16,6 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
-    QFileDialog,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -38,9 +35,8 @@ from PySide6.QtWidgets import (
 
 from ..akasha import AkashaError, AkashaWebClient, Build, StaleProfileError
 from ..models import Asset, Placement, Project
-from ..renderer import export_project, safe_name
-from ..storage import cache_dir, load_profile_cache, load_project, save_profile_cache, save_project
-from . import dialogs
+from ..storage import cache_dir, save_profile_cache
+from . import dialogs, project_io
 from .asset_loader import AssetLoader
 from .history import HistoryController
 from .lineup import parse_lineup
@@ -671,95 +667,14 @@ class MainWindow(QMainWindow):
             self._dispatch_render()
 
     def export(self) -> None:
-        try:
-            self.validate_team()
-            if set(self.selected_name_keys()) - set(self.assets):
-                # The download can no longer be awaited here, so start it and
-                # let the user come back once the preview has filled in.
-                self.asset_loader.ensure()
-                dialogs.show_error(self, "Character art is still downloading", "Try the export again in a moment.")
-                return
-            stem = safe_name(self.output_name.text().strip() or "genshin_thumbnail")
-            default_dir = self.project_path.parent if self.project_path else Path.cwd()
-            target = dialogs.ask_export_target(self, self.project.mode, default_dir, stem)
-            if target is None:
-                return
-            directory, chosen_stem = target
-            stem = safe_name(chosen_stem)
-            self.output_name.setText(stem)
-            self.project.output_name = stem
-            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            written = export_project(self.project, self.assets, directory)
-            dialogs.show_export_finished(self, written)
-            self.statusBar().showMessage(f"Exported {len(written)} thumbnail(s)", 7000)
-        except Exception as error:
-            dialogs.show_error(self, "Export failed", error)
-        finally:
-            QApplication.restoreOverrideCursor()
+        project_io.export(self, self)
 
     def is_dirty(self) -> bool:
         """Whether the project differs from what was last saved, loaded, or started blank."""
         return self.project != self.saved_snapshot
 
     def save_project(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(self, "Save project", "thumbnail-project.json", "JSON (*.json)")
-        if not path:
-            return
-        with contextlib.suppress(ValueError):
-            self.validate_team()
-        self.project.uid = self.uid_edit.text().strip()
-        self.project.output_name = self.output_name.text().strip() or "genshin_thumbnail"
-        save_project(self.project, Path(path))
-        self.project_path = Path(path)
-        self.saved_snapshot = copy.deepcopy(self.project)
-        self.statusBar().showMessage("Project saved", 5000)
+        project_io.save_project(self, self)
 
     def open_project(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Open project", "", "JSON (*.json)")
-        if not path:
-            return
-        try:
-            project = load_project(Path(path))
-            self.project = project
-            self.project_path = Path(path)
-            self.selected = (project.active_team if project.mode == "stygian" else 0, 0)
-            self.assets = {}
-            self.abyss_radio.blockSignals(True)
-            self.stygian_radio.blockSignals(True)
-            self.abyss_radio.setChecked(project.mode == "abyss")
-            self.stygian_radio.setChecked(project.mode == "stygian")
-            self.abyss_radio.blockSignals(False)
-            self.stygian_radio.blockSignals(False)
-            self.uid_edit.setText(project.uid)
-            self.output_name.setText(project.output_name)
-            self.boss_combo.setVisible(project.mode == "stygian")
-            self.boss_combo.setCurrentIndex(project.active_team)
-            self.rebuild_team_fields()
-            self.sync_controls()
-            cached = load_profile_cache(project.uid)
-            if cached is None:
-                self.statusBar().showMessage(
-                    "Project opened \u00b7 no cached profile found for this UID", 8000
-                )
-                self._history.reset()
-                self.saved_snapshot = copy.deepcopy(self.project)
-                return
-            builds, last_update = cached
-            self.builds = {build.name.casefold(): build for build in builds}
-            self.populate_combo_items()
-            age_minutes = max(0.0, (datetime.now(timezone.utc) - last_update).total_seconds() / 60)
-            local = last_update.astimezone().strftime("%Y-%m-%d %H:%M")
-            self.profile_status.setText(
-                f"{len(builds)} builds · from cache · last updated {local} · {age_minutes:.0f} min ago"
-            )
-            self.asset_loader.ensure()
-            self.schedule_render()
-            if age_minutes > 60 and dialogs.confirm_cache_refresh(self, age_minutes):
-                self.load_profile()
-                if self.builds:
-                    self.asset_loader.ensure()
-            self._history.reset()
-            self.saved_snapshot = copy.deepcopy(self.project)
-            self.statusBar().showMessage("Project opened", 5000)
-        except Exception as error:
-            dialogs.show_error(self, "Could not open project", error)
+        project_io.open_project(self, self, self._history)

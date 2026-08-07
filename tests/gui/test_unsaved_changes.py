@@ -6,7 +6,7 @@ from typing import ClassVar
 import pytest
 from PySide6.QtWidgets import QMessageBox
 
-from genshin_thumbnail_studio.gui import MainWindow, dialogs, main_window
+from genshin_thumbnail_studio.gui import MainWindow, dialogs, project_io
 
 from .helpers import qapp
 
@@ -94,7 +94,7 @@ def test_closing_a_dirty_window_and_discarding_closes_without_saving(
     DecisionMessageBox.choice = "discard"
     monkeypatch.setattr(dialogs, "QMessageBox", DecisionMessageBox)
     monkeypatch.setattr(
-        main_window.QFileDialog,
+        project_io.QFileDialog,
         "getSaveFileName",
         staticmethod(lambda *args, **kwargs: pytest.fail("must not be called")),
     )
@@ -115,7 +115,7 @@ def test_closing_a_dirty_window_and_saving_writes_the_project_then_closes(
     monkeypatch.setattr(dialogs, "QMessageBox", DecisionMessageBox)
     path = tmp_path / "thumbnail-project.json"
     monkeypatch.setattr(
-        main_window.QFileDialog, "getSaveFileName", staticmethod(lambda *args, **kwargs: (str(path), ""))
+        project_io.QFileDialog, "getSaveFileName", staticmethod(lambda *args, **kwargs: (str(path), ""))
     )
     window = MainWindow()
     window.project.teams[0][0].offset_x = 0.3
@@ -134,7 +134,7 @@ def test_closing_and_choosing_save_but_cancelling_the_file_dialog_keeps_the_wind
     DecisionMessageBox.choice = "save"
     monkeypatch.setattr(dialogs, "QMessageBox", DecisionMessageBox)
     monkeypatch.setattr(
-        main_window.QFileDialog, "getSaveFileName", staticmethod(lambda *args, **kwargs: ("", ""))
+        project_io.QFileDialog, "getSaveFileName", staticmethod(lambda *args, **kwargs: ("", ""))
     )
     window = MainWindow()
     window.project.teams[0][0].offset_x = 0.3
@@ -211,7 +211,7 @@ def test_switching_mode_with_unsaved_changes_and_saving_saves_then_switches(
     monkeypatch.setattr(dialogs, "QMessageBox", DecisionMessageBox)
     path = tmp_path / "thumbnail-project.json"
     monkeypatch.setattr(
-        main_window.QFileDialog, "getSaveFileName", staticmethod(lambda *args, **kwargs: (str(path), ""))
+        project_io.QFileDialog, "getSaveFileName", staticmethod(lambda *args, **kwargs: (str(path), ""))
     )
     window = MainWindow()
     window.project.teams[0][0].offset_x = 0.3
