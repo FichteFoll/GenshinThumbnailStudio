@@ -17,6 +17,9 @@ QPushButton:pressed { background: #25272d; }
 QToolButton { background: #30333b; border: 1px solid #515561; padding: 7px 10px; }
 QToolButton:hover { background: #3a3e48; border-color: #777d8b; }
 QToolButton:pressed { background: #25272d; }
+/* Once the tool button is stylesheet-rendered it stops drawing the divider
+   between its main and its arrow section for itself, so ::menu-button has to. */
+QToolButton::menu-button { width: 16px; border-left: 1px solid #515561; }
 QRadioButton { spacing: 6px; }
 QSlider::groove:horizontal { height: 4px; background: #454954; }
 QSlider::handle:horizontal { width: 14px; margin: -5px 0; background: #ffd95d; border-radius: 7px; }

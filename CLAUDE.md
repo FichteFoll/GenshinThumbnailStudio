@@ -292,8 +292,11 @@ and `storage.py` for persistence.
   because the save button is a `QToolButton` for its dropdown
   and has to look like the buttons around it;
   change the two together.
+  Its `QToolButton::menu-button` rule is not cosmetic:
+  once the tool button is stylesheet-rendered
+  it stops drawing the divider between its main and its arrow section for itself.
 - `main_window.py` — `RENDER_THROTTLE_MS`, `RESOLUTION_OPTIONS` and `MainWindow`.
-  At 746 lines this is still the largest module,
+  At 750 lines this is still the largest module,
   and the one most of `tests/gui/` exercises:
   what is left of it (`load_profile`, the placement editing, the render throttle)
   is Qt-bound throughout,
@@ -329,10 +332,18 @@ and `storage.py` for persistence.
   and a menu repeating it would be noise
   (`Ctrl+Shift+S` still works, the action being registered on the window).
   It is called from `_build_ui`'s end and from `set_project_path()`,
-  which is the single write path for `project_path` precisely so that
-  no transition can miss the update:
+  which is the single write path for `project_path` after construction
+  precisely so that no transition can miss the update:
   not opening, not saving, not saving as,
   and not `_mode_changed` clearing it.
+  (`__init__`'s own `self.project_path = None` cannot go through it,
+  the buttons not existing yet,
+  which is what the call at `_build_ui`'s end covers.)
+  The save button also takes its height from `open_button` there,
+  once the stylesheet both size against is applied,
+  because a `QToolButton` derives a taller box than a `QPushButton`
+  from the same padding
+  and the row would otherwise read as misaligned.
   The preview renders continuously rather than on demand:
   `schedule_render()` starts its throttle timer whether or not any art has been downloaded,
   `__init__` schedules the first render itself,
@@ -564,7 +575,7 @@ though `HistoryController` in the same module is Qt-bound,
 as is all of `dialogs.py`, `project_io.py` and `asset_loader.py`.
 `PlacementController`, `PresetStore` and `AssetLoader` read the window's `project`/`builds`/`assets`
 through `EditorState` on *every* call instead of capturing them at construction time,
-because `_mode_changed`, `open_project`, `load_profile` and `_member_changed`
+because `_mode_changed`, `project_io.open_project`, `load_profile` and `_member_changed`
 all replace those attributes wholesale;
 a captured reference would go stale,
 and a stale `assets` would silently fall back to `STANDARD_ART_SIZE`

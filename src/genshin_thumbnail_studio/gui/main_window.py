@@ -318,6 +318,10 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Ready")
 
         self.setStyleSheet(MAIN_STYLESHEET)
+        # A QToolButton derives a taller box than a QPushButton from the same
+        # stylesheet padding, so the save button takes its height from the
+        # button beside it, once the stylesheet both of them size against is on.
+        self.save_button.setFixedHeight(self.open_button.sizeHint().height())
         self._update_save_button()
 
     @staticmethod

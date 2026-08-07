@@ -5,9 +5,11 @@ These build a real `MainWindow`, so they need the offscreen platform that
 """
 
 from pathlib import Path
+from typing import cast
 
 import pytest
 from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtWidgets import QAbstractButton, QToolButton
 
 from genshin_thumbnail_studio.gui import MainWindow, dialogs, project_io
 
@@ -49,6 +51,32 @@ def test_each_project_shortcut_triggers_the_action_it_names(
     # gains the focus real key delivery needs.
     monkeypatch.setattr(window, method, record)
     _action_for(window, sequence).trigger()
+
+    assert calls == [method]
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+@pytest.mark.parametrize(
+    ("button", "method"),
+    [("open_button", "open_project"), ("save_button", "save_project"), ("export_button", "export")],
+)
+def test_each_project_button_runs_the_flow_its_action_names(
+    button: str, method: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+    calls: list[str] = []
+
+    def record() -> None:
+        calls.append(method)
+
+    monkeypatch.setattr(window, method, record)
+    # The save button's main section has to save rather than drop the menu,
+    # which is what MenuButtonPopup buys over InstantPopup.
+    assert window.save_button.popupMode() == QToolButton.ToolButtonPopupMode.MenuButtonPopup
+    cast(QAbstractButton, getattr(window, button)).click()
 
     assert calls == [method]
 
