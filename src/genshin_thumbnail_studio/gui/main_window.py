@@ -393,7 +393,7 @@ class MainWindow(QMainWindow):
             return
         uid = self.uid_edit.text().strip()
         self.project = Project.blank(mode, uid)
-        self.project_path = None
+        self.set_project_path(None)
         self.assets = {}
         self.selected = (0, 0)
         self.boss_combo.setVisible(mode == "stygian")
@@ -673,8 +673,16 @@ class MainWindow(QMainWindow):
         """Whether the project differs from what was last saved, loaded, or started blank."""
         return self.project != self.saved_snapshot
 
+    def set_project_path(self, path: Path | None) -> None:
+        """The single write path for `project_path`, so nothing that has to
+        follow a change of it can be missed at an assignment site."""
+        self.project_path = path
+
     def save_project(self) -> None:
         project_io.save_project(self, self)
+
+    def save_project_as(self) -> None:
+        project_io.save_project_as(self, self)
 
     def open_project(self) -> None:
         project_io.open_project(self, self, self._history)

@@ -63,18 +63,33 @@ class ProjectEditor(EditorState, Protocol):
     def populate_combo_items(self) -> None: ...
     def schedule_render(self) -> None: ...
     def load_profile(self) -> None: ...
+    def set_project_path(self, path: Path | None) -> None: ...
 
 
 def save_project(parent: QMainWindow, editor: ProjectEditor) -> None:
-    path, _ = QFileDialog.getSaveFileName(parent, "Save project", "thumbnail-project.json", "JSON (*.json)")
+    """Overwrite the project's own file, or ask for one when it has none."""
+    if editor.project_path is None:
+        save_project_as(parent, editor)
+        return
+    _write_project(parent, editor, editor.project_path)
+
+
+def save_project_as(parent: QMainWindow, editor: ProjectEditor) -> None:
+    """Ask for a path, write there, and adopt it as the project's file."""
+    default = str(editor.project_path or "thumbnail-project.json")
+    path, _ = QFileDialog.getSaveFileName(parent, "Save project", default, "JSON (*.json)")
     if not path:
         return
+    _write_project(parent, editor, Path(path))
+
+
+def _write_project(parent: QMainWindow, editor: ProjectEditor, path: Path) -> None:
     with contextlib.suppress(ValueError):
         editor.validate_team()
     editor.project.uid = editor.uid_edit.text().strip()
     editor.project.output_name = editor.output_name.text().strip() or "genshin_thumbnail"
-    storage.save_project(editor.project, Path(path))
-    editor.project_path = Path(path)
+    storage.save_project(editor.project, path)
+    editor.set_project_path(path)
     editor.saved_snapshot = copy.deepcopy(editor.project)
     parent.statusBar().showMessage("Project saved", 5000)
 
@@ -86,7 +101,7 @@ def open_project(parent: QMainWindow, editor: ProjectEditor, history: HistoryCon
     try:
         project = storage.load_project(Path(path))
         editor.project = project
-        editor.project_path = Path(path)
+        editor.set_project_path(Path(path))
         editor.selected = (project.active_team if project.mode == "stygian" else 0, 0)
         editor.assets = {}
         editor.abyss_radio.blockSignals(True)
