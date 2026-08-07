@@ -108,6 +108,11 @@ class MainWindow(QMainWindow):
         self._rebuild_team_fields()
         self._sync_controls()
         self._save_current_preset()
+        # A restore can bring back a name whose art `_member_changed` pruned,
+        # and it reaches the combos before their signals are connected, so it
+        # goes through neither that handler nor its `ensure()`. Without this the
+        # slot would stay a placeholder for good: inert, and refusing to export.
+        self._asset_loader.ensure()
         self.schedule_render()
 
     def closeEvent(self, event: QCloseEvent) -> None:
@@ -609,6 +614,10 @@ class MainWindow(QMainWindow):
         return list(unique.values())
 
     def _on_asset_ready(self, key: str, asset: Asset) -> None:
+        # A download outliving `waitForDone(2000)` lands here during teardown,
+        # where touching the widgets `_sync_controls()` drives is pointless.
+        if self._closing:
+            return
         self.assets[key] = asset
         for team in self.project.teams:
             for member in team:

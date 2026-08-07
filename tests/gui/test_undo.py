@@ -328,6 +328,37 @@ def test_no_debounce_is_left_pending_during_a_slot_drag(
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
+def test_undoing_back_to_a_name_re_requests_its_art(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A restored name must not leave its slot a placeholder for good.
+
+    Clearing a name prunes its `Asset`, and a restore writes the name onto the
+    combos before their signals are connected, so it reaches neither
+    `_member_changed` nor the `ensure()` at its end. Without a call of its own
+    the slot would stay inert and refuse to export, with nothing downloading.
+    """
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = _window_with_history_baseline(tmp_path)
+    restored: list[list[str]] = []
+    monkeypatch.setattr(
+        window._asset_loader, "ensure", lambda: restored.append(sorted(window._selected_name_keys()))
+    )
+
+    window._member_changed(0, 0, "")
+    window._history.commit_now()
+    assert window.assets == {}
+    restored.clear()
+
+    window._history.undo()
+
+    assert window.current_member().name == TEAM_NAMES[0]
+    assert restored == [sorted(name.casefold() for name in TEAM_NAMES)]
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
 def test_art_arriving_mid_drag_leaves_the_debounce_disarmed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

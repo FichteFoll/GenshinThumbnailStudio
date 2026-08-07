@@ -214,11 +214,12 @@ def test_closing_the_window_stops_rendering(tmp_path: Path, monkeypatch: pytest.
 
     window.schedule_render()
     window._dispatch_render()
-    # A late asset still stores itself, but must not revive the render loop.
+    # A download can outlive the drain and land here mid-teardown.
     window._on_asset_ready("furina", create_test_assets(tmp_path / "assets", ["Furina"])["furina"])
 
     assert not window._render_timer.isActive()
     assert started_jobs == []
+    assert window.assets == {}
 
 
 def test_arriving_art_makes_its_slot_editable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
