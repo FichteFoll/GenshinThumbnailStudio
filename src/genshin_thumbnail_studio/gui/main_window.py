@@ -5,12 +5,13 @@ drag/wheel/slider placement editing to fetching, preview/export, and persistence
 from __future__ import annotations
 
 import copy
+from collections.abc import Callable
 from pathlib import Path
 
 from PIL import Image
 from PIL.ImageQt import ImageQt
 from PySide6.QtCore import Qt, QThreadPool, QTimer
-from PySide6.QtGui import QCloseEvent, QPixmap
+from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -23,12 +24,14 @@ from PySide6.QtWidgets import (
     QLayout,
     QLineEdit,
     QMainWindow,
+    QMenu,
     QPushButton,
     QRadioButton,
     QScrollArea,
     QSlider,
     QSplitter,
     QStyle,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -126,7 +129,51 @@ class MainWindow(QMainWindow):
         self.client.close()
         super().closeEvent(event)
 
+    def _action(self, text: str, sequence: str, handler: Callable[[], None]) -> QAction:
+        """A window-wide action for one of the project file flows.
+
+        Registered on the window with `addAction()`, so its shortcut fires
+        wherever the focus is. Deliberately a `QAction` and not a `QShortcut`
+        like `history.py` uses: the "Save as..." menu entry needs an action
+        anyway, and a sequence bound to both would be ambiguous and fire
+        neither. Callers pass a lambda rather than a bound method, so the
+        dispatch stays late-bound and replacing the method on the instance
+        replaces what fires.
+        """
+        action = QAction(text, self)
+        action.setShortcut(QKeySequence(sequence))
+        action.triggered.connect(handler)
+        self.addAction(action)
+        return action
+
+    def _build_actions(self) -> None:
+        self.open_action = self._action("Open project", "Ctrl+O", lambda: self.open_project())
+        self.save_action = self._action("Save project", "Ctrl+S", lambda: self.save_project())
+        self.save_as_action = self._action("Save as...", "Ctrl+Shift+S", lambda: self.save_project_as())
+        self.export_action = self._action("Export PNG", "Ctrl+E", lambda: self.export())
+        self._save_menu = QMenu(self)
+        self._save_menu.addAction(self.save_as_action)
+
+    def _update_save_button(self) -> None:
+        """Show whether saving overwrites a file or asks for one.
+
+        Driven from `set_project_path()`, the single write path for
+        `project_path`, so no transition can miss it.
+        """
+        path = self.project_path
+        self.save_action.setText("Save project" if path else "Save project as...")
+        self.save_action.setToolTip(f"Save {path.name} (Ctrl+S)" if path else "Save project as... (Ctrl+S)")
+        self.save_button.setText(self.save_action.text())
+        self.save_button.setToolTip(self.save_action.toolTip())
+        # Without a file to overwrite the button already *is* "save as", so a
+        # menu repeating it would be noise; Ctrl+Shift+S still works, because
+        # the action is registered on the window rather than only on the menu.
+        # Detaching takes a null menu, which Qt documents but the PySide6 stub
+        # does not admit, so the argument type has to be waived here.
+        self.save_button.setMenu(self._save_menu if path else None)  # pyright: ignore[reportArgumentType]
+
     def _build_ui(self) -> None:
+        self._build_actions()
         splitter = QSplitter(Qt.Orientation.Horizontal)
         self.setCentralWidget(splitter)
 
@@ -190,16 +237,25 @@ class MainWindow(QMainWindow):
         controls_layout.addLayout(output_form)
 
         project_row = QHBoxLayout()
-        open_button = QPushButton(self._icon(QStyle.StandardPixmap.SP_DialogOpenButton), "Open project")
-        save_button = QPushButton(self._icon(QStyle.StandardPixmap.SP_DialogSaveButton), "Save project")
-        open_button.clicked.connect(self.open_project)
-        save_button.clicked.connect(self.save_project)
-        project_row.addWidget(open_button)
-        project_row.addWidget(save_button)
+        self.open_button = QPushButton(self._icon(QStyle.StandardPixmap.SP_DialogOpenButton), "Open project")
+        self.open_button.setToolTip("Open project (Ctrl+O)")
+        self.open_button.clicked.connect(self.open_action.trigger)
+        # A QToolButton, so its arrow section can open the "Save as..." menu
+        # while the main section still saves; _update_save_button() fills in
+        # the caption, the tooltip and whether the menu is attached at all.
+        self.save_button = QToolButton()
+        self.save_button.setIcon(self._icon(QStyle.StandardPixmap.SP_DialogSaveButton))
+        self.save_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.save_button.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
+        self.save_button.setSizePolicy(self.open_button.sizePolicy())
+        self.save_button.clicked.connect(self.save_action.trigger)
+        project_row.addWidget(self.open_button)
+        project_row.addWidget(self.save_button)
         controls_layout.addLayout(project_row)
 
         self.export_button = QPushButton(self._icon(QStyle.StandardPixmap.SP_DialogSaveButton), "Export PNG")
-        self.export_button.clicked.connect(self.export)
+        self.export_button.setToolTip("Export PNG (Ctrl+E)")
+        self.export_button.clicked.connect(self.export_action.trigger)
         controls_layout.addWidget(self.export_button)
 
         right = QWidget()
@@ -262,6 +318,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Ready")
 
         self.setStyleSheet(MAIN_STYLESHEET)
+        self._update_save_button()
 
     @staticmethod
     def _slider(minimum: int, maximum: int, value: int) -> QSlider:
@@ -677,6 +734,7 @@ class MainWindow(QMainWindow):
         """The single write path for `project_path`, so nothing that has to
         follow a change of it can be missed at an assignment site."""
         self.project_path = path
+        self._update_save_button()
 
     def save_project(self) -> None:
         project_io.save_project(self, self)

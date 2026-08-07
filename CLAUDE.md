@@ -287,14 +287,52 @@ and `storage.py` for persistence.
 - `app.py` — `run()`,
   the entry point behind `pyproject.toml`'s `gui-scripts`, `__main__.py` and `launch.py`.
 - `style.py` — `MAIN_STYLESHEET`, the whole application's QSS, applied once to the main window.
+  Its `QToolButton` rule pairs with the `QPushButton` one
+  and repeats the same colors, border and padding,
+  because the save button is a `QToolButton` for its dropdown
+  and has to look like the buttons around it;
+  change the two together.
 - `main_window.py` — `RENDER_THROTTLE_MS`, `RESOLUTION_OPTIONS` and `MainWindow`.
-  At 680 lines this is still the largest module,
+  At 746 lines this is still the largest module,
   and the one most of `tests/gui/` exercises:
   what is left of it (`load_profile`, the placement editing, the render throttle)
   is Qt-bound throughout,
   so it was not decomposed further
   beyond moving the blocking dialogs to `dialogs.py`
   and the project file flows to `project_io.py`.
+  The project file actions are four `QAction`s built by `_build_actions()`,
+  registered on the window with `addAction()` so their shortcuts fire window-wide:
+  `open_action` (`Ctrl+O`), `save_action` (`Ctrl+S`),
+  `save_as_action` (`Ctrl+Shift+S`) and `export_action` (`Ctrl+E`).
+  They are `QAction`s rather than the `QShortcut`s `history.py` uses,
+  because the "Save as..." menu entry needs an action anyway
+  and a `QMenu` renders an action's shortcut in the item itself;
+  a sequence bound to both a `QShortcut` and a `QAction` is ambiguous
+  and fires neither,
+  so these four must not also get `QShortcut`s.
+  Each action dispatches through a lambda rather than a bound method,
+  so a test that replaces the method on the instance replaces what fires.
+  `self.open_button` and `self.export_button` are `QPushButton`s
+  whose `clicked` triggers the matching action,
+  and each names its sequence in its tooltip;
+  `self.save_button` is a `QToolButton`
+  in `QToolButton.ToolButtonPopupMode.MenuButtonPopup`,
+  so its main section triggers `save_action`
+  while its arrow section opens `self._save_menu`,
+  which holds `save_as_action`.
+  `_update_save_button()` keeps that button in step with `project_path`:
+  with a file it reads "Save project"
+  and carries the menu,
+  without one it reads "Save project as..."
+  and carries no menu,
+  since the primary button already *is* "save as" then
+  and a menu repeating it would be noise
+  (`Ctrl+Shift+S` still works, the action being registered on the window).
+  It is called from `_build_ui`'s end and from `set_project_path()`,
+  which is the single write path for `project_path` precisely so that
+  no transition can miss the update:
+  not opening, not saving, not saving as,
+  and not `_mode_changed` clearing it.
   The preview renders continuously rather than on demand:
   `schedule_render()` starts its throttle timer whether or not any art has been downloaded,
   `__init__` schedules the first render itself,
@@ -399,7 +437,7 @@ and `storage.py` for persistence.
   the patch itself lands on `QFileDialog`'s class attribute either way.
 - `project_io.py` — reading and writing the project's files:
   the JSON project itself and the exported PNGs.
-  `save_project()`, `open_project()` and `export()`,
+  `save_project()`, `save_project_as()`, `open_project()` and `export()`,
   as free functions rather than `MainWindow` methods,
   so nothing here imports the window and the package stays acyclic,
   the same reason `dialogs.py` gives.
@@ -416,9 +454,19 @@ and `storage.py` for persistence.
   `uid_edit`, `output_name`, `profile_status`,
   `abyss_radio`, `stygian_radio`, `boss_combo`,
   and the `validate_team`/`selected_name_keys`/`rebuild_team_fields`/
-  `sync_controls`/`populate_combo_items`/`schedule_render`/`load_profile` methods);
+  `sync_controls`/`populate_combo_items`/`schedule_render`/`load_profile`/
+  `set_project_path` methods);
   it lives here rather than in `state.py`,
   which is Qt-free and must stay that way.
+  `save_project()` overwrites `project_path` without asking
+  and falls through to `save_project_as()` only when there is none;
+  `save_project_as()` asks for a path,
+  defaulting to the current one,
+  and adopts the answer.
+  Both write through the shared `_write_project()`,
+  which is also the only place that calls `editor.set_project_path()`
+  besides `open_project()`,
+  so the window's save button cannot fall out of step with the file it saves to.
   `export()` still runs `validate_team()`,
   so an unresolved slot refuses to export;
   when the art is merely still missing it starts `asset_loader.ensure()`
