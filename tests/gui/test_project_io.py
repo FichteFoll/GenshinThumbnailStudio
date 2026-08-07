@@ -228,7 +228,7 @@ def _prepare_export_window(window: MainWindow, tmp_path: Path, names: list[str])
     assets = create_test_assets(tmp_path / "assets", names)
     window.builds = {key: asset.build for key, asset in assets.items()}
     fill_window_teams(window, names)
-    window._rebuild_team_fields()
+    window.rebuild_team_fields()
     window.assets = assets
 
 
@@ -403,7 +403,7 @@ def test_opening_a_project_takes_its_dirty_baseline_before_the_art_arrives(
     monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
     window, _ = prepare_cached_open(tmp_path, monkeypatch, datetime.now(timezone.utc) - timedelta(minutes=5))
 
-    # Inside the range `_sync_controls()` clamps to, so the assertions below
+    # Inside the range `sync_controls()` clamps to, so the assertions below
     # read the preset back rather than the reachable maximum.
     reframed = 0.1
 

@@ -146,7 +146,7 @@ def _window_with_assets(tmp_path: Path, names: list[str]) -> MainWindow:
     return window
 
 
-# ``_sync_controls`` writes the integer slider values back onto the member, so
+# ``sync_controls`` writes the integer slider values back onto the member, so
 # every offset is quantized to per-mille of the panel, a step of at most 0.5
 # canvas pixels and hence a rounding error of at most half that.
 OFFSET_TOLERANCE = 0.001
@@ -243,7 +243,7 @@ def test_sync_controls_shows_the_flip_without_writing_it_back(tmp_path: Path, mo
     # value. Only the write side proves the handler did not run.
     writes: list[int] = []
     monkeypatch.setattr(window, "_save_current_preset", lambda: writes.append(1))
-    window._sync_controls()
+    window.sync_controls()
 
     assert window.flip_check.isChecked() is True
     assert window.current_member().flip is True

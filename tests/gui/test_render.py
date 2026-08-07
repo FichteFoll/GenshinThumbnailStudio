@@ -226,7 +226,7 @@ def test_arriving_art_makes_its_slot_editable(tmp_path: Path, monkeypatch: pytes
     """A portrait the user cannot touch is not what the download was for.
 
     The placement controls and the preview's inert-slot set are both derived in
-    `_sync_controls()`, so an asset arriving outside any edit handler has to
+    `sync_controls()`, so an asset arriving outside any edit handler has to
     trigger one or the slot keeps behaving like the placeholder it just stopped
     being.
     """

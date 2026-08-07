@@ -300,7 +300,7 @@ and `storage.py` for persistence.
   and the window always shows something.
   There is no "Generate preview" button and no blocking download on the GUI thread:
   the window owns an `AssetLoader`
-  (`self._asset_loader`, created right after `self._thread_pool` and sharing that pool),
+  (`self.asset_loader`, created right after `self._thread_pool` and sharing that pool),
   whose `asset_ready` feeds `_on_asset_ready`,
   whose `progress` writes to the status bar,
   and whose `failed` writes to it with an 8000 ms timeout
@@ -313,20 +313,20 @@ and `storage.py` for persistence.
   because an undo can bring back a name whose art `_member_changed` pruned
   and it writes the combos before their signals are connected,
   so it reaches neither that handler nor the `ensure()` at its end.
-  `export()` still runs `_validate_team()`,
+  `export()` still runs `validate_team()`,
   so an unresolved slot refuses to export;
   when the art is merely still missing it starts `ensure()` and asks the user to retry,
   because it can no longer wait for the download.
   `_filled_slots()` returns the `(team, slot)` pairs
   whose member name is non-empty and casefolds into `self.assets`,
   i.e. the slots that render a portrait rather than a placeholder;
-  `_sync_controls()` passes it to `PreviewWidget.set_context()`
+  `sync_controls()` passes it to `PreviewWidget.set_context()`
   and enables or disables `x_slider`, `y_slider`, `zoom_slider`, `flip_check` and `reset_button`
   on whether the selection is in it,
   so a placeholder selected through the team fields cannot be edited either,
   and `drag_placement`/`change_zoom` early-return on the same check
   so the programmatic path cannot pan a placeholder or record an undo step for a no-op edit.
-  `_on_asset_ready` bails on `_closing` and otherwise calls `_sync_controls()` for that reason too:
+  `_on_asset_ready` bails on `_closing` and otherwise calls `sync_controls()` for that reason too:
   re-deriving `_filled_slots()` is what turns the slot whose art just arrived
   from an inert placeholder into an editable portrait,
   and without it the canvas would show a character the user could not click, drag or zoom.
@@ -463,7 +463,7 @@ and `storage.py` for persistence.
   `undo()`/`redo()` restore a state onto `state.project.teams`
   and call the `on_restored` callback the window passes in,
   then `replace_current()` the result:
-  `_history_restored()` runs `_sync_controls()`, which quantizes every offset to per-mille,
+  `_history_restored()` runs `sync_controls()`, which quantizes every offset to per-mille,
   and without recording that normalized form
   the next `commit_now()` would read the quantization as a fresh edit and truncate the redo tail.
   It installs `Ctrl+Z` (undo), `Ctrl+Y` and `Ctrl+Shift+Z` (redo) as `QShortcut`s on its parent widget,

@@ -84,10 +84,10 @@ class MainWindow(QMainWindow):
         self._render_timer.setSingleShot(True)
         self._render_timer.timeout.connect(self._dispatch_render)
         self._thread_pool = QThreadPool(self)
-        self._asset_loader = AssetLoader(self, cache_dir() / "assets", self._thread_pool, self)
-        self._asset_loader.asset_ready.connect(self._on_asset_ready)
-        self._asset_loader.progress.connect(self.statusBar().showMessage)
-        self._asset_loader.failed.connect(self._on_asset_download_failed)
+        self.asset_loader = AssetLoader(self, cache_dir() / "assets", self._thread_pool, self)
+        self.asset_loader.asset_ready.connect(self._on_asset_ready)
+        self.asset_loader.progress.connect(self.statusBar().showMessage)
+        self.asset_loader.failed.connect(self._on_asset_download_failed)
         self._render_token = 0
         self._render_job_running = False
         self._render_stale = False
@@ -95,9 +95,9 @@ class MainWindow(QMainWindow):
         self.client = AkashaWebClient(cache_dir())
         self.team_combos: list[list[QComboBox]] = []
         self._build_ui()
-        self._rebuild_team_fields()
-        self._sync_controls()
-        self._saved_snapshot = copy.deepcopy(self.project)
+        self.rebuild_team_fields()
+        self.sync_controls()
+        self.saved_snapshot = copy.deepcopy(self.project)
         self.schedule_render()  # Through the throttle, so no render runs in the constructor.
 
     def _icon(self, standard: QStyle.StandardPixmap):
@@ -105,14 +105,14 @@ class MainWindow(QMainWindow):
 
     def _history_restored(self) -> None:
         """Show the teams an undo or redo just put back on the project."""
-        self._rebuild_team_fields()
-        self._sync_controls()
+        self.rebuild_team_fields()
+        self.sync_controls()
         self._save_current_preset()
         # A restore can bring back a name whose art `_member_changed` pruned,
         # and it reaches the combos before their signals are connected, so it
         # goes through neither that handler nor its `ensure()`. Without this the
         # slot would stay a placeholder for good: inert, and refusing to export.
-        self._asset_loader.ensure()
+        self.asset_loader.ensure()
         self.schedule_render()
 
     def closeEvent(self, event: QCloseEvent) -> None:
@@ -230,7 +230,7 @@ class MainWindow(QMainWindow):
 
         placement_row = QHBoxLayout()
         self.selected_label = QLabel("Team 1, character 1")
-        # Placeholder offset ranges; _sync_controls() sets the reachable ones.
+        # Placeholder offset ranges; sync_controls() sets the reachable ones.
         self.x_slider = self._slider(-500, 500, 0)
         self.y_slider = self._slider(-500, 500, -20)
         self.zoom_slider = self._slider(70, 180, 100)
@@ -288,7 +288,7 @@ class MainWindow(QMainWindow):
                 if sub_layout:
                     self._clear_layout(sub_layout)
 
-    def _rebuild_team_fields(self) -> None:
+    def rebuild_team_fields(self) -> None:
         self._clear_layout(self.team_layout)
         self.team_combos = []
         for team_index, team in enumerate(self.project.teams):
@@ -319,7 +319,7 @@ class MainWindow(QMainWindow):
             self.team_layout.addLayout(rows)
             self.team_combos.append(row_combos)
         self.team_layout.addStretch(1)
-        self._populate_combo_items()
+        self.populate_combo_items()
 
     def _refresh_slot_display(self) -> None:
         for team_index, row in enumerate(self.team_combos):
@@ -347,7 +347,7 @@ class MainWindow(QMainWindow):
         if not accepted and self._drag_snapshot is not None:
             self.project.teams = self._drag_snapshot
             self._refresh_slot_display()
-            self._sync_controls()
+            self.sync_controls()
             self.schedule_render()
         self._drag_snapshot = None
         self._drag_position = None
@@ -368,7 +368,7 @@ class MainWindow(QMainWindow):
                 team[slot_index] = members[team_index * per_team + slot_index]
         self._refresh_slot_display()
         self.selected = target
-        self._sync_controls()
+        self.sync_controls()
         self.schedule_render()
         if self._drag_position is None:
             self._history.commit_now()
@@ -376,7 +376,7 @@ class MainWindow(QMainWindow):
         # in one go, and a debounce that fired while the user lingered over a
         # slot would record an arrangement that a cancelled drag then reverts.
 
-    def _populate_combo_items(self) -> None:
+    def populate_combo_items(self) -> None:
         names = [build.name for build in sorted(self.builds.values(), key=lambda item: item.name.casefold())]
         for row in self.team_combos:
             for combo in row:
@@ -401,11 +401,11 @@ class MainWindow(QMainWindow):
         self.assets = {}
         self.selected = (0, 0)
         self.boss_combo.setVisible(mode == "stygian")
-        self._rebuild_team_fields()
-        self._sync_controls()
+        self.rebuild_team_fields()
+        self.sync_controls()
         self.schedule_render()
         self._history.reset()
-        self._saved_snapshot = copy.deepcopy(self.project)
+        self.saved_snapshot = copy.deepcopy(self.project)
 
     def _output_name_changed(self, value: str) -> None:
         self.project.output_name = value
@@ -420,7 +420,7 @@ class MainWindow(QMainWindow):
             return
         self.project.active_team = max(0, index)
         self.selected = (self.project.active_team, self.selected[1])
-        self._sync_controls()
+        self.sync_controls()
         self.schedule_render()
 
     def _member_changed(self, team: int, slot: int, name: str) -> None:
@@ -429,13 +429,13 @@ class MainWindow(QMainWindow):
         member.name = name.strip()
         if member.name and member.name.casefold() != old_name.casefold():
             self._presets.apply_to(self, member)
-        self.assets = {key: value for key, value in self.assets.items() if key in self._selected_name_keys()}
-        self._sync_controls()
+        self.assets = {key: value for key, value in self.assets.items() if key in self.selected_name_keys()}
+        self.sync_controls()
         self._history.schedule()
-        self._asset_loader.ensure()
+        self.asset_loader.ensure()
         self.schedule_render()
 
-    def _selected_name_keys(self) -> set[str]:
+    def selected_name_keys(self) -> set[str]:
         return {member.name.casefold() for team in self.project.teams for member in team if member.name}
 
     def _save_current_preset(self) -> None:
@@ -456,9 +456,9 @@ class MainWindow(QMainWindow):
 
     def select_slot(self, team: int, slot: int) -> None:
         self.selected = (team, slot)
-        self._sync_controls()
+        self.sync_controls()
 
-    def _sync_controls(self) -> None:
+    def sync_controls(self) -> None:
         team, slot = self.selected
         team = min(team, len(self.project.teams) - 1)
         slot = min(slot, 3)
@@ -501,7 +501,7 @@ class MainWindow(QMainWindow):
         member.offset_y = self.y_slider.value() / 1000
         member.zoom = self.zoom_slider.value() / 100
         self._save_current_preset()
-        self._sync_controls()
+        self.sync_controls()
         self.schedule_render()
         self._history.schedule()
 
@@ -510,7 +510,7 @@ class MainWindow(QMainWindow):
             return
         self.current_member().flip = checked
         self._save_current_preset()
-        self._sync_controls()
+        self.sync_controls()
         self.schedule_render()
         self._history.schedule()
 
@@ -520,7 +520,7 @@ class MainWindow(QMainWindow):
             return
         self._placement.pan(self.current_member(), dx, dy)
         self._save_current_preset()
-        self._sync_controls()
+        self.sync_controls()
         self.schedule_render()
         self._history.schedule()
 
@@ -530,14 +530,14 @@ class MainWindow(QMainWindow):
             return
         self._placement.zoom_by(self.current_member(), delta)
         self._save_current_preset()
-        self._sync_controls()
+        self.sync_controls()
         self.schedule_render()
         self._history.schedule()
 
     def reset_placement(self) -> None:
         self._placement.reset(self.current_member())
         self._save_current_preset()
-        self._sync_controls()
+        self.sync_controls()
         self.schedule_render()
         self._history.commit_now()
 
@@ -571,11 +571,11 @@ class MainWindow(QMainWindow):
             self.builds = {build.name.casefold(): build for build in builds}
             save_profile_cache(uid, builds, last)
             self.assets = {}
-            self._populate_combo_items()
+            self.populate_combo_items()
             local = last.astimezone().strftime("%Y-%m-%d %H:%M")
             self.profile_status.setText(f"{len(builds)} builds \u00b7 last updated {local} \u00b7 {age:.0f} min ago")
             self.statusBar().showMessage("Akasha profile loaded", 5000)
-            self._asset_loader.ensure()
+            self.asset_loader.ensure()
             self.schedule_render()
         except Exception as error:
             dialogs.show_error(self, "Could not load profile", error)
@@ -596,7 +596,7 @@ class MainWindow(QMainWindow):
             team, slot = divmod(index, 4)
             self.team_combos[team][slot].setCurrentText(name)
 
-    def _validate_team(self) -> list[Build]:
+    def validate_team(self) -> list[Build]:
         missing: list[str] = []
         selected: list[Build] = []
         for team_index, row in enumerate(self.team_combos):
@@ -615,7 +615,7 @@ class MainWindow(QMainWindow):
 
     def _on_asset_ready(self, key: str, asset: Asset) -> None:
         # A download outliving `waitForDone(2000)` lands here during teardown,
-        # where touching the widgets `_sync_controls()` drives is pointless.
+        # where touching the widgets `sync_controls()` drives is pointless.
         if self._closing:
             return
         self.assets[key] = asset
@@ -624,9 +624,9 @@ class MainWindow(QMainWindow):
                 if member.name.casefold() == key:
                     self._presets.apply_to(self, member)
         # The arriving portrait only stops being a placeholder once the controls
-        # resync: `_sync_controls()` is what re-derives `_filled_slots()` for the
+        # resync: `sync_controls()` is what re-derives `_filled_slots()` for the
         # preview and the placement widgets, and so makes the slot editable.
-        self._sync_controls()
+        self.sync_controls()
         self.schedule_render()
         if self._drag_position is None:
             # Debounced, so a batch of arrivals coalesces into one undo step;
@@ -672,11 +672,11 @@ class MainWindow(QMainWindow):
 
     def export(self) -> None:
         try:
-            self._validate_team()
-            if set(self._selected_name_keys()) - set(self.assets):
+            self.validate_team()
+            if set(self.selected_name_keys()) - set(self.assets):
                 # The download can no longer be awaited here, so start it and
                 # let the user come back once the preview has filled in.
-                self._asset_loader.ensure()
+                self.asset_loader.ensure()
                 dialogs.show_error(self, "Character art is still downloading", "Try the export again in a moment.")
                 return
             stem = safe_name(self.output_name.text().strip() or "genshin_thumbnail")
@@ -699,19 +699,19 @@ class MainWindow(QMainWindow):
 
     def is_dirty(self) -> bool:
         """Whether the project differs from what was last saved, loaded, or started blank."""
-        return self.project != self._saved_snapshot
+        return self.project != self.saved_snapshot
 
     def save_project(self) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "Save project", "thumbnail-project.json", "JSON (*.json)")
         if not path:
             return
         with contextlib.suppress(ValueError):
-            self._validate_team()
+            self.validate_team()
         self.project.uid = self.uid_edit.text().strip()
         self.project.output_name = self.output_name.text().strip() or "genshin_thumbnail"
         save_project(self.project, Path(path))
         self.project_path = Path(path)
-        self._saved_snapshot = copy.deepcopy(self.project)
+        self.saved_snapshot = copy.deepcopy(self.project)
         self.statusBar().showMessage("Project saved", 5000)
 
     def open_project(self) -> None:
@@ -734,32 +734,32 @@ class MainWindow(QMainWindow):
             self.output_name.setText(project.output_name)
             self.boss_combo.setVisible(project.mode == "stygian")
             self.boss_combo.setCurrentIndex(project.active_team)
-            self._rebuild_team_fields()
-            self._sync_controls()
+            self.rebuild_team_fields()
+            self.sync_controls()
             cached = load_profile_cache(project.uid)
             if cached is None:
                 self.statusBar().showMessage(
                     "Project opened \u00b7 no cached profile found for this UID", 8000
                 )
                 self._history.reset()
-                self._saved_snapshot = copy.deepcopy(self.project)
+                self.saved_snapshot = copy.deepcopy(self.project)
                 return
             builds, last_update = cached
             self.builds = {build.name.casefold(): build for build in builds}
-            self._populate_combo_items()
+            self.populate_combo_items()
             age_minutes = max(0.0, (datetime.now(timezone.utc) - last_update).total_seconds() / 60)
             local = last_update.astimezone().strftime("%Y-%m-%d %H:%M")
             self.profile_status.setText(
                 f"{len(builds)} builds · from cache · last updated {local} · {age_minutes:.0f} min ago"
             )
-            self._asset_loader.ensure()
+            self.asset_loader.ensure()
             self.schedule_render()
             if age_minutes > 60 and dialogs.confirm_cache_refresh(self, age_minutes):
                 self.load_profile()
                 if self.builds:
-                    self._asset_loader.ensure()
+                    self.asset_loader.ensure()
             self._history.reset()
-            self._saved_snapshot = copy.deepcopy(self.project)
+            self.saved_snapshot = copy.deepcopy(self.project)
             self.statusBar().showMessage("Project opened", 5000)
         except Exception as error:
             dialogs.show_error(self, "Could not open project", error)
