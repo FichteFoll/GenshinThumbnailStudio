@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .app import run
+from .asset_loader import AssetJob, AssetJobSignals, AssetLoader
 from .dialogs import (
     ask_export_target,
     ask_lineup_text,
@@ -30,6 +31,9 @@ __all__ = [
     "RENDER_THROTTLE_MS",
     "RESOLUTION_OPTIONS",
     "SLOT_MIME_TYPE",
+    "AssetJob",
+    "AssetJobSignals",
+    "AssetLoader",
     "EditorState",
     "HistoryController",
     "MainWindow",

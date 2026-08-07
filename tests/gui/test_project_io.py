@@ -5,9 +5,9 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QApplication, QMessageBox
 
-from genshin_thumbnail_studio.gui import MainWindow, dialogs, main_window
+from genshin_thumbnail_studio.gui import MainWindow, asset_loader, dialogs, main_window
 from genshin_thumbnail_studio.models import Asset, Build, Project
 from genshin_thumbnail_studio.storage import load_profile_cache, save_profile_cache, save_project
 
@@ -105,13 +105,30 @@ def prepare_cached_open(
     assets = create_test_assets(tmp_path / "assets", TEAM_NAMES)
 
     def fake_download_assets(*args: Any, **kwargs: Any) -> dict[str, Asset]:
+        on_asset = kwargs.get("on_asset")
+        if callable(on_asset):
+            for key, asset in assets.items():
+                on_asset(key, asset)
         return assets
 
-    monkeypatch.setattr(main_window, "download_assets", fake_download_assets)
+    monkeypatch.setattr(asset_loader, "download_assets", fake_download_assets)
     monkeypatch.setattr(
         main_window.QFileDialog, "getOpenFileName", staticmethod(lambda *args, **kwargs: (str(project_path), ""))
     )
     return window, uid
+
+
+def settle_downloads_and_render(window: MainWindow, app: QApplication) -> None:
+    """Let the background art download land, then force the throttled render.
+
+    Opening a project no longer downloads or renders synchronously: it starts
+    the loader and schedules a render, so a test that wants the finished pixmap
+    has to wait for both.
+    """
+    window._thread_pool.waitForDone(5000)
+    app.processEvents()
+    window._dispatch_render()
+    wait_for_render(window, app)
 
 
 def test_open_project_loads_cached_profile_and_previews(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -121,7 +138,7 @@ def test_open_project_loads_cached_profile_and_previews(tmp_path: Path, monkeypa
     window, uid = prepare_cached_open(tmp_path, monkeypatch, datetime.now(timezone.utc) - timedelta(minutes=5))
 
     window.open_project()
-    wait_for_render(window, app)
+    settle_downloads_and_render(window, app)
 
     assert window.project.uid == uid
     assert sorted(window.builds) == sorted(name.casefold() for name in TEAM_NAMES)
@@ -149,7 +166,7 @@ def test_open_project_with_stale_cache_offers_refresh(tmp_path: Path, monkeypatc
     monkeypatch.setattr(window.client, "load_profile", forbidden_load_profile)
 
     window.open_project()
-    wait_for_render(window, app)
+    settle_downloads_and_render(window, app)
 
     assert len(StubMessageBox.instances) == 1
     assert "2.0 hours" in StubMessageBox.instances[0].text
@@ -213,6 +230,46 @@ def _prepare_export_window(window: MainWindow, tmp_path: Path, names: list[str])
     fill_window_teams(window, names)
     window._rebuild_team_fields()
     window.assets = assets
+
+
+class RecordingCritical:
+    """Records `QMessageBox.critical` calls, which `dialogs.show_error` makes."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def critical(self, parent: object, title: str, text: str) -> None:
+        self.calls.append((title, text))
+
+
+def test_export_refuses_a_team_whose_slot_names_no_loaded_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The always-on preview tolerates placeholders; the export still does not."""
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+    _prepare_export_window(window, tmp_path, TEAM_NAMES)
+    # One slot names a character the loaded profile has no build for, which is
+    # exactly the slot the preview would draw as a placeholder panel.
+    window.team_combos[1][3].setCurrentText("Somebody Else")
+
+    recorder = RecordingCritical()
+    monkeypatch.setattr(dialogs, "QMessageBox", recorder)
+    for chooser in ("getSaveFileName", "getExistingDirectory"):
+        monkeypatch.setattr(
+            main_window.QFileDialog,
+            chooser,
+            staticmethod(lambda *args, **kwargs: pytest.fail("an incomplete team must not reach the export dialog")),
+        )
+
+    window.export()
+
+    assert [title for title, _ in recorder.calls] == ["Export failed"]
+    assert "Somebody Else" in recorder.calls[0][1]
+    assert list(tmp_path.glob("*.png")) == []
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
 def test_export_abyss_writes_the_file_chosen_in_the_save_dialog(
@@ -332,27 +389,39 @@ def test_saving_project_clears_the_dirty_flag(tmp_path: Path, monkeypatch: pytes
     app.processEvents()
 
 
-def test_opening_a_project_settles_before_the_dirty_baseline_is_taken(
+def test_opening_a_project_takes_its_dirty_baseline_before_the_art_arrives(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Opening leaves the project as it was read; the presets reframe it later.
+
+    The download no longer runs inside `open_project()`, so the preset that each
+    arriving asset applies is an edit made after the baseline, exactly like one
+    the user would make by hand.
+    """
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
     monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
     window, _ = prepare_cached_open(tmp_path, monkeypatch, datetime.now(timezone.utc) - timedelta(minutes=5))
 
+    # Inside the range `_sync_controls()` clamps to, so the assertions below
+    # read the preset back rather than the reachable maximum.
+    reframed = 0.1
+
     def fake_apply_to(editor: MainWindow, member: Any) -> None:
-        member.offset_x = 0.42
+        member.offset_x = reframed
 
     monkeypatch.setattr(window._presets, "apply_to", fake_apply_to)
 
     window.open_project()
-    wait_for_render(window, app)
 
-    assert window.project.teams[0][0].offset_x == 0.42
+    assert window.project.teams[0][0].offset_x != reframed
     assert not window.is_dirty()
 
-    window.close()
-    app.processEvents()
+    settle_downloads_and_render(window, app)
+
+    assert window.project.teams[0][0].offset_x == reframed
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
 def test_export_defaults_to_the_saved_project_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

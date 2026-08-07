@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from PySide6.QtCore import QEvent, QPointF, Qt
+from PySide6.QtGui import QMouseEvent, QPixmap
 
 from genshin_thumbnail_studio.gui import MainWindow
 from genshin_thumbnail_studio.models import Placement
@@ -293,5 +295,101 @@ def test_reset_placement_clears_the_flip(tmp_path: Path, monkeypatch: pytest.Mon
 
     assert window.current_member().flip is False
     assert window.flip_check.isChecked() is False
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+# Slot (0, 0) is the only one with downloaded art; every other slot renders as a
+# placeholder panel and must therefore be inert.
+FILLED_SLOT = (0, 0)
+PLACEHOLDER_SLOT = (0, 3)
+
+
+def _window_with_one_filled_slot(tmp_path: Path) -> MainWindow:
+    window = MainWindow()
+    fill_window_teams(window, TEAM_NAMES)
+    window.assets = create_test_assets(tmp_path / "assets", TEAM_NAMES[:1])
+    window.select_slot(*FILLED_SLOT)
+    return window
+
+
+def test_clicking_a_placeholder_slot_does_not_select_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = _window_with_one_filled_slot(tmp_path)
+    # `_image_rect()` is empty without a pixmap, which would swallow the click
+    # before it ever reached the placeholder check.
+    window.preview.resize(1280, 720)
+    window.preview.set_preview(QPixmap(1280, 720))
+    emitted: list[tuple[int, int]] = []
+
+    def record(team: int, slot: int) -> None:
+        emitted.append((team, slot))
+
+    window.preview.slot_selected.connect(record)
+
+    team, slot = PLACEHOLDER_SLOT
+    center = QPointF(slot * 320 + 160, team * 360 + 180)
+    window.preview.mousePressEvent(
+        QMouseEvent(
+            QEvent.Type.MouseButtonPress,
+            center,
+            center,
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+    )
+
+    assert emitted == []
+    assert window.selected == FILLED_SLOT
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+def test_dragging_a_placeholder_slot_does_not_move_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = _window_with_one_filled_slot(tmp_path)
+    window.select_slot(*PLACEHOLDER_SLOT)
+    member = window.current_member()
+    before_x, before_y = member.offset_x, member.offset_y
+
+    window.drag_placement(40, 40)
+
+    assert member.offset_x == before_x
+    assert member.offset_y == before_y
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+def test_zooming_a_placeholder_slot_does_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = _window_with_one_filled_slot(tmp_path)
+    window.select_slot(*PLACEHOLDER_SLOT)
+    member = window.current_member()
+    before_zoom = member.zoom
+
+    window.change_zoom(0.1)
+
+    assert member.zoom == before_zoom
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+def test_placement_controls_are_disabled_for_a_placeholder_slot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = _window_with_one_filled_slot(tmp_path)
+    controls = [window.x_slider, window.y_slider, window.zoom_slider, window.flip_check, window.reset_button]
+
+    window.select_slot(*PLACEHOLDER_SLOT)
+    assert [control.isEnabled() for control in controls] == [False] * len(controls)
+
+    window.select_slot(*FILLED_SLOT)
+    assert [control.isEnabled() for control in controls] == [True] * len(controls)
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)

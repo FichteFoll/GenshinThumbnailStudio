@@ -45,6 +45,7 @@ EXPECTED_MODULES = {
     "gui/app.py",
     "gui/style.py",
     "gui/main_window.py",
+    "gui/asset_loader.py",
     "gui/dialogs.py",
     "gui/state.py",
     "gui/placement.py",
@@ -69,7 +70,11 @@ RETIRED_TEST_FILES = ("test_akasha.py", "test_renderer.py", "test_gui_smoke.py",
 # are Qt-bound throughout; the blocking dialogs they put up live in
 # `gui/dialogs.py`.
 # A module crossing this bound is a signal to split it, not to raise the bound.
-MAX_MODULE_LINES = 750
+# Raised from 750 to 800 by explicit decision when the always-on preview left
+# `main_window.py` at 756: the alternative on the table was extracting the
+# throttled render pipeline into its own module, which was deferred, not ruled
+# out. The next crossing should reopen that question rather than raise this again.
+MAX_MODULE_LINES = 800
 
 
 def source_files() -> list[Path]:

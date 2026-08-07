@@ -33,16 +33,22 @@ class PreviewWidget(QFrame):
         self._mode = "abyss"
         self._active_team = 0
         self._selected = (0, 0)
+        self._filled: set[tuple[int, int]] = set()
         self._drag_last: QPoint | None = None
 
     def set_preview(self, pixmap: QPixmap) -> None:
         self._pixmap = pixmap
         self.update()
 
-    def set_context(self, mode: str, active_team: int, selected: tuple[int, int]) -> None:
+    def set_context(
+        self, mode: str, active_team: int, selected: tuple[int, int], filled: set[tuple[int, int]]
+    ) -> None:
+        """`filled` names the `(team, slot)` pairs whose art has been downloaded;
+        the rest render as placeholders and are inert here."""
         self._mode = mode
         self._active_team = active_team
         self._selected = selected
+        self._filled = filled
         self.update()
 
     def _image_rect(self) -> QRect:
@@ -72,12 +78,14 @@ class PreviewWidget(QFrame):
         rect = self._image_rect()
         if not self._pixmap or rect.isEmpty():
             painter.setPen(QColor("#8f96a3"))
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Load a profile and generate a preview")
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Rendering ...")
             return
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         painter.drawPixmap(rect, self._pixmap)
 
         team, slot = self._selected
+        if self._selected not in self._filled:
+            return
         visible_team = team if self._mode == "abyss" else 0
         if self._mode == "stygian" and team != self._active_team:
             return
@@ -101,6 +109,8 @@ class PreviewWidget(QFrame):
         x, y = point
         slot = min(3, max(0, int(x // 320)))
         team = min(1, max(0, int(y // 360))) if self._mode == "abyss" else self._active_team
+        if (team, slot) not in self._filled:
+            return
         self._selected = (team, slot)
         self._drag_last = event.position().toPoint()
         self.setCursor(Qt.CursorShape.ClosedHandCursor)
@@ -127,6 +137,9 @@ class PreviewWidget(QFrame):
 
     def wheelEvent(self, event: QWheelEvent) -> None:
         if self._image_point(event.position().toPoint()) is None:
+            return
+        # The wheel zooms the selected member, not the hovered one.
+        if self._selected not in self._filled:
             return
         self.zoom_requested.emit(0.04 if event.angleDelta().y() > 0 else -0.04)
         event.accept()
