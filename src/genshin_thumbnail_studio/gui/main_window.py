@@ -91,6 +91,7 @@ class MainWindow(QMainWindow):
         self._render_token = 0
         self._render_job_running = False
         self._render_stale = False
+        self._closing = False
         self.client = AkashaWebClient(cache_dir())
         self.team_combos: list[list[QComboBox]] = []
         self._build_ui()
@@ -113,8 +114,12 @@ class MainWindow(QMainWindow):
         if not dialogs.confirm_discard_changes(self, "exit", self.is_dirty, self.save_project):
             event.ignore()
             return
-        # The preview renders on its own now, so a job may well be in flight;
-        # let it finish rather than have it emit into a window already gone.
+        # The preview renders on its own now, so a job may well be in flight.
+        # Draining is not enough: both jobs signal the GUI thread over a queued
+        # connection, so `waitForDone()` returns with their slots still queued
+        # and `client.close()` spins the loops that deliver them. The flag stops
+        # a late one from restarting the timer or re-dispatching onto the pool.
+        self._closing = True
         self._render_timer.stop()
         self._thread_pool.waitForDone(2000)
         self.client.close()
@@ -534,7 +539,7 @@ class MainWindow(QMainWindow):
     def schedule_render(self) -> None:
         # A throttle, not a debounce: restarting the timer on every
         # mouse-move event would mean it never fires during a drag.
-        if not self._render_timer.isActive():
+        if not self._closing and not self._render_timer.isActive():
             self._render_timer.start(RENDER_THROTTLE_MS)
 
     def load_profile(self) -> None:
@@ -609,10 +614,15 @@ class MainWindow(QMainWindow):
             for member in team:
                 if member.name.casefold() == key:
                     self._presets.apply_to(self, member)
+        # The arriving portrait only stops being a placeholder once the controls
+        # resync: `_sync_controls()` is what re-derives `_filled_slots()` for the
+        # preview and the placement widgets, and so makes the slot editable.
+        self._sync_controls()
         self.schedule_render()
-        # Debounced, so a batch of arriving assets reframing their members
-        # collapses into one undo step instead of one per character.
-        self._history.schedule()
+        if self._drag_position is None:
+            # Debounced, so a batch of arrivals coalesces into one undo step;
+            # skipped mid-drag, where nothing may be scheduled at all.
+            self._history.schedule()
 
     def _on_asset_download_failed(self, error: Exception) -> None:
         # In the status bar rather than a dialog: a download running in the
@@ -620,6 +630,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(str(error), 8000)
 
     def _dispatch_render(self) -> None:
+        if self._closing:
+            return
         self._render_token += 1
         if self._render_job_running:
             self._render_stale = True
@@ -656,9 +668,7 @@ class MainWindow(QMainWindow):
                 # The download can no longer be awaited here, so start it and
                 # let the user come back once the preview has filled in.
                 self._asset_loader.ensure()
-                dialogs.show_error(
-                    self, "Character art is still downloading", "Try the export again in a moment."
-                )
+                dialogs.show_error(self, "Character art is still downloading", "Try the export again in a moment.")
                 return
             stem = safe_name(self.output_name.text().strip() or "genshin_thumbnail")
             default_dir = self.project_path.parent if self.project_path else Path.cwd()

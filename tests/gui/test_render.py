@@ -156,6 +156,99 @@ def test_schedule_render_without_assets_starts_the_timer(tmp_path: Path, monkeyp
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
+def test_a_fresh_window_schedules_its_first_render_itself(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No user action is required to obtain a preview: the constructor asks for one."""
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+
+    assert window._render_timer.isActive()
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+def test_switching_modes_schedules_a_render_instead_of_blanking_the_canvas(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+    window._dispatch_render()
+    wait_for_render(window, app)
+    rendered = window.preview._pixmap
+    assert rendered is not None and not rendered.isNull()
+    window._render_timer.stop()
+
+    window.stygian_radio.setChecked(True)
+
+    # The new mode's blank teams have a placeholder rendering of their own, so
+    # the canvas keeps the old frame until that render lands, rather than
+    # being emptied.
+    assert window.project.mode == "stygian"
+    assert window._render_timer.isActive()
+    assert window.preview._pixmap is rendered
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+def test_closing_the_window_stops_rendering(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A render must not be scheduled or dispatched into a window being torn down.
+
+    Both jobs signal the GUI thread across a queued connection, so draining the
+    pool in `closeEvent` leaves their slots in the event queue; `client.close()`
+    then spins the loops that deliver them.
+    """
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+    assert window._closing is True
+    assert not window._render_timer.isActive()
+
+    started_jobs: list[RenderJob] = []
+    monkeypatch.setattr(window._thread_pool, "start", started_jobs.append)
+
+    window.schedule_render()
+    window._dispatch_render()
+    # A late asset still stores itself, but must not revive the render loop.
+    window._on_asset_ready("furina", create_test_assets(tmp_path / "assets", ["Furina"])["furina"])
+
+    assert not window._render_timer.isActive()
+    assert started_jobs == []
+
+
+def test_arriving_art_makes_its_slot_editable(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A portrait the user cannot touch is not what the download was for.
+
+    The placement controls and the preview's inert-slot set are both derived in
+    `_sync_controls()`, so an asset arriving outside any edit handler has to
+    trigger one or the slot keeps behaving like the placeholder it just stopped
+    being.
+    """
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+    assets = create_test_assets(tmp_path / "assets", ["Furina"])
+    fill_window_teams(window, ["Furina"])
+    window.select_slot(0, 0)
+
+    assert window.x_slider.isEnabled() is False
+    assert window.preview._filled == set()
+
+    window._on_asset_ready("furina", assets["furina"])
+
+    assert window.x_slider.isEnabled() is True
+    assert window.zoom_slider.isEnabled() is True
+    assert window.reset_button.isEnabled() is True
+    assert (0, 0) in window.preview._filled
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
 def test_fresh_window_renders_a_placeholder_preview(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()

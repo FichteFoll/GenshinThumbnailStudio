@@ -126,6 +126,18 @@ def test_ensure_emits_asset_ready_per_downloaded_character(
     assert arrived == ["furina", "nahida"]
 
 
+def test_progress_reports_the_batch_finishing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A finished batch has to say so, or the status bar keeps claiming a download."""
+    loader, _, _ = make_loader(["Furina", "Nahida"], tmp_path)
+    monkeypatch.setattr(asset_loader, "download_assets", fake_downloader([]))
+    reported: list[str] = []
+    loader.progress.connect(reported.append)
+
+    loader.ensure()
+
+    assert reported == ["Downloading art for 2 character(s) ...", "Character art ready"]
+
+
 def test_ensure_starts_no_job_for_art_that_is_already_downloaded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

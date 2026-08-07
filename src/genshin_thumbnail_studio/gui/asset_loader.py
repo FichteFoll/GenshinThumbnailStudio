@@ -94,3 +94,8 @@ class AssetLoader(QObject):
         self._in_flight.pop(token, None)
         if error is not None:
             self.failed.emit(error)
+            return
+        if not self._in_flight:
+            # The "Downloading ..." line would otherwise claim a download is
+            # still running for as long as nothing else writes to the status bar.
+            self.progress.emit("Character art ready")

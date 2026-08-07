@@ -232,6 +232,46 @@ def _prepare_export_window(window: MainWindow, tmp_path: Path, names: list[str])
     window.assets = assets
 
 
+class RecordingCritical:
+    """Records `QMessageBox.critical` calls, which `dialogs.show_error` makes."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def critical(self, parent: object, title: str, text: str) -> None:
+        self.calls.append((title, text))
+
+
+def test_export_refuses_a_team_whose_slot_names_no_loaded_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The always-on preview tolerates placeholders; the export still does not."""
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+    _prepare_export_window(window, tmp_path, TEAM_NAMES)
+    # One slot names a character the loaded profile has no build for, which is
+    # exactly the slot the preview would draw as a placeholder panel.
+    window.team_combos[1][3].setCurrentText("Somebody Else")
+
+    recorder = RecordingCritical()
+    monkeypatch.setattr(dialogs, "QMessageBox", recorder)
+    for chooser in ("getSaveFileName", "getExistingDirectory"):
+        monkeypatch.setattr(
+            main_window.QFileDialog,
+            chooser,
+            staticmethod(lambda *args, **kwargs: pytest.fail("an incomplete team must not reach the export dialog")),
+        )
+
+    window.export()
+
+    assert [title for title, _ in recorder.calls] == ["Export failed"]
+    assert "Somebody Else" in recorder.calls[0][1]
+    assert list(tmp_path.glob("*.png")) == []
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
 def test_export_abyss_writes_the_file_chosen_in_the_save_dialog(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -363,19 +403,23 @@ def test_opening_a_project_takes_its_dirty_baseline_before_the_art_arrives(
     monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
     window, _ = prepare_cached_open(tmp_path, monkeypatch, datetime.now(timezone.utc) - timedelta(minutes=5))
 
+    # Inside the range `_sync_controls()` clamps to, so the assertions below
+    # read the preset back rather than the reachable maximum.
+    reframed = 0.1
+
     def fake_apply_to(editor: MainWindow, member: Any) -> None:
-        member.offset_x = 0.42
+        member.offset_x = reframed
 
     monkeypatch.setattr(window._presets, "apply_to", fake_apply_to)
 
     window.open_project()
 
-    assert window.project.teams[0][0].offset_x != 0.42
+    assert window.project.teams[0][0].offset_x != reframed
     assert not window.is_dirty()
 
     settle_downloads_and_render(window, app)
 
-    assert window.project.teams[0][0].offset_x == 0.42
+    assert window.project.teams[0][0].offset_x == reframed
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 

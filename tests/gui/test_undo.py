@@ -328,6 +328,35 @@ def test_no_debounce_is_left_pending_during_a_slot_drag(
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
+def test_art_arriving_mid_drag_leaves_the_debounce_disarmed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same rule holds for the one edit the user does not make.
+
+    Downloads run for seconds after a profile load, so an asset can land in the
+    middle of a slot drag; the preset it re-applies must not re-arm the debounce
+    `_on_slot_drag_started` just settled.
+    """
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = _window_with_history_baseline(tmp_path)
+    arriving = create_test_assets(tmp_path / "late", TEAM_NAMES[1:2])
+
+    window._on_slot_drag_started(0, 0)
+    window._on_slot_drag_hover(1, 3)
+
+    window._on_asset_ready(TEAM_NAMES[1].casefold(), arriving[TEAM_NAMES[1].casefold()])
+
+    assert window._history._timer.isActive() is False
+
+    window._on_slot_drag_ended(False)
+    window._history.undo()
+    names = [member.name for team in window.project.teams for member in team]
+    assert names == TEAM_NAMES
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
 def _activate(window: MainWindow, sequence: str) -> None:
     """Fire the shortcut bound to `sequence` as if the user had pressed it.
 
