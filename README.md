@@ -22,7 +22,16 @@ without Codex or another AI tool.
   so one facing out of the thumbnail can face into it,
   all apply to those slots as well.
 - Saves reusable placement presets and JSON project files.
-- Exports supersampled PNG files at 1280x720.
+  Projects are opened with `Ctrl+O`
+  and saved with `Ctrl+S`,
+  which overwrites the project's own file once it has one
+  and otherwise asks where to put it,
+  remembering the answer.
+  `Ctrl+Shift+S` saves under a new name,
+  as does the dropdown on the save button,
+  which appears once the project has a file.
+- Exports supersampled PNG files at 1280x720,
+  on `Ctrl+E` or the export button.
 
 ## Run from source
 

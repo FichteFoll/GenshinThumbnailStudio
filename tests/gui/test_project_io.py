@@ -7,9 +7,9 @@ from typing import Any, ClassVar
 import pytest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
-from genshin_thumbnail_studio.gui import MainWindow, asset_loader, dialogs, main_window
+from genshin_thumbnail_studio.gui import MainWindow, asset_loader, dialogs, project_io
 from genshin_thumbnail_studio.models import Asset, Build, Project
-from genshin_thumbnail_studio.storage import load_profile_cache, save_profile_cache, save_project
+from genshin_thumbnail_studio.storage import load_profile_cache, load_project, save_profile_cache, save_project
 
 from .helpers import (
     TEAM_NAMES,
@@ -113,7 +113,7 @@ def prepare_cached_open(
 
     monkeypatch.setattr(asset_loader, "download_assets", fake_download_assets)
     monkeypatch.setattr(
-        main_window.QFileDialog, "getOpenFileName", staticmethod(lambda *args, **kwargs: (str(project_path), ""))
+        project_io.QFileDialog, "getOpenFileName", staticmethod(lambda *args, **kwargs: (str(project_path), ""))
     )
     return window, uid
 
@@ -185,7 +185,7 @@ def test_open_project_without_cache_shows_hint(tmp_path: Path, monkeypatch: pyte
     project_path = tmp_path / "project.json"
     write_project(project_path, "900000099")
     monkeypatch.setattr(
-        main_window.QFileDialog, "getOpenFileName", staticmethod(lambda *args, **kwargs: (str(project_path), ""))
+        project_io.QFileDialog, "getOpenFileName", staticmethod(lambda *args, **kwargs: (str(project_path), ""))
     )
     window = MainWindow()
 
@@ -228,7 +228,7 @@ def _prepare_export_window(window: MainWindow, tmp_path: Path, names: list[str])
     assets = create_test_assets(tmp_path / "assets", names)
     window.builds = {key: asset.build for key, asset in assets.items()}
     fill_window_teams(window, names)
-    window._rebuild_team_fields()
+    window.rebuild_team_fields()
     window.assets = assets
 
 
@@ -258,7 +258,7 @@ def test_export_refuses_a_team_whose_slot_names_no_loaded_build(
     monkeypatch.setattr(dialogs, "QMessageBox", recorder)
     for chooser in ("getSaveFileName", "getExistingDirectory"):
         monkeypatch.setattr(
-            main_window.QFileDialog,
+            project_io.QFileDialog,
             chooser,
             staticmethod(lambda *args, **kwargs: pytest.fail("an incomplete team must not reach the export dialog")),
         )
@@ -283,7 +283,7 @@ def test_export_abyss_writes_the_file_chosen_in_the_save_dialog(
 
     monkeypatch.setattr(dialogs, "QMessageBox", StubMessageBox)
     monkeypatch.setattr(
-        main_window.QFileDialog,
+        project_io.QFileDialog,
         "getExistingDirectory",
         staticmethod(lambda *args, **kwargs: pytest.fail("abyss export must not ask for a folder")),
     )
@@ -294,7 +294,7 @@ def test_export_abyss_writes_the_file_chosen_in_the_save_dialog(
         default_names.append(default_name)
         return str(chosen), "PNG (*.png)"
 
-    monkeypatch.setattr(main_window.QFileDialog, "getSaveFileName", staticmethod(fake_save_dialog))
+    monkeypatch.setattr(project_io.QFileDialog, "getSaveFileName", staticmethod(fake_save_dialog))
 
     window.export()
 
@@ -319,13 +319,13 @@ def test_export_stygian_still_asks_for_a_folder(tmp_path: Path, monkeypatch: pyt
 
     monkeypatch.setattr(dialogs, "QMessageBox", StubMessageBox)
     monkeypatch.setattr(
-        main_window.QFileDialog,
+        project_io.QFileDialog,
         "getSaveFileName",
         staticmethod(lambda *args, **kwargs: pytest.fail("stygian export must not ask for a file name")),
     )
     directory = tmp_path / "out"
     monkeypatch.setattr(
-        main_window.QFileDialog, "getExistingDirectory", staticmethod(lambda *args, **kwargs: str(directory))
+        project_io.QFileDialog, "getExistingDirectory", staticmethod(lambda *args, **kwargs: str(directory))
     )
 
     window.export()
@@ -348,7 +348,7 @@ def test_export_defaults_to_the_opened_project_folder(tmp_path: Path, monkeypatc
     window = MainWindow()
     monkeypatch.setattr(dialogs, "QMessageBox", StubMessageBox)
     monkeypatch.setattr(
-        main_window.QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(project_file), ""))
+        project_io.QFileDialog, "getOpenFileName", staticmethod(lambda *a, **k: (str(project_file), ""))
     )
     window.open_project()
 
@@ -360,7 +360,7 @@ def test_export_defaults_to_the_opened_project_folder(tmp_path: Path, monkeypatc
         default_paths.append(default_path)
         return str(tmp_path / "out" / "chosen.png"), "PNG (*.png)"
 
-    monkeypatch.setattr(main_window.QFileDialog, "getSaveFileName", staticmethod(fake_save_dialog))
+    monkeypatch.setattr(project_io.QFileDialog, "getSaveFileName", staticmethod(fake_save_dialog))
 
     window.export()
 
@@ -377,7 +377,7 @@ def test_saving_project_clears_the_dirty_flag(tmp_path: Path, monkeypatch: pytes
     assert window.is_dirty()
 
     monkeypatch.setattr(
-        main_window.QFileDialog,
+        project_io.QFileDialog,
         "getSaveFileName",
         staticmethod(lambda *args, **kwargs: (str(tmp_path / "thumbnail-project.json"), "")),
     )
@@ -403,7 +403,7 @@ def test_opening_a_project_takes_its_dirty_baseline_before_the_art_arrives(
     monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
     window, _ = prepare_cached_open(tmp_path, monkeypatch, datetime.now(timezone.utc) - timedelta(minutes=5))
 
-    # Inside the range `_sync_controls()` clamps to, so the assertions below
+    # Inside the range `sync_controls()` clamps to, so the assertions below
     # read the preset back rather than the reachable maximum.
     reframed = 0.1
 
@@ -424,6 +424,124 @@ def test_opening_a_project_takes_its_dirty_baseline_before_the_art_arrives(
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
+def test_saving_an_opened_project_overwrites_it_without_a_dialog(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
+    window, _ = prepare_cached_open(tmp_path, monkeypatch, datetime.now(timezone.utc) - timedelta(minutes=5))
+
+    window.open_project()
+    settle_downloads_and_render(window, app)
+    project_path = tmp_path / "project.json"
+    assert window.project_path == project_path
+
+    window.project.teams[0][0].offset_x = 0.125
+    monkeypatch.setattr(
+        project_io.QFileDialog,
+        "getSaveFileName",
+        staticmethod(lambda *args, **kwargs: pytest.fail("saving an opened project must not ask for a path")),
+    )
+
+    window.save_project()
+
+    assert load_project(project_path).teams[0][0].offset_x == 0.125
+    assert not window.is_dirty()
+
+    window.close()
+    app.processEvents()
+
+
+def test_saving_without_a_path_asks_once_and_reuses_the_answer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
+    window = MainWindow()
+    assert window.project_path is None
+    window.project.teams[0][0].offset_x = 0.3
+
+    first = tmp_path / "first.json"
+    asked: list[str] = []
+
+    def fake_save_dialog(parent: object, title: str, default_path: str, name_filter: str) -> tuple[str, str]:
+        asked.append(default_path)
+        return str(first), "JSON (*.json)"
+
+    monkeypatch.setattr(project_io.QFileDialog, "getSaveFileName", staticmethod(fake_save_dialog))
+
+    window.save_project()
+
+    assert first.exists()
+    assert window.project_path == first
+    assert len(asked) == 1
+
+    window.project.teams[0][0].offset_x = 0.4
+    window.save_project()
+
+    assert len(asked) == 1
+    assert load_project(first).teams[0][0].offset_x == 0.4
+    assert window.project_path == first
+
+    window.close()
+    app.processEvents()
+
+
+def test_save_as_asks_again_even_when_the_project_has_a_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
+    window = MainWindow()
+    first = tmp_path / "first.json"
+    monkeypatch.setattr(
+        project_io.QFileDialog, "getSaveFileName", staticmethod(lambda *args, **kwargs: (str(first), ""))
+    )
+    window.save_project()
+    assert window.project_path == first
+
+    second = tmp_path / "second.json"
+    monkeypatch.setattr(
+        project_io.QFileDialog, "getSaveFileName", staticmethod(lambda *args, **kwargs: (str(second), ""))
+    )
+
+    window.save_project_as()
+
+    assert second.exists()
+    assert window.project_path == second
+
+    window.close()
+    app.processEvents()
+
+
+def test_cancelling_save_as_keeps_the_previous_file_and_the_dirty_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
+    window = MainWindow()
+    first = tmp_path / "first.json"
+    monkeypatch.setattr(
+        project_io.QFileDialog, "getSaveFileName", staticmethod(lambda *args, **kwargs: (str(first), ""))
+    )
+    window.save_project()
+    window.project.teams[0][0].offset_x = 0.42
+    assert window.is_dirty()
+
+    monkeypatch.setattr(project_io.QFileDialog, "getSaveFileName", staticmethod(lambda *args, **kwargs: ("", "")))
+
+    window.save_project_as()
+
+    assert window.project_path == first
+    assert window.is_dirty()
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
 def test_export_defaults_to_the_saved_project_folder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
@@ -437,7 +555,7 @@ def test_export_defaults_to_the_saved_project_folder(tmp_path: Path, monkeypatch
 
     monkeypatch.setattr(dialogs, "QMessageBox", StubMessageBox)
     monkeypatch.setattr(
-        main_window.QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(project_file), ""))
+        project_io.QFileDialog, "getSaveFileName", staticmethod(lambda *a, **k: (str(project_file), ""))
     )
     window.save_project()
 
@@ -447,7 +565,7 @@ def test_export_defaults_to_the_saved_project_folder(tmp_path: Path, monkeypatch
         default_paths.append(default_path)
         return str(tmp_path / "out" / "chosen.png"), "PNG (*.png)"
 
-    monkeypatch.setattr(main_window.QFileDialog, "getSaveFileName", staticmethod(fake_save_dialog))
+    monkeypatch.setattr(project_io.QFileDialog, "getSaveFileName", staticmethod(fake_save_dialog))
 
     window.export()
 

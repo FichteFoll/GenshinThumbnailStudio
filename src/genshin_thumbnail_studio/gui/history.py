@@ -166,7 +166,7 @@ class HistoryController(QObject):
             return
         self._state.project.teams = teams
         self._on_restored()
-        # `on_restored` normalizes what it was handed: `_sync_controls()` writes
+        # `on_restored` normalizes what it was handed: `sync_controls()` writes
         # the slider-quantized offsets back onto the members. Recording that
         # result as the current state keeps the next `commit_now()` from reading
         # the quantization as a fresh edit and truncating the redo tail.

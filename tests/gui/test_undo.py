@@ -23,7 +23,7 @@ from .helpers import (
     qapp,
 )
 
-# `_sync_controls` quantizes every offset to per-mille of the panel, so a
+# `sync_controls` quantizes every offset to per-mille of the panel, so a
 # restored offset can differ from the recorded one by half a step.
 OFFSET_TOLERANCE = 0.001
 
@@ -46,7 +46,7 @@ def _window_with_history_baseline(tmp_path: Path) -> MainWindow:
     window = MainWindow()
     fill_window_teams(window, TEAM_NAMES)
     window.assets = create_test_assets(tmp_path / "assets", TEAM_NAMES[:1])
-    window._rebuild_team_fields()
+    window.rebuild_team_fields()
     window.select_slot(0, 0)
     window._history.reset()
     return window
@@ -343,7 +343,7 @@ def test_undoing_back_to_a_name_re_requests_its_art(
     window = _window_with_history_baseline(tmp_path)
     restored: list[list[str]] = []
     monkeypatch.setattr(
-        window._asset_loader, "ensure", lambda: restored.append(sorted(window._selected_name_keys()))
+        window.asset_loader, "ensure", lambda: restored.append(sorted(window.selected_name_keys()))
     )
 
     window._member_changed(0, 0, "")
