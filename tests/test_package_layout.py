@@ -1,4 +1,4 @@
-"""Guard the sub-package layout described in this repo's CLAUDE.md.
+"""Guard the sub-package layout described in this repo's docs/architecture.md.
 
 The assertions here are structural on purpose: they say which modules exist,
 that sibling modules are reached by relative import, that each package's facade
