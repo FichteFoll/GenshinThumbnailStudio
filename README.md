@@ -1,7 +1,6 @@
 # Genshin Thumbnail Studio
 
-Standalone desktop application for creating the established 1280x720 Genshin team thumbnails
-without Codex or another AI tool.
+Standalone desktop application for creating Genshin Impact team thumbnails.
 
 ## Features
 
@@ -30,7 +29,7 @@ without Codex or another AI tool.
   `Ctrl+Shift+S` saves under a new name,
   as does the dropdown on the save button,
   which appears once the project has a file.
-- Exports supersampled PNG files at 1280x720,
+- Exports supersampled PNG files at the configured resolution,
   on `Ctrl+E` or the export button.
 
 ## Run from source

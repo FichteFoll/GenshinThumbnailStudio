@@ -5,7 +5,7 @@ when working with code in this repository.
 
 ## Project
 
-Standalone PySide6 desktop app that builds 1280x720 Genshin Impact team thumbnails
+Standalone PySide6 desktop app that builds Genshin Impact team thumbnails
 (Spiral Abyss or Stygian Onslaught)
 from a player's public Akasha profile,
 without any AI image generation.
