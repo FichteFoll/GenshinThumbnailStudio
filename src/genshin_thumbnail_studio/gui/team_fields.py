@@ -13,7 +13,7 @@ import copy
 from typing import Protocol
 
 from PySide6.QtCore import QObject
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import QComboBox, QLabel, QLayout, QMenu, QVBoxLayout
 
 from ..models import Build, Placement
@@ -227,6 +227,11 @@ class TeamFieldsController(QObject):
         actually displays it.
         """
         menu = QMenu()
+        # Exactly one build can be selected, and an exclusive action group is
+        # what makes Qt draw the entries with radio indicators instead of
+        # check boxes. Parented to the menu so it outlives this call.
+        group = QActionGroup(menu)
+        group.setExclusive(True)
         for choice in self._build_choices(team, slot):
             action = QAction(choice.label, menu)
             action.setCheckable(True)
@@ -234,6 +239,7 @@ class TeamFieldsController(QObject):
             action.triggered.connect(
                 lambda _checked=False, build=choice.build: self._editor.build_selected(team, slot, build)
             )
+            group.addAction(action)
             menu.addAction(action)
         return menu
 

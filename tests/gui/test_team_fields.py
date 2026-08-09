@@ -127,6 +127,20 @@ def test_typing_a_character_enables_its_build_button(host: Host) -> None:
     assert slot_widget.build_button.isEnabled() is True
 
 
+def test_the_menus_actions_share_one_exclusive_action_group(host: Host) -> None:
+    """R6: Qt draws an action's menu entry as a radio button, not a check box,
+    exactly when its action group is exclusive."""
+    menu = host.controller.build_menu(0, 0)
+    actions = menu.actions()
+
+    groups = {action.actionGroup() for action in actions}
+    assert len(groups) == 1
+    group = groups.pop()
+    assert group is not None
+    assert group.isExclusive() is True
+    assert sum(action.isChecked() for action in actions) == 1
+
+
 def test_reordering_slots_moves_the_build_buttons_with_them(host: Host) -> None:
     """The names move between slots with their signals blocked, so the arrows
     have to be refreshed by hand or they stay with the old positions."""
