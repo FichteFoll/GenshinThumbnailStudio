@@ -6,6 +6,7 @@ from .actions import ProjectActions
 from .app import run
 from .asset_loader import AssetJob, AssetJobSignals, AssetLoader
 from .build_choices import BuildChoice, build_choices, selected_build
+from .build_editor import ELEMENT_CHOICES, BuildEditorDialog, ask_custom_build
 from .controls_panel import RESOLUTION_OPTIONS, ControlsPanel
 from .dialogs import (
     ask_export_target,
@@ -31,6 +32,7 @@ from .team_fields import TeamFieldsController
 from .team_slots import SLOT_MIME_TYPE, TeamSlotWidget
 
 __all__ = [
+    "ELEMENT_CHOICES",
     "HISTORY_DEBOUNCE_MS",
     "HISTORY_LIMIT",
     "MAX_ZOOM",
@@ -42,6 +44,7 @@ __all__ = [
     "AssetJobSignals",
     "AssetLoader",
     "BuildChoice",
+    "BuildEditorDialog",
     "ControlsPanel",
     "EditorPanel",
     "EditorState",
@@ -59,6 +62,7 @@ __all__ = [
     "RenderPipeline",
     "TeamFieldsController",
     "TeamSlotWidget",
+    "ask_custom_build",
     "ask_export_target",
     "ask_lineup_text",
     "build_choices",

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..models import Build, Placement
+from ..models import CUSTOM_BUILD_NAME, Build, Placement
 from .state import EditorState
 
 
@@ -46,6 +46,9 @@ def build_choices(profile_builds: list[Build], stored: Build | None) -> list[Bui
     is indistinguishable from it. The suffix is display-only: the `Build`
     behind a labelled choice keeps its unsuffixed `build_name`, so the suffix
     can never reach a saved project file.
+    A snapshot the slot's own "Edit ..." popup produced is the exception: it
+    carries `CUSTOM_BUILD_NAME` and keeps it bare, since it comes from the
+    project by definition and the suffix would say nothing.
     """
     if stored is None:
         # The profile lists the live build first, so the first entry is the default.
@@ -68,11 +71,18 @@ def build_choices(profile_builds: list[Build], stored: Build | None) -> list[Bui
             # told apart from having no snapshot at all.
             choices.append(BuildChoice(build.build_name, build, True))
             continue
-        choices.append(BuildChoice(f"{build.build_name} (project)", stored, True))
+        choices.append(BuildChoice(_stored_label(build.build_name), stored, True))
         choices.append(BuildChoice(build.build_name, build, False))
     if not matched:
-        choices.append(BuildChoice(f"{stored.build_name} (project)", stored, True))
+        choices.append(BuildChoice(_stored_label(stored.build_name), stored, True))
     return choices
+
+
+def _stored_label(name: str) -> str:
+    """The menu label of a choice carrying the project's own snapshot."""
+    if name == CUSTOM_BUILD_NAME:
+        return name
+    return f"{name} (project)"
 
 
 def selected_build(state: EditorState, member: Placement) -> Build | None:

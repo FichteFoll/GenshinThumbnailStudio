@@ -70,6 +70,8 @@ all under `src/genshin_thumbnail_studio/`:
   and the JSON project file format.
 - `storage.py` — project/preset persistence and the app data dir.
 - `enka/` — all network interaction with Enka Network, over the `enka` PyPI package.
+  Its `catalog.py` is the costume and weapon catalog
+  the build editor popup offers its choices from.
 - `renderer/` — pure Pillow compositing, no Qt or network.
 - `gui/` — the PySide6 application.
 
@@ -117,6 +119,9 @@ with a `placeholder_panel()` wherever a slot's derived file has not arrived yet.
   A project file still encodes the selected build's details,
   so it reopens with the framing *and* the C/R and weapon badges it was saved with,
   while the art itself is still re-fetched from Enka.
+  A build the slot's own "Edit ..." popup produced is that same snapshot,
+  named `CUSTOM_BUILD_NAME`, so it needs no field and no format change:
+  the project file stays at `schemaVersion` 4.
 
 ## Docs
 

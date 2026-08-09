@@ -14,6 +14,16 @@ Standalone desktop application for creating Genshin Impact team thumbnails.
 - Remembers each character's build details
   (skin, weapon, constellation, refinement) in the project file,
   so a project still opens correctly after the Enka profile has changed.
+- Lets the user edit a character's build directly, through an "Edit ..." item
+  at the bottom of that slot's build menu.
+  The popup it opens configures the skin, the weapon,
+  the constellation count and the weapon refinement count,
+  plus the element for the Traveler, whose element the source data cannot pin down.
+  Accepting it frames that slot with a "Custom" build,
+  saved in the project file the way any other build it is framed with is,
+  while the build it was based on stays available in the menu.
+  The skin and weapon choices offered come from Enka's own costume
+  and weapon data, not from the profile.
 - Supports one two-team Spiral Abyss thumbnail
   or three four-character Stygian Onslaught thumbnails.
 - Character art, skins and weapon icons come from Enka's own asset URLs.

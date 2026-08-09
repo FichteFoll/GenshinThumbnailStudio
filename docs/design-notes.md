@@ -60,6 +60,22 @@ the panel and badge render caches key on the derived path itself
 (`str(art_path)`, `str(weapon_path)`) rather than on a name,
 for the same reason a stand-in name was wrong above.
 
+**A build the editor popup produces is the placement's snapshot, not a field
+of its own.**
+It is not a different kind of thing from the builds already in the menu: it
+belongs to one slot, it is what that slot draws, and it is what the project
+should reopen with, which is precisely `Placement.build`. Giving it a second
+field would have bought only its survival of the user then picking a profile
+build, at the price of a format change, a menu rule that merges two sources, a
+model write of its own, and a rule for when the second field goes stale. It
+follows the ordinary snapshot's life instead: a different selection replaces
+it, retyping the character drops it, and undo brings it back, exactly as for
+any other build. It needs no unique name to stay apart from another slot's,
+because a placement already owns its art: two of them differ in their
+`art_url`/`weapon_url`, which is what `art_path(root)`/`weapon_path(root)`
+key on, so `CUSTOM_BUILD_NAME = "Custom"` can be the name every one of them
+carries without a colliding identity following from that.
+
 **Existence now means "downloaded and validated."**
 The old in-memory dict provided that guarantee implicitly:
 a slot only learned of its art after `on_asset` fired for it,
@@ -83,6 +99,40 @@ What actually determines whether two builds need one download or two
 is `(build.art_url, build.weapon_url)`, not their names or a name-based key.
 `Build` is mutable and therefore unhashable, so the in-flight set holds
 that tuple rather than the build itself.
+
+**`catalog.py` is a separate module, fed by two files the `enka` library
+already downloads plus one this app downloads itself.**
+`characters.json` and `text_map.json` give the costume and element data
+for free, since the library fetches them regardless; the weapon list does
+not exist in either, so `load_catalog()` pulls Enka's own public weapon
+catalog (`WEAPON_DATA_URL`) into `weapons.json` beside them.
+A 7-day refresh is what keeps the build editor from paying that download
+on every "Edit ..." click while still catching new weapons within a week,
+and a failed refresh falling back to the stale file on disk (rather than
+raising) is what keeps a network hiccup from blocking the popup entirely;
+an altogether missing cache degrades one step further,
+to the build's own weapon rather than an error, for the same reason.
+
+**Skin labels are derived from art file names, not from any Enka data field.**
+Costume names appear nowhere in `characters.json`, `text_map.json` or the
+weapon catalog, but the costume's `Art` path already encodes one
+(`UI_Costume_AyakaCostumeFruhling` -> `Fruhling`): stripping the fixed
+`UI_Costume_` prefix and everything up to and including the last
+`Costume` in what remains recovers it without a name lookup that does not
+exist. It is a display label only, falling back to the costume id when the
+stem does not yield one; nothing is keyed by it.
+
+**The element row exists only for the Traveler.**
+Every other character's element is a fixed fact of the source data;
+offering a control for it would let the popup produce a build the game
+could never show, and offering a disabled one would still ask to be read
+and still imply the value could be something else, so there is no row.
+The Traveler is the one playable name Enka splits into
+many character entries, one per body and element, that disagree about `Element`
+precisely because the source data itself cannot pin the element down
+without knowing which one and which element the player chose,
+so `element_is_variable()` enables the control exactly there
+and shows the source build's element, disabled, everywhere else.
 
 ## `renderer/`
 
@@ -211,6 +261,18 @@ for the same reason `ProjectFiles` does,
 because the drag handlers commit through it.
 `MainWindow.member_changed()` is public rather than private
 so the window satisfies the `TeamFieldsEditor` Protocol.
+`catalog()` follows the same rule for the same reason: every collaborator
+reaches its long-lived resources
+(`EnkaClient`, `PresetStore`, `AssetLoader`, the `QThreadPool`)
+through the window and its `...Editor` Protocol, so the `Catalog` belongs
+there too, even though that is what pushes
+`main_window.py` past the line-count tripwire. Carving out an exception
+to keep one module short would have cost more than the raised bound does:
+the window would then hold some resources and writes directly and reach
+others through an inconsistent side channel, which is a worse trade than
+a module that is fifty lines longer. The tripwire moved from 400 to 450
+once, deliberately, for this; the intended fix for a window that keeps
+growing is a later decomposition of it, not a further raise.
 
 `ProjectFiles` takes the window twice,
 as `parent: QMainWindow` for the dialogs and status bar

@@ -10,11 +10,12 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QThreadPool
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
+    QApplication,
     QMainWindow,
     QSplitter,
 )
 
-from ..enka import EnkaClient, is_uid
+from ..enka import Catalog, EnkaClient, is_uid, load_catalog
 from ..models import Build, Placement, Project
 from ..storage import cache_dir, load_last_profile
 from . import dialogs, profile_io
@@ -56,7 +57,11 @@ class MainWindow(QMainWindow):
         self.asset_loader.failed.connect(self._on_asset_download_failed)
         self._render = RenderPipeline(self, self._thread_pool, self)
         self._closing = False
-        self.client = EnkaClient(cache_dir() / "enka")
+        # Where the `enka` library's own data files land, and therefore where
+        # the catalog reads its characters, names and weapons from.
+        self._enka_asset_root = cache_dir() / "enka"
+        self._catalog: Catalog | None = None
+        self.client = EnkaClient(self._enka_asset_root)
         self._build_ui()
         # Ready to use, not a fetch on startup (R13): filled in but not loaded.
         self.controls_panel.profile_edit.setText(load_last_profile())
@@ -211,6 +216,23 @@ class MainWindow(QMainWindow):
         self._history.schedule()
         self.asset_loader.ensure()
         self.schedule_render()
+
+    def catalog(self) -> Catalog:
+        """Enka's costumes and weapons, loaded on the first "Edit ..." and kept.
+
+        Lazily, because building it costs a download the app must not pay on
+        startup or during a render, and behind a wait cursor because that
+        download blocks the GUI thread the way a profile fetch does.
+        `load_catalog()` never raises: a failed load yields an empty catalog,
+        which still offers the build's own skin and weapon.
+        """
+        if self._catalog is None:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            try:
+                self._catalog = load_catalog(self._enka_asset_root)
+            finally:
+                QApplication.restoreOverrideCursor()
+        return self._catalog
 
     def _save_current_preset(self) -> None:
         self._presets.remember(self, self.current_member())

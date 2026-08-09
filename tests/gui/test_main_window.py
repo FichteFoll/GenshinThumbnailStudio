@@ -3,8 +3,10 @@
 from pathlib import Path
 
 import pytest
+from PySide6.QtWidgets import QApplication
 
-from genshin_thumbnail_studio.gui import MainWindow
+from genshin_thumbnail_studio.enka import Catalog
+from genshin_thumbnail_studio.gui import MainWindow, main_window
 
 from .helpers import close_ignoring_unsaved_changes, qapp
 
@@ -24,6 +26,51 @@ def test_new_window_has_no_unsaved_changes(tmp_path: Path, monkeypatch: pytest.M
     app = qapp()
     window = MainWindow()
     assert not window.is_dirty()
+    window.close()
+    app.processEvents()
+
+
+def test_the_catalog_is_loaded_once_and_kept(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Loading it costs a download, so it happens on the first "Edit ..." and
+    never again for the life of the window."""
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+    roots: list[Path] = []
+
+    def fake_load_catalog(asset_root: Path) -> Catalog:
+        roots.append(asset_root)
+        return Catalog({}, {}, {})
+
+    monkeypatch.setattr(main_window, "load_catalog", fake_load_catalog)
+
+    first = window.catalog()
+    second = window.catalog()
+
+    assert first is second
+    assert roots == [window._enka_asset_root]
+    window.close()
+    app.processEvents()
+
+
+def test_a_failing_catalog_load_still_restores_the_cursor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`load_catalog()` promises never to raise, but a wait cursor left behind
+    by a broken promise would freeze the pointer for the rest of the session."""
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+
+    def failing_load_catalog(asset_root: Path) -> Catalog:
+        raise OSError("no catalog today")
+
+    monkeypatch.setattr(main_window, "load_catalog", failing_load_catalog)
+
+    with pytest.raises(OSError):
+        window.catalog()
+
+    assert QApplication.overrideCursor() is None
     window.close()
     app.processEvents()
 

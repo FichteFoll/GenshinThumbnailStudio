@@ -42,7 +42,10 @@ importing neither the package nor PySide6.
 It asserts the exact set of modules,
 that sibling modules are reached by relative import,
 that each facade's `__all__` only names things it binds,
-and that no module has grown past a line-count tripwire.
+and that no module has grown past a line-count tripwire (450 lines).
+That bound was raised from 400 once, deliberately,
+when the build editor's wiring landed in `gui/main_window.py`:
+see the note on `catalog()` in [design-notes.md](design-notes.md).
 
 Read it before moving or adding a module,
 since it is the test that will fail.
@@ -62,6 +65,9 @@ and pytest imports a package's `conftest.py` before any of its test modules.
 
 `tests/enka/` needs no `conftest.py` at all:
 nothing in that package imports Qt.
+`tests/enka/test_catalog.py` is part of that package:
+it builds `Catalog` from small literal dicts and monkeypatches
+`catalog.download`, so it touches neither the network nor Qt.
 
 `tests/renderer/` has no `conftest.py` either:
 the renderer is Qt-free,
@@ -72,7 +78,10 @@ So do the `tests/gui/` modules whose subjects construct no widget
 `AssetLoader` is a `QObject`, not a widget,
 and its tests run jobs inline through a `QThreadPool` stand-in).
 Everything else in `tests/gui/` needs the offscreen platform,
-including `test_history.py`, whose `HistoryController` tests build a `QWidget` and a `QShortcut`.
+including `test_history.py`, whose `HistoryController` tests build a `QWidget` and a `QShortcut`,
+and `test_build_editor.py`, which constructs `BuildEditorDialog` directly
+against a `Catalog` built from literal dicts, driving its widgets
+rather than `exec()`ing the dialog.
 
 PySide6 still gets imported for all of these
 (reaching any `gui` submodule executes the package facade, which imports `MainWindow`),

@@ -4,7 +4,7 @@ Qt-free: `build_choices()` is the pure rule the dropdown renders.
 """
 
 from genshin_thumbnail_studio.gui.build_choices import BuildChoice, build_choices
-from genshin_thumbnail_studio.models import LIVE_BUILD_NAME, Build
+from genshin_thumbnail_studio.models import CUSTOM_BUILD_NAME, LIVE_BUILD_NAME, Build
 
 
 def make_build(
@@ -151,3 +151,40 @@ def test_no_choice_of_any_case_carries_a_suffixed_build_name() -> None:
         [],
         [f"{LIVE_BUILD_NAME} (project)"],
     ]
+
+
+def test_a_slots_own_edited_build_is_offered_last_under_a_bare_name() -> None:
+    """The custom build is the project's snapshot, so the merge already offers
+    it; it only keeps its bare name, because "(project)" would say nothing."""
+    live = make_build()
+    saved = make_build("Bow DPS")
+    custom = make_build(CUSTOM_BUILD_NAME, constellation=6, refinement=5)
+
+    choices = build_choices([live, saved], custom)
+
+    assert labels(choices) == [LIVE_BUILD_NAME, "Bow DPS", CUSTOM_BUILD_NAME]
+    assert selected_labels(choices) == [CUSTOM_BUILD_NAME]
+    # The build it was based on stays selectable beside it (R6).
+    assert choices[0].build is live and choices[1].build is saved
+    assert choices[2].build is custom
+
+
+def test_a_profile_build_named_custom_keeps_its_bare_name_too() -> None:
+    """Nothing keys on the name beyond the label, so a profile that happens to
+    hold a build called "Custom" merges as any other name would."""
+    live = make_build()
+    profile_custom = make_build(CUSTOM_BUILD_NAME)
+
+    choices = build_choices([live, profile_custom], profile_custom)
+
+    assert labels(choices) == [LIVE_BUILD_NAME, CUSTOM_BUILD_NAME]
+    assert selected_labels(choices) == [CUSTOM_BUILD_NAME]
+
+
+def test_a_custom_build_is_the_whole_menu_without_a_profile() -> None:
+    custom = make_build(CUSTOM_BUILD_NAME)
+
+    choices = build_choices([], custom)
+
+    assert labels(choices) == [CUSTOM_BUILD_NAME]
+    assert choices[0].selected and choices[0].build is custom

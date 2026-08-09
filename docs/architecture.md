@@ -63,6 +63,13 @@ Facts that the rest of the app depends on:
   `Build.details()` is the four user-visible fields
   (costume id, weapon name, constellation, refinement)
   a project's snapshotted build is compared against a live one by.
+- `CUSTOM_BUILD_NAME = "Custom"` is the name a build carries
+  once the slot's "Edit ..." popup has produced it.
+  Such a build is the placement's snapshot like any other,
+  stored in `Placement.build` and saved with it;
+  the name needs no uniquifying,
+  since a build resolves its own art,
+  and nothing keys on it beyond the menu label.
 - `Build.art_path(root)`/`Build.weapon_path(root)` are a pure function
   of the build and the root, so two slots holding different builds of one
   character never share a weapon icon or a skin, and two builds that are
@@ -84,6 +91,8 @@ Facts that the rest of the app depends on:
   it carries the pre-v3 `fx`/`fy` conversion below,
   and the v3 -> v4 step of defaulting `profileName` and every placement's `build`.
   A file already at 4 passes through untouched.
+  The build editor needed no format change:
+  a build its popup produces is the same snapshot the format already carries.
 - `storage.py`'s pre-v3 migration, still part of the same entry point,
   turns placements and presets that stored an `fx`/`fy` focal point
   in source-art space into the panel-relative offsets.
@@ -137,6 +146,17 @@ All network interaction with Enka Network, over the `enka` PyPI package.
   so a file only ever exists at its final path once it is complete,
   and calling `on_build(build)` once both of a build's files are published.
   It returns `None`: there is nothing left to key, since the paths are the identity.
+- `catalog.py` — the costume and weapon catalog the build editor popup
+  offers its choices from: `Catalog` (`skins(build)`, `weapons_for(build)`,
+  `element_is_variable(build)`), the `SkinOption` and `WeaponOption`
+  dataclasses, `WEAPON_TYPE_IDS` and `load_catalog(asset_root)`.
+  `load_catalog()` reads the `enka` library's already-downloaded
+  `characters.json` and `text_map.json` from the asset root,
+  and downloads `WEAPON_DATA_URL` (Enka's own weapon catalog) into
+  `weapons.json` there, refreshing it after `WEAPON_DATA_MAX_AGE_DAYS`;
+  a missing or unreadable file degrades to an empty catalog
+  and a failed download falls back to whatever is already on disk.
+  `load_catalog()` never raises.
 
 Only `client.py` imports the third-party `enka` package,
 and it imports it as `enka_api`:
@@ -149,6 +169,8 @@ Import direction: `errors` imports nothing from the package;
 `http` and `parsing` import `errors`;
 `profile` imports `errors` and `http`;
 `assets` imports `errors` and `http`;
+`catalog` imports `errors`, `http` and `parsing`, and reaches `Build`
+through `..models`;
 `client` imports `errors`, `http`, `parsing` and `profile`.
 Only `client.py` imports the third-party library,
 so everything else in the package is testable without it.
@@ -233,6 +255,14 @@ and `storage.py` for persistence.
   and thin delegates to the collaborators below.
   It constructs every widget through the two panels
   and owns no child widget of its own.
+  It also owns the `Catalog` the way it owns its `EnkaClient`:
+  `catalog()` loads it lazily on first use, from the same
+  `cache_dir() / "enka"` asset root the client already reads,
+  wrapped in the same wait-cursor pattern `ProfileLoader.load()` uses,
+  and caches it for later calls.
+  A build the editor popup produces reaches the model through the existing
+  `build_selected()`; it is not a different kind of thing from the builds
+  already in that menu, so it needs no model write of its own.
 - `actions.py` — `ProjectActions`
   and the `ProjectActionHost` Protocol it dispatches through.
   Owns the five project `QAction`s
@@ -276,6 +306,19 @@ and `storage.py` for persistence.
   and `reset_requested`.
   `preview`'s own `slot_selected`, `placement_dragged` and `zoom_requested`
   are not re-exposed: the window connects to `editor_panel.preview` directly.
+- `build_editor.py` — `BuildEditorDialog`, the per-character build editor
+  popup an "Edit ..." menu item opens, and `ask_custom_build(parent, build,
+  catalog, custom_name)`, which constructs it, `exec()`s it,
+  and returns `result_build()` on acceptance, else `None`.
+  The dialog seeds a skin combo, a weapon combo and constellation/refinement
+  spin boxes from a `Catalog`'s options for the build passed in,
+  plus an `element_combo` (`ELEMENT_CHOICES`) added only when
+  `catalog.element_is_variable(build)` is true,
+  so `element_combo` is `None` for every character but the Traveler
+  and the form has no element row at all.
+  `result_build()` is a copy of the seed build (`dataclasses.replace`)
+  with the chosen skin, weapon, constellation, refinement and, where there is
+  a row for it, element, plus `build_name=custom_name` and `build_id=""`.
 - `dialogs.py` — the blocking dialogs as free functions taking the parent widget:
   `confirm_discard_changes()`, `confirm_cache_refresh()`,
   `show_error()`, `show_export_finished()`, `ask_lineup_text()`, `ask_export_target()`.
@@ -298,7 +341,7 @@ and `storage.py` for persistence.
 - `build_choices.py` — Qt-free: `selected_build()`
   (the `Placement.build` snapshot, or the character's first/live build,
   or `None`), `resolve_build()` (`selected_build()`, also assigning the result
-  onto the member), `BuildChoice` and `build_choices()`,
+  onto the member), `BuildChoice` and `build_choices(profile_builds, stored)`,
   which merges a profile's builds with a project's stored one
   into the labelled, ordered list the build menu renders.
   Exactly those entries that carry the project's snapshot get a trailing
@@ -306,6 +349,13 @@ and `storage.py` for persistence.
   `Build.build_name`; the profile's own entries keep their bare build names,
   including the merged entry whose details match the snapshot,
   which carries the profile's fresher `Build` and is indistinguishable from it.
+  A snapshot the slot's own "Edit ..." popup produced is the exception:
+  it carries `CUSTOM_BUILD_NAME` and keeps its bare name,
+  since it comes from the project by definition
+  and the suffix would say nothing.
+  It needs no argument of its own:
+  it is the stored build, so the merge already appends it last
+  and already marks it as the selected entry.
 - `placement.py` — `MIN_ZOOM`, `MAX_ZOOM` and `PlacementController`:
   `offset_bounds()` (reading the member's art size through its build's
   derived art path when that file exists, `STANDARD_ART_SIZE` otherwise),
@@ -339,10 +389,19 @@ and `storage.py` for persistence.
   with `build_menu()` (the menu of that character's `build_choices()`,
   each action checked exactly when selected,
   and all of them sharing one exclusive `QActionGroup`,
-  which is what makes Qt draw them as radio buttons rather than check boxes)
+  which is what makes Qt draw them as radio buttons rather than check boxes,
+  plus a separator and a non-checkable "Edit ..." action below them,
+  outside that group, added only when the slot has at least one build choice)
   and `show_build_menu()` (popping it up under the slot's button).
   `refresh_build_buttons()` also sets each slot's button caption to the
   label of its currently selected build choice.
+  `_edit_build(team, slot)` takes the slot's currently selected build
+  (falling back to its first choice) as the seed, opens
+  `ask_custom_build()` against `self._editor.catalog()`,
+  and on a build back from it goes through `_select_build()`,
+  the same path an entry of the menu takes.
+  `TeamFieldsEditor` gains `catalog() -> Catalog` for this,
+  alongside its existing `build_selected()`.
   Constructed once in `MainWindow.__init__` with the window as
   `TeamFieldsEditor`, the panel's layout and the window's `HistoryController`.
   `MainWindow` keeps thin `rebuild_team_fields()` and `populate_combo_items()`
@@ -374,9 +433,10 @@ and `history.py`'s `PlacementHistory`.
 Qt-bound: everything else, including `history.py`'s `HistoryController`.
 
 Import direction:
-`controls_panel`, `dialogs`, `lineup`, `preview`, `render_job`, `state`,
+`build_editor`, `controls_panel`, `dialogs`, `lineup`, `preview`, `render_job`, `state`,
 `style` and `team_slots` import nothing from the package
-(`render_job` reaches the renderer through `..renderer`);
+(`render_job` reaches the renderer through `..renderer`,
+and `build_editor` reaches `Build` through `..models` and `Catalog` through `..enka`);
 `asset_loader`, `build_choices`, `history`, `placement` and `presets` import `state`
 (`history` also reaches `Placement` through `..models`,
 and `asset_loader` reaches `download_assets` through `..enka`);
@@ -384,8 +444,8 @@ and `asset_loader` reaches `download_assets` through `..enka`);
 `editor_panel` imports `preview`;
 `render_pipeline` imports `state` and `render_job`,
 and reaches `Project` through `..models`;
-`team_fields` imports `state`, `history`, `build_choices` and `team_slots`,
-and reaches `Placement` through `..models`;
+`team_fields` imports `state`, `history`, `build_choices`, `build_editor` and `team_slots`,
+and reaches `Placement` through `..models` and `Catalog` through `..enka`;
 `project_io` imports `state`, `dialogs`, `history`, `asset_loader`, `build_choices`,
 `controls_panel` and `editor_panel`,
 and reaches `..models`, `..storage` and `..renderer` outside the package;
@@ -394,10 +454,12 @@ and reaches `..models`, `..storage` and `..renderer` outside the package;
 and reaches `..enka` and `..storage` outside the package;
 `main_window` imports `actions`, `asset_loader`, `build_choices`, `controls_panel`,
 `dialogs`, `editor_panel`, `history`, `placement`, `presets`, `profile_io`, `project_io`,
-`render_pipeline`, `style` and `team_fields`.
-It imports neither `app` nor `state`, `lineup`, `preview`, `render_job`
-or `team_slots`:
+`render_pipeline`, `style` and `team_fields`,
+and reaches `Catalog`/`load_catalog` through `..enka`.
+It imports neither `app` nor `state`, `lineup`, `preview`, `render_job`,
+`team_slots` or `build_editor`:
 `state` it satisfies structurally,
+`build_editor` it reaches through `team_fields`,
 and the other four it reaches through the panel or the collaborator that owns them.
 `dialogs` and `profile_io` it imports as modules
 (`from . import dialogs, profile_io`) and the rest by name,
