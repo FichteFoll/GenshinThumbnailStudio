@@ -17,21 +17,14 @@ from pathlib import Path
 from typing import Protocol
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (
-    QApplication,
-    QComboBox,
-    QFileDialog,
-    QLabel,
-    QLineEdit,
-    QMainWindow,
-    QRadioButton,
-)
+from PySide6.QtWidgets import QApplication, QComboBox, QFileDialog, QMainWindow
 
 from .. import storage
 from ..models import Build, Project
 from ..renderer import export_project, safe_name
 from . import dialogs
 from .asset_loader import AssetLoader
+from .controls_panel import ControlsPanel
 from .history import HistoryController
 from .state import EditorState
 
@@ -50,11 +43,7 @@ class ProjectEditor(EditorState, Protocol):
     saved_snapshot: Project
     selected: tuple[int, int]
     asset_loader: AssetLoader
-    uid_edit: QLineEdit
-    output_name: QLineEdit
-    profile_status: QLabel
-    abyss_radio: QRadioButton
-    stygian_radio: QRadioButton
+    controls_panel: ControlsPanel
     boss_combo: QComboBox
 
     def validate_team(self) -> list[Build]: ...
@@ -98,10 +87,11 @@ class ProjectFiles:
 
     def _write_project(self, path: Path) -> None:
         editor = self._editor
+        controls = editor.controls_panel
         with contextlib.suppress(ValueError):
             editor.validate_team()
-        editor.project.uid = editor.uid_edit.text().strip()
-        editor.project.output_name = editor.output_name.text().strip() or "genshin_thumbnail"
+        editor.project.uid = controls.uid_edit.text().strip()
+        editor.project.output_name = controls.output_name.text().strip() or "genshin_thumbnail"
         storage.save_project(editor.project, path)
         editor.set_project_path(path)
         editor.saved_snapshot = copy.deepcopy(editor.project)
@@ -110,6 +100,7 @@ class ProjectFiles:
     def open(self) -> None:
         parent = self._parent
         editor = self._editor
+        controls = editor.controls_panel
         path, _ = QFileDialog.getOpenFileName(parent, "Open project", "", "JSON (*.json)")
         if not path:
             return
@@ -119,14 +110,14 @@ class ProjectFiles:
             editor.set_project_path(Path(path))
             editor.selected = (project.active_team if project.mode == "stygian" else 0, 0)
             editor.assets = {}
-            editor.abyss_radio.blockSignals(True)
-            editor.stygian_radio.blockSignals(True)
-            editor.abyss_radio.setChecked(project.mode == "abyss")
-            editor.stygian_radio.setChecked(project.mode == "stygian")
-            editor.abyss_radio.blockSignals(False)
-            editor.stygian_radio.blockSignals(False)
-            editor.uid_edit.setText(project.uid)
-            editor.output_name.setText(project.output_name)
+            controls.abyss_radio.blockSignals(True)
+            controls.stygian_radio.blockSignals(True)
+            controls.abyss_radio.setChecked(project.mode == "abyss")
+            controls.stygian_radio.setChecked(project.mode == "stygian")
+            controls.abyss_radio.blockSignals(False)
+            controls.stygian_radio.blockSignals(False)
+            controls.uid_edit.setText(project.uid)
+            controls.output_name.setText(project.output_name)
             editor.boss_combo.setVisible(project.mode == "stygian")
             editor.boss_combo.setCurrentIndex(project.active_team)
             editor.rebuild_team_fields()
@@ -144,7 +135,7 @@ class ProjectFiles:
             editor.populate_combo_items()
             age_minutes = max(0.0, (datetime.now(timezone.utc) - last_update).total_seconds() / 60)
             local = last_update.astimezone().strftime("%Y-%m-%d %H:%M")
-            editor.profile_status.setText(
+            controls.profile_status.setText(
                 f"{len(builds)} builds · from cache · last updated {local} · {age_minutes:.0f} min ago"
             )
             editor.asset_loader.ensure()
@@ -162,6 +153,7 @@ class ProjectFiles:
     def export(self) -> None:
         parent = self._parent
         editor = self._editor
+        output_name = editor.controls_panel.output_name
         try:
             editor.validate_team()
             if set(editor.selected_name_keys()) - set(editor.assets):
@@ -170,14 +162,14 @@ class ProjectFiles:
                 editor.asset_loader.ensure()
                 dialogs.show_error(parent, "Character art is still downloading", "Try the export again in a moment.")
                 return
-            stem = safe_name(editor.output_name.text().strip() or "genshin_thumbnail")
+            stem = safe_name(output_name.text().strip() or "genshin_thumbnail")
             default_dir = editor.project_path.parent if editor.project_path else Path.cwd()
             target = dialogs.ask_export_target(parent, editor.project.mode, default_dir, stem)
             if target is None:
                 return
             directory, chosen_stem = target
             stem = safe_name(chosen_stem)
-            editor.output_name.setText(stem)
+            output_name.setText(stem)
             editor.project.output_name = stem
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
             written = export_project(editor.project, editor.assets, directory)

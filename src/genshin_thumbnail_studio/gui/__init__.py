@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from .app import run
 from .asset_loader import AssetJob, AssetJobSignals, AssetLoader
+from .controls_panel import RESOLUTION_OPTIONS, ControlsPanel
 from .dialogs import (
     ask_export_target,
     ask_lineup_text,
@@ -15,7 +16,7 @@ from .dialogs import (
 )
 from .history import HISTORY_DEBOUNCE_MS, HISTORY_LIMIT, HistoryController, PlacementHistory
 from .lineup import parse_lineup
-from .main_window import RESOLUTION_OPTIONS, MainWindow
+from .main_window import MainWindow
 from .placement import MAX_ZOOM, MIN_ZOOM, PlacementController
 from .presets import PresetStore, preset_key
 from .preview import PreviewWidget
@@ -36,6 +37,7 @@ __all__ = [
     "AssetJob",
     "AssetJobSignals",
     "AssetLoader",
+    "ControlsPanel",
     "EditorState",
     "HistoryController",
     "MainWindow",

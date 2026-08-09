@@ -181,7 +181,7 @@ def test_switching_modes_schedules_a_render_instead_of_blanking_the_canvas(
     assert rendered is not None and not rendered.isNull()
     window._render.timer.stop()
 
-    window.stygian_radio.setChecked(True)
+    window.controls_panel.stygian_radio.setChecked(True)
 
     # The new mode's blank teams have a placeholder rendering of their own, so
     # the canvas keeps the old frame until that render lands, rather than

@@ -152,7 +152,7 @@ def test_switching_mode_on_a_clean_window_does_not_prompt(tmp_path: Path, monkey
     monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
     window = MainWindow()
 
-    window.stygian_radio.setChecked(True)
+    window.controls_panel.stygian_radio.setChecked(True)
 
     assert window.project.mode == "stygian"
 
@@ -171,12 +171,12 @@ def test_switching_mode_with_unsaved_changes_and_cancelling_keeps_the_previous_m
     window.project.teams[0][0].offset_x = 0.3
     original_project = window.project
 
-    window.stygian_radio.setChecked(True)
+    window.controls_panel.stygian_radio.setChecked(True)
 
     assert window.project is original_project
     assert window.project.mode == "abyss"
-    assert window.abyss_radio.isChecked()
-    assert not window.stygian_radio.isChecked()
+    assert window.controls_panel.abyss_radio.isChecked()
+    assert not window.controls_panel.stygian_radio.isChecked()
 
     DecisionMessageBox.choice = "discard"
     window.close()
@@ -193,7 +193,7 @@ def test_switching_mode_with_unsaved_changes_and_discarding_switches(
     window = MainWindow()
     window.project.teams[0][0].offset_x = 0.3
 
-    window.stygian_radio.setChecked(True)
+    window.controls_panel.stygian_radio.setChecked(True)
 
     assert window.project.mode == "stygian"
     assert not window.is_dirty()
@@ -216,7 +216,7 @@ def test_switching_mode_with_unsaved_changes_and_saving_saves_then_switches(
     window = MainWindow()
     window.project.teams[0][0].offset_x = 0.3
 
-    window.stygian_radio.setChecked(True)
+    window.controls_panel.stygian_radio.setChecked(True)
 
     assert path.exists()
     assert window.project.mode == "stygian"

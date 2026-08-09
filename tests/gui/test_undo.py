@@ -246,7 +246,7 @@ def test_switching_the_mode_drops_the_previous_modes_history(
     # A clean window, so the mode switch does not put up the unsaved-changes prompt.
     window = MainWindow()
 
-    window.stygian_radio.setChecked(True)
+    window.controls_panel.stygian_radio.setChecked(True)
     window._history.undo()
 
     assert window.project.mode == "stygian"

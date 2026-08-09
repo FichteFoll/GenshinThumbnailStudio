@@ -148,11 +148,24 @@ and `storage.py` for persistence.
   `__main__.py` and `launch.py`.
 - `style.py` — `MAIN_STYLESHEET`, the whole application's QSS,
   applied once to the main window.
-- `main_window.py` — `RESOLUTION_OPTIONS` and `MainWindow`:
+- `main_window.py` — `MainWindow`:
   profile loading, placement editing,
   the four project `QAction`s (`Ctrl+O`, `Ctrl+S`, `Ctrl+Shift+S`, `Ctrl+E`),
   team-slot reordering, and the close sequence.
   The largest module by far.
+- `controls_panel.py` — `RESOLUTION_OPTIONS` and `ControlsPanel`,
+  the window's left column:
+  the mode radios, the UID entry with its load button and profile status,
+  the paste-lineup button, the scrolling `team_container`/`team_layout`,
+  the output name and resolution fields,
+  and the open, save and export buttons.
+  All of them stay public attributes,
+  which is what `project_io.ProjectEditor` and the tests reach through;
+  user intent leaves the panel as
+  `mode_changed`, `profile_requested`, `paste_requested`,
+  `output_name_changed` and `resolution_changed`.
+  `align_save_button_height()` is called by the window
+  once its stylesheet is applied.
 - `dialogs.py` — the blocking dialogs as free functions taking the parent widget:
   `confirm_discard_changes()`, `choose_stale_profile_action()`, `confirm_cache_refresh()`,
   `show_error()`, `show_export_finished()`, `ask_lineup_text()`, `ask_export_target()`.
@@ -204,11 +217,13 @@ Import direction: `lineup`, `style`, `state` and `dialogs` import nothing from t
 `placement`, `presets`, `history` and `asset_loader` import `state`
 (`history` also reaches `Placement` through `..models`,
 and `asset_loader` reaches `download_assets` through `..akasha`);
-`preview`, `team_slots` and `render_job` import nothing from the package
+`preview`, `team_slots`, `render_job` and `controls_panel`
+import nothing from the package
 (`render_job` reaches the renderer through `..renderer`);
 `render_pipeline` imports `state` and `render_job`,
 and reaches `Project` through `..models`;
-`project_io` imports `state`, `dialogs`, `history` and `asset_loader`,
+`project_io` imports `state`, `dialogs`, `history`, `asset_loader`
+and `controls_panel`,
 and reaches `..models`, `..storage` and `..renderer` outside the package;
 `main_window` imports every sibling except `state`,
 which it satisfies structurally rather than importing,

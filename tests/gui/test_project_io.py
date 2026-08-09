@@ -211,7 +211,7 @@ def test_load_profile_persists_profile_cache(tmp_path: Path, monkeypatch: pytest
         return builds, 5.0, last_update
 
     monkeypatch.setattr(window.client, "load_profile", fake_load_profile)
-    window.uid_edit.setText(uid)
+    window.controls_panel.uid_edit.setText(uid)
 
     window.load_profile()
 
@@ -279,7 +279,7 @@ def test_export_abyss_writes_the_file_chosen_in_the_save_dialog(
     app = qapp()
     window = MainWindow()
     _prepare_export_window(window, tmp_path, TEAM_NAMES)
-    window.output_name.setText("prefilled")
+    window.controls_panel.output_name.setText("prefilled")
 
     monkeypatch.setattr(dialogs, "QMessageBox", StubMessageBox)
     monkeypatch.setattr(
@@ -301,7 +301,7 @@ def test_export_abyss_writes_the_file_chosen_in_the_save_dialog(
     assert [Path(name).name for name in default_names] == ["prefilled.png"]
     assert chosen.exists()
     assert list(chosen.parent.glob("*.png")) == [chosen]
-    assert window.output_name.text() == "chosen"
+    assert window.controls_panel.output_name.text() == "chosen"
     assert window.project.output_name == "chosen"
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
@@ -312,10 +312,10 @@ def test_export_stygian_still_asks_for_a_folder(tmp_path: Path, monkeypatch: pyt
     app = qapp()
     window = MainWindow()
     # Switching the mode replaces window.project, so fill the teams afterwards.
-    window.stygian_radio.setChecked(True)
+    window.controls_panel.stygian_radio.setChecked(True)
     names = [*TEAM_NAMES, "Xingqiu", "Ganyu", "Raiden Shogun", "Yelan"]
     _prepare_export_window(window, tmp_path, names)
-    window.output_name.setText("bosses")
+    window.controls_panel.output_name.setText("bosses")
 
     monkeypatch.setattr(dialogs, "QMessageBox", StubMessageBox)
     monkeypatch.setattr(
@@ -353,7 +353,7 @@ def test_export_defaults_to_the_opened_project_folder(tmp_path: Path, monkeypatc
     window.open_project()
 
     _prepare_export_window(window, tmp_path, TEAM_NAMES)
-    window.output_name.setText("prefilled")
+    window.controls_panel.output_name.setText("prefilled")
     default_paths: list[str] = []
 
     def fake_save_dialog(parent: object, title: str, default_path: str, name_filter: str) -> tuple[str, str]:
@@ -551,7 +551,7 @@ def test_export_defaults_to_the_saved_project_folder(tmp_path: Path, monkeypatch
 
     window = MainWindow()
     _prepare_export_window(window, tmp_path, TEAM_NAMES)
-    window.output_name.setText("prefilled")
+    window.controls_panel.output_name.setText("prefilled")
 
     monkeypatch.setattr(dialogs, "QMessageBox", StubMessageBox)
     monkeypatch.setattr(

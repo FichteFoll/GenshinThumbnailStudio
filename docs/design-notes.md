@@ -72,7 +72,8 @@ and intercept a render already in flight.
 
 `main_window.py` was reduced by moving the blocking dialogs to `dialogs.py`,
 the project file flows to `project_io.py`,
-and the throttled preview loop to `render_pipeline.py`.
+the throttled preview loop to `render_pipeline.py`,
+and the left column of the layout to `controls_panel.py`.
 The extracted modules take the window, or the state Protocol it satisfies,
 as a parameter rather than importing `MainWindow`,
 which is what keeps the package acyclic.
@@ -98,6 +99,20 @@ Its throttle is deliberately not a debounce:
 restarting the timer on every mouse-move event
 would mean it never fires during a drag.
 (`HistoryController.schedule()` is the debounce, for the opposite reason.)
+
+`ControlsPanel` is a `QWidget` that owns its children
+and exposes them both ways:
+as public attributes, which `project_io.ProjectEditor` and the tests reach through,
+and as its own signals
+(`mode_changed`, `profile_requested`, `paste_requested`,
+`output_name_changed`, `resolution_changed`),
+which keep the window from reaching into the panel to connect a handler.
+The open, save and export buttons get no signal:
+they trigger `QAction`s the window owns,
+so the window connects `clicked` to `action.trigger` itself.
+`align_save_button_height()` is a method rather than part of the constructor,
+because it can only run once the window has applied the stylesheet
+both buttons size against.
 
 `ProjectFiles` takes the window twice,
 as `parent: QMainWindow` for the dialogs and status bar
@@ -141,7 +156,8 @@ Its `QToolButton::menu-button` rule is not cosmetic:
 once stylesheet-rendered, the tool button stops drawing
 the divider between its main and arrow sections for itself.
 The button also takes its height from `open_button` after the stylesheet is applied,
-because a `QToolButton` derives a taller box than a `QPushButton` from the same padding.
+because a `QToolButton` derives a taller box than a `QPushButton` from the same padding;
+that is `ControlsPanel.align_save_button_height()`.
 
 ### Continuous preview
 

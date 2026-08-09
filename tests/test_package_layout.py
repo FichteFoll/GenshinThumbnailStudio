@@ -45,6 +45,7 @@ EXPECTED_MODULES = {
     "gui/app.py",
     "gui/style.py",
     "gui/main_window.py",
+    "gui/controls_panel.py",
     "gui/asset_loader.py",
     "gui/project_io.py",
     "gui/dialogs.py",
