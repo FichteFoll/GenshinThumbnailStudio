@@ -107,6 +107,8 @@ class ControlsPanel(QWidget):
         controls_layout.addLayout(output_form)
 
         project_row = QHBoxLayout()
+        self.new_button = QPushButton(self._icon(QStyle.StandardPixmap.SP_FileIcon), "New project")
+        project_row.addWidget(self.new_button)
         self.open_button = QPushButton(self._icon(QStyle.StandardPixmap.SP_DialogOpenButton), "Open project")
         # A QToolButton, so its arrow section can open the "Save as..." menu
         # while the main section still saves; `apply_save_action()` fills in the

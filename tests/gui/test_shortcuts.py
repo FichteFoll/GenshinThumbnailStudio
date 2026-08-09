@@ -29,6 +29,7 @@ def _action_for(window: MainWindow, sequence: str) -> QAction:
 @pytest.mark.parametrize(
     ("sequence", "method"),
     [
+        ("Ctrl+N", "new_project"),
         ("Ctrl+O", "open_project"),
         ("Ctrl+S", "save_project"),
         ("Ctrl+Shift+S", "save_project_as"),

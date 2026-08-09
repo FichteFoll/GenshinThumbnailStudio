@@ -57,6 +57,8 @@ class ProjectEditor(EditorState, Protocol):
     def schedule_render(self) -> None: ...
     def load_profile(self) -> None: ...
     def set_project_path(self, path: Path | None) -> None: ...
+    def is_dirty(self) -> bool: ...
+    def save_project(self) -> None: ...
 
 
 class ProjectFiles:
@@ -101,6 +103,35 @@ class ProjectFiles:
         editor.set_project_path(path)
         editor.saved_snapshot = copy.deepcopy(editor.project)
         self._parent.statusBar().showMessage("Project saved", 5000)
+
+    def new(self) -> None:
+        """Reset to a blank abyss project, keeping the profile/UID (R14)."""
+        parent = self._parent
+        editor = self._editor
+        controls = editor.controls_panel
+        if not dialogs.confirm_discard_changes(parent, "start a new project", editor.is_dirty, editor.save_project):
+            return
+        old_project = editor.project
+        editor.project = Project.blank("abyss", old_project.uid)
+        editor.project.profile_name = old_project.profile_name
+        editor.set_project_path(None)
+        editor.selected = (0, 0)
+        controls.abyss_radio.blockSignals(True)
+        controls.stygian_radio.blockSignals(True)
+        controls.abyss_radio.setChecked(True)
+        controls.stygian_radio.setChecked(False)
+        controls.abyss_radio.blockSignals(False)
+        controls.stygian_radio.blockSignals(False)
+        controls.output_name.setText("genshin_thumbnail")
+        controls.resolution_combo.setCurrentIndex(controls.resolution_combo.findData(1080))
+        boss_combo = editor.editor_panel.boss_combo
+        boss_combo.setVisible(False)
+        boss_combo.setCurrentIndex(0)
+        editor.rebuild_team_fields()
+        editor.sync_controls()
+        editor.schedule_render()
+        self._history.reset()
+        editor.saved_snapshot = copy.deepcopy(editor.project)
 
     def open(self) -> None:
         parent = self._parent

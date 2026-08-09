@@ -20,6 +20,7 @@ from genshin_thumbnail_studio.storage import (
     save_project,
 )
 
+from . import helpers
 from .helpers import (
     TEAM_NAMES,
     close_ignoring_unsaved_changes,
@@ -427,6 +428,50 @@ def test_choosing_a_build_snapshots_it_into_the_saved_and_reopened_project(
     reopened = window.project.teams[0][0].build
     assert reopened is not None
     assert reopened.details() == ("203201", "Aqua Simulacra", 6, 5)
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+def test_new_project_resets_everything_but_the_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """R14: "New project" keeps the profile/UID but resets the rest of the state."""
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    monkeypatch.setattr(dialogs, "QMessageBox", helpers.DiscardMessageBox)
+
+    def no_downloads(*args: object, **kwargs: object) -> dict[str, Asset]:
+        return {}
+
+    monkeypatch.setattr(asset_loader, "download_assets", no_downloads)
+    uid = "700000042"
+    save_profile_cache(make_profile(uid, TEAM_NAMES))
+    project_path = tmp_path / "project.json"
+    write_project(project_path, uid)
+    monkeypatch.setattr(
+        project_io.QFileDialog, "getOpenFileName", staticmethod(lambda *args, **kwargs: (str(project_path), ""))
+    )
+    window = MainWindow()
+    window.open_project()
+
+    window.controls_panel.stygian_radio.setChecked(True)
+    window.controls_panel.output_name.setText("custom_output")
+    window.controls_panel.resolution_combo.setCurrentIndex(0)
+    window.project.teams[0][0].offset_x = 0.3
+    assert window.is_dirty()
+    assert window.project.mode == "stygian"
+
+    window.new_project()
+
+    assert window.project.mode == "abyss"
+    assert window.project == Project.blank("abyss", uid)
+    assert not window.is_dirty()
+    assert window.project_path is None
+    assert window.controls_panel.abyss_radio.isChecked()
+    assert window.controls_panel.output_name.text() == "genshin_thumbnail"
+    assert window.controls_panel.resolution_combo.currentData() == 1080
+    assert not window.editor_panel.boss_combo.isVisible()
+    assert window.controls_panel.profile_edit.text() == uid
+    assert window.project.uid == uid
+    assert sorted(window.builds) == sorted(name.casefold() for name in TEAM_NAMES)
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 

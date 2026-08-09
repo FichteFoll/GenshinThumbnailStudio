@@ -385,5 +385,8 @@ class MainWindow(QMainWindow):
     def save_project_as(self) -> None:
         self.project_files.save_as()
 
+    def new_project(self) -> None:
+        self.project_files.new()
+
     def open_project(self) -> None:
         self.project_files.open()
