@@ -7,15 +7,16 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 
-# The PyPI package, not this sub-package of the same name; the alias is what
-# keeps `import enka` inside `enka/client.py` from reading as a self-import.
-import enka as enka_api  # pyright: ignore[reportMissingTypeStubs]
+# The PyPI package, not this sub-package of the same name. `GenshinClient` comes
+# from its defining module rather than the `enka` facade, which re-exports by
+# star import without an `__all__` and so reads as a private import.
+from enka import errors as enka_errors
 
-# The submodules are spelled out rather than reached through `enka_api`, which
-# the type checker cannot resolve attribute-wise: the package ships no stubs.
-from enka import errors as enka_errors  # pyright: ignore[reportMissingTypeStubs]
+# `enka/assets/` ships no `__init__.py`, so the package's `py.typed` marker does
+# not reach it and these two stay unchecked.
 from enka.assets.data import PATH_TO_SOURCE  # pyright: ignore[reportMissingTypeStubs]
 from enka.assets.gi.manager import GI_ASSETS  # pyright: ignore[reportMissingTypeStubs]
+from enka.clients.gi import GenshinClient
 
 from ..models import LIVE_BUILD_NAME, Build, Profile
 from .errors import EnkaError
@@ -43,11 +44,11 @@ def redirect_asset_files(root: Path) -> None:
         asset._path = new_path  # pyright: ignore[reportPrivateUsage]
 
 
-def _create_client() -> enka_api.GenshinClient:
-    return enka_api.GenshinClient(headers={"User-Agent": USER_AGENT})
+def _create_client() -> GenshinClient:
+    return GenshinClient(headers={"User-Agent": USER_AGENT})
 
 
-async def _fetch_live_builds(client: enka_api.GenshinClient, uid: str) -> list[Build]:
+async def _fetch_live_builds(client: GenshinClient, uid: str) -> list[Build]:
     """The player's current showcase, which is what "live" means here.
 
     The saved-builds endpoint also marks entries `live`, but those are whatever
@@ -89,7 +90,7 @@ def _live_builds(response: Mapping[str, Sequence[SavedBuildLike]]) -> list[Build
 
 
 async def _fetch_build_response(
-    client: enka_api.GenshinClient, username: str, owner_hash: str
+    client: GenshinClient, username: str, owner_hash: str
 ) -> Mapping[str, Sequence[SavedBuildLike]]:
     return await client.fetch_builds({"username": username, "hash": owner_hash})
 

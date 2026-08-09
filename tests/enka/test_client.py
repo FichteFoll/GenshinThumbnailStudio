@@ -8,7 +8,7 @@ from types import TracebackType
 from typing import Any
 
 import pytest
-from enka.errors import PlayerDoesNotExistError  # pyright: ignore[reportMissingTypeStubs]
+from enka.errors import PlayerDoesNotExistError
 
 from genshin_thumbnail_studio.enka import client as client_module
 from genshin_thumbnail_studio.enka.errors import EnkaError
