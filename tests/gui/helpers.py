@@ -45,8 +45,6 @@ def create_test_assets(directory: Path, names: list[str]) -> dict[str, Asset]:
             weapon_name="Weapon",
             costume_id=None,
             build_id=str(index),
-            build_md5=str(index),
-            last_build_update=None,
             art_url="https://example.invalid/art.png",
             weapon_url="https://example.invalid/weapon.png",
         )

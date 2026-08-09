@@ -29,14 +29,11 @@ def make_build(name: str) -> Build:
         weapon_name="Splendor of Tranquil Waters",
         costume_id=None,
         build_id=f"{name}-build",
-        build_md5="0123456789abcdef",
-        last_build_update="2026-08-01T12:00:00+00:00",
         art_url=f"https://enka.network/ui/{name}.png",
         weapon_url="https://enka.network/ui/weapon.png",
         element="Hydro",
         rarity=5,
         weapon_rarity=5,
-        raw={"name": name},
     )
 
 

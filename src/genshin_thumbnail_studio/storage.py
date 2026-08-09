@@ -1,7 +1,9 @@
 """Project JSON save/load, app data dir resolution, and preset persistence.
 
-Also migrates pre-v3 project files and presets, whose placements stored an
-`fx`/`fy` focal point, into the current panel-relative offsets.
+`migrate_project_data()` is the single entry point for project migrations:
+pre-v3 files and presets stored an `fx`/`fy` focal point that becomes a
+panel-relative offset, and v3 files predate the profile name and the
+per-placement build snapshot.
 """
 
 from __future__ import annotations
@@ -9,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
@@ -93,23 +96,49 @@ def _migrate_focal_point_if_dict(value: Any, compact: bool) -> Any:
     return value
 
 
+def _migrate_members(value: dict[str, Any], migrate: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[str, Any]:
+    """Apply `migrate` to every placement dict in `value["teams"]`."""
+    teams = value.get("teams")
+    if not isinstance(teams, list):
+        return value
+    result = dict(value)
+    result["teams"] = [
+        [migrate(cast("dict[str, Any]", member)) if isinstance(member, dict) else member
+         for member in cast("list[Any]", team)]
+        if isinstance(team, list)
+        else team
+        for team in cast("list[Any]", teams)
+    ]
+    return result
+
+
+def migrate_project_data(value: dict[str, Any]) -> dict[str, Any]:
+    """Bring a project payload of any past schema version up to the current one.
+
+    The single entry point for project migrations, called before
+    `Project.from_dict()`. A file already at the current version passes through
+    unchanged.
+    """
+    version = int(value.get("schemaVersion", 1))
+    if version <= 1:
+        # Version 1 files predate the output-size setting and were rendered at
+        # the then-hardcoded 720p. Pin it here, since bumping the version below
+        # hides the file's age from `Project.from_dict()`.
+        value = {**value, "outputHeight": 720}
+    if version < 3:
+        compact = str(value.get("mode", "abyss")).casefold() == "abyss"
+        value = _migrate_members(value, lambda member: _migrate_focal_point(member, compact))
+    if version < 4:
+        value = _migrate_members(value, lambda member: {"build": None, **member})
+        value = {**value, "profileName": value.get("profileName", ""), "schemaVersion": 4}
+    return value
+
+
 def load_project(path: Path) -> Project:
     raw: Any = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise ValueError("Project file must contain a JSON object.")
-    value = cast(dict[str, Any], raw)
-    compact = str(value.get("mode", "abyss")).casefold() == "abyss"
-    teams = value.get("teams")
-    if isinstance(teams, list):
-        teams_list = cast("list[Any]", teams)
-        value = dict(value)
-        value["teams"] = [
-            [_migrate_focal_point_if_dict(member, compact) for member in cast("list[Any]", team)]
-            if isinstance(team, list)
-            else team
-            for team in teams_list
-        ]
-    return Project.from_dict(value)
+    return Project.from_dict(migrate_project_data(cast(dict[str, Any], raw)))
 
 
 def profile_cache_path(uid: str) -> Path:
@@ -139,6 +168,38 @@ def load_profile_cache(uid: str) -> tuple[list[Build], datetime] | None:
         return builds, last_update
     except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
         return None
+
+
+def settings_path() -> Path:
+    return app_data_dir() / "settings.json"
+
+
+def _load_settings() -> dict[str, Any]:
+    """The settings object, or an empty one when the file is missing, unreadable
+    or malformed. Settings are a convenience, never worth an error dialog."""
+    path = settings_path()
+    if not path.exists():
+        return {}
+    try:
+        raw: Any = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    return cast("dict[str, Any]", raw)
+
+
+def load_last_profile() -> str:
+    return str(_load_settings().get("lastProfile", ""))
+
+
+def save_last_profile(value: str) -> None:
+    settings = _load_settings()
+    settings["lastProfile"] = value
+    try:
+        settings_path().write_text(json.dumps(settings, indent=2, sort_keys=True), encoding="utf-8")
+    except OSError:
+        return
 
 
 def load_presets() -> dict[str, dict[str, float]]:

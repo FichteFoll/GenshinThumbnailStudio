@@ -47,8 +47,6 @@ def make_build(name: str) -> Build:
         weapon_name="Weapon",
         costume_id=None,
         build_id=f"{name}-build",
-        build_md5="0123456789abcdef",
-        last_build_update=None,
         art_url=f"https://example.invalid/{name}.png",
         weapon_url="https://example.invalid/weapon.png",
     )

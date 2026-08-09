@@ -24,16 +24,13 @@ class StubState:
     assets: dict[str, Asset] = field(default_factory=dict)
 
 
-def _build(name: str, costume_id: str | None, build_id: str) -> Build:
+def _build(name: str, costume_id: str | None = None) -> Build:
     return Build(
         name=name,
         constellation=0,
         refinement=1,
         weapon_name="Weapon",
         costume_id=costume_id,
-        build_id=build_id,
-        build_md5=build_id,
-        last_build_update=None,
         art_url="https://example.invalid/art.png",
         weapon_url="https://example.invalid/weapon.png",
     )
@@ -52,32 +49,32 @@ def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_preset_key_uses_the_costume_id_when_the_build_has_one() -> None:
-    state = _state(builds=[_build("Furina", "200301", "b-1")])
+    state = _state(builds=[_build("Furina", "200301")])
 
     assert preset_key(state, Placement(name="Furina")) == "abyss|200301"
 
 
-def test_preset_key_falls_back_to_the_build_id_then_the_name() -> None:
-    state = _state(builds=[_build("Furina", None, "b-1")])
+def test_preset_key_falls_back_to_the_name() -> None:
+    state = _state(builds=[_build("Furina")])
 
-    assert preset_key(state, Placement(name="Furina")) == "abyss|b-1"
+    assert preset_key(state, Placement(name="Furina")) == "abyss|furina"
     # No build loaded for this name at all.
     assert preset_key(state, Placement(name="Nahida")) == "abyss|nahida"
 
 
 def test_preset_key_separates_the_two_modes() -> None:
-    build = _build("Furina", None, "b-1")
+    build = _build("Furina")
     member = Placement(name="Furina")
 
     abyss = preset_key(_state("abyss", [build]), member)
     stygian = preset_key(_state("stygian", [build]), member)
 
     assert abyss != stygian
-    assert (abyss, stygian) == ("abyss|b-1", "stygian|b-1")
+    assert (abyss, stygian) == ("abyss|furina", "stygian|furina")
 
 
 def test_remember_then_apply_round_trips_all_four_values() -> None:
-    state = _state(builds=[_build("Furina", None, "b-1")])
+    state = _state(builds=[_build("Furina")])
     store = PresetStore({})
     source = Placement(name="Furina", offset_x=0.11, offset_y=-0.07, zoom=1.33, flip=True)
 
@@ -101,7 +98,7 @@ def test_remember_ignores_a_member_without_a_name() -> None:
 
 
 def test_apply_leaves_the_member_untouched_without_a_stored_preset() -> None:
-    state = _state(builds=[_build("Furina", None, "b-1")])
+    state = _state(builds=[_build("Furina")])
     store = PresetStore({})
     member = Placement(name="Furina", offset_x=0.11, offset_y=-0.07, zoom=1.33, flip=True)
 
@@ -111,7 +108,7 @@ def test_apply_leaves_the_member_untouched_without_a_stored_preset() -> None:
 
 
 def test_load_reads_what_a_previous_store_saved() -> None:
-    state = _state(builds=[_build("Furina", None, "b-1")])
+    state = _state(builds=[_build("Furina")])
     PresetStore({}).remember(state, Placement(name="Furina", offset_x=0.25, zoom=1.4, flip=True))
 
     reloaded = PresetStore.load()

@@ -160,14 +160,11 @@ def parse_builds(
                 weapon_name=str(weapon.get("name") or "Unknown weapon"),
                 costume_id=None if costume in (None, "", 0, "0") else str(costume),
                 build_id=str(raw.get("_id") or ""),
-                build_md5=str(raw.get("md5") or ""),
-                last_build_update=str(raw.get("lastBuildUpdate") or "") or None,
                 art_url=exact_art_url(raw),
                 weapon_url=weapon_url(raw),
                 element=character_element(raw),
                 rarity=character_rarity(raw, character_rarity_map),
                 weapon_rarity=weapon_rarity(raw, weapon_rarity_map),
-                raw=raw,
             )
         )
     return sorted(result, key=lambda item: item.name.casefold())
