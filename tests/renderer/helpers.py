@@ -5,7 +5,7 @@ from typing import NamedTuple
 
 from PIL import Image, ImageDraw
 
-from genshin_thumbnail_studio.models import Asset, Build, Project
+from genshin_thumbnail_studio.models import Build, Project
 from genshin_thumbnail_studio.renderer.geometry import (
     BASE_W,
     CARD_BORDER,
@@ -62,70 +62,74 @@ def compact_layout(scale: int = 1) -> CompactLayout:
     )
 
 
-def create_assets(
-    directory: Path,
+def make_builds(
     names: list[str],
     elements: dict[str, str] | None = None,
     rarities: dict[str, tuple[int | None, int | None]] | None = None,
-) -> dict[str, Asset]:
-    """One asset per name, keyed by `Build.key` the way the editor keys them."""
-    result: dict[str, Asset] = {}
+) -> list[Build]:
+    """One live build per name, no files written.
+
+    Each build gets art and weapon URLs of its own, so that no two builds
+    resolve to the same cached path - which is the only thing that tells two
+    slots' art apart now.
+    """
+    builds: list[Build] = []
     for index, name in enumerate(names):
-        art_path = directory / f"art-{index}.png"
-        weapon_path = directory / f"weapon-{index}.png"
+        rarity, weapon_rarity = (rarities or {}).get(name, (None, None))
+        builds.append(
+            Build(
+                name=name,
+                constellation=index % 7,
+                refinement=index % 5 + 1,
+                weapon_name="Weapon",
+                costume_id=None,
+                build_id=str(index),
+                art_url=f"https://example.invalid/{index}-art.png",
+                weapon_url=f"https://example.invalid/{index}-weapon.png",
+                element=(elements or {}).get(name),
+                rarity=rarity,
+                weapon_rarity=weapon_rarity,
+            )
+        )
+    return builds
+
+
+def publish(root: Path, builds: list[Build]) -> None:
+    """Write each build's art and weapon image where the build says they belong.
+
+    That, and nothing else, is what makes a slot framed with one of these builds
+    render as a portrait rather than as a placeholder.
+    """
+    for index, build in enumerate(builds):
+        art_path = build.art_path(root)
+        art_path.parent.mkdir(parents=True, exist_ok=True)
         art = Image.new("RGBA", (1200, 900), (25 + index * 10, 70, 100, 255))
-        draw = ImageDraw.Draw(art)
-        draw.ellipse((250, 80, 950, 850), fill=(130 + index * 8, 180, 220, 255))
+        ImageDraw.Draw(art).ellipse((250, 80, 950, 850), fill=(130 + index * 8, 180, 220, 255))
         art.save(art_path)
+        weapon_path = build.weapon_path(root)
+        weapon_path.parent.mkdir(parents=True, exist_ok=True)
         weapon = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
         ImageDraw.Draw(weapon).polygon([(128, 10), (190, 220), (128, 190), (66, 220)], fill="white")
         weapon.save(weapon_path)
-        rarity, weapon_rarity = (rarities or {}).get(name, (None, None))
-        build = Build(
-            name=name,
-            constellation=index % 7,
-            refinement=index % 5 + 1,
-            weapon_name="Weapon",
-            costume_id=None,
-            build_id=str(index),
-            art_url="https://example.invalid/art.png",
-            weapon_url="https://example.invalid/weapon.png",
-            element=(elements or {}).get(name),
-            rarity=rarity,
-            weapon_rarity=weapon_rarity,
-        )
-        result[build.key] = Asset(build, art_path, weapon_path)
-    return result
 
 
-def asset_key(name: str) -> str:
-    """The key `create_assets()` files a character's art under: `Build.key` for
-    that character's live build."""
-    return live_build(name).key
+def create_assets(
+    root: Path,
+    names: list[str],
+    elements: dict[str, str] | None = None,
+    rarities: dict[str, tuple[int | None, int | None]] | None = None,
+) -> list[Build]:
+    """One build per name, with its files published under the cache root `root`."""
+    builds = make_builds(names, elements, rarities)
+    publish(root, builds)
+    return builds
 
 
-def live_build(name: str) -> Build:
-    """The minimal live build a placement carries in these tests.
-
-    The renderer resolves a slot's art through `Placement.asset_key` alone, so a
-    placement needs a build whose `key` matches the one `create_assets()` filed
-    that character's art under.
-    """
-    return Build(
-        name=name,
-        constellation=0,
-        refinement=1,
-        weapon_name="Weapon",
-        costume_id=None,
-        art_url="https://example.invalid/art.png",
-        weapon_url="https://example.invalid/weapon.png",
-    )
-
-
-def fill_project(project: Project, names: list[str]) -> None:
+def fill_project(project: Project, builds: list[Build]) -> None:
+    """Frame each slot with one of `builds`, in order."""
     for index, member in enumerate(member for team in project.teams for member in team):
-        member.name = names[index]
-        member.build = live_build(names[index])
+        member.name = builds[index].name
+        member.build = builds[index]
 
 
 def marked_source() -> Image.Image:
@@ -153,11 +157,13 @@ def two_tone_art() -> Image.Image:
     return art
 
 
-def two_tone_project(tmp_path: Path) -> tuple[Project, dict[str, Asset]]:
+def two_tone_project(tmp_path: Path) -> tuple[Project, Path]:
+    """A filled abyss project and the cache root its builds' art was published
+    under, every portrait replaced by the two-tone art."""
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
-    fill_project(project, names)
-    assets = create_assets(tmp_path, names)
-    for asset in assets.values():
-        two_tone_art().save(asset.art_path)
-    return project, assets
+    builds = create_assets(tmp_path, names)
+    fill_project(project, builds)
+    for build in builds:
+        two_tone_art().save(build.art_path(tmp_path))
+    return project, tmp_path

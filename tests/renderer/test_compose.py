@@ -5,20 +5,19 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from genshin_thumbnail_studio.models import Asset, Build, Project
+from genshin_thumbnail_studio.models import Build, Project
 from genshin_thumbnail_studio.renderer.compose import export_project, render_image, render_preview
 
-from .helpers import compact_layout, create_assets, fill_project
+from .helpers import compact_layout, create_assets, fill_project, make_builds, publish
 
 
 def test_abyss_render_and_export(tmp_path: Path) -> None:
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
-    fill_project(project, names)
-    assets = create_assets(tmp_path, names)
-    preview = render_preview(project, assets)
+    fill_project(project, create_assets(tmp_path, names))
+    preview = render_preview(project, tmp_path)
     assert preview.size == (1280, 720)
-    written = export_project(project, assets, tmp_path / "out")
+    written = export_project(project, tmp_path, tmp_path / "out")
     assert len(written) == 1
     assert written[0].exists()
     assert written[0].suffix == ".png"
@@ -30,9 +29,8 @@ def test_export_uses_configured_output_resolution(tmp_path: Path) -> None:
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
     project.output_height = 1440
-    fill_project(project, names)
-    assets = create_assets(tmp_path, names)
-    written = export_project(project, assets, tmp_path / "out")
+    fill_project(project, create_assets(tmp_path, names))
+    written = export_project(project, tmp_path, tmp_path / "out")
     assert len(written) == 1
     with Image.open(written[0]) as image:
         assert image.size == (2560, 1440)
@@ -41,9 +39,8 @@ def test_export_uses_configured_output_resolution(tmp_path: Path) -> None:
 def test_stygian_exports_three_files(tmp_path: Path) -> None:
     names = [f"Character {index}" for index in range(12)]
     project = Project.blank("stygian")
-    fill_project(project, names)
-    assets = create_assets(tmp_path, names)
-    written = export_project(project, assets, tmp_path / "out")
+    fill_project(project, create_assets(tmp_path, names))
+    written = export_project(project, tmp_path, tmp_path / "out")
     assert len(written) == 3
     assert all(path.exists() for path in written)
 
@@ -59,22 +56,13 @@ def _weapon_icon(path: Path, square: bool) -> None:
 
 
 def test_two_builds_of_one_character_render_their_own_weapon_badge(tmp_path: Path) -> None:
-    """The art dict is keyed by character *and* build, and so is the panel cache.
+    """A build resolves its own weapon icon, and its path is the panel cache key.
 
     Two slots holding different builds of one character differ only in their
-    weapon icon here. Looking assets up by the bare character name would give
-    both slots the same asset, and a render cache keyed by the name alone would
+    weapon URL here. Resolving the art by the bare character name would give
+    both slots the same icon, and a render cache keyed by the name alone would
     serve the first slot's panel to the second.
     """
-    art_path = tmp_path / "furina.png"
-    art = Image.new("RGBA", (1200, 900), (25, 70, 100, 255))
-    ImageDraw.Draw(art).ellipse((250, 80, 950, 850), fill=(130, 180, 220, 255))
-    art.save(art_path)
-    live_weapon = tmp_path / "weapon-live.png"
-    saved_weapon = tmp_path / "weapon-saved.png"
-    _weapon_icon(live_weapon, square=False)
-    _weapon_icon(saved_weapon, square=True)
-
     live = Build(
         name="Furina",
         constellation=2,
@@ -87,11 +75,17 @@ def test_two_builds_of_one_character_render_their_own_weapon_badge(tmp_path: Pat
         rarity=5,
         weapon_rarity=5,
     )
-    saved = replace(live, build_name="Bow DPS", build_id="7", weapon_name="Favonius Sword")
-    assets = {
-        live.key: Asset(live, art_path, live_weapon),
-        saved.key: Asset(saved, art_path, saved_weapon),
-    }
+    saved = replace(
+        live,
+        build_name="Bow DPS",
+        build_id="7",
+        weapon_name="Favonius Sword",
+        weapon_url="https://example.invalid/saved-weapon.png",
+    )
+    publish(tmp_path, [live, saved])
+    _weapon_icon(live.weapon_path(tmp_path), square=False)
+    _weapon_icon(saved.weapon_path(tmp_path), square=True)
+
     project = Project.blank("abyss")
     first, second = project.teams[0][0], project.teams[0][1]
     for member, build in ((first, live), (second, saved)):
@@ -101,7 +95,7 @@ def test_two_builds_of_one_character_render_their_own_weapon_badge(tmp_path: Pat
         # panels can differ by.
         member.color = "#78d7ff"
 
-    image = render_image(project.teams, assets, compact=True, scale=1, require_complete=False)
+    image = render_image(project.teams, tmp_path, compact=True, scale=1, require_complete=False)
 
     # A window around each slot's badge, narrow enough that no neighbouring
     # panel reaches into it, so the two crops are congruent by construction.
@@ -123,18 +117,19 @@ def test_two_builds_of_one_character_render_their_own_weapon_badge(tmp_path: Pat
 def test_render_image_requires_complete_assets_by_default(tmp_path: Path) -> None:
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
-    fill_project(project, names)
-    assets = create_assets(tmp_path, names[1:])  # missing the first slot's asset
+    builds = make_builds(names)
+    fill_project(project, builds)
+    publish(tmp_path, builds[1:])  # the first slot's art was never downloaded
 
     try:
-        render_image(project.teams, assets, compact=True, scale=1)
+        render_image(project.teams, tmp_path, compact=True, scale=1)
     except ValueError:
         pass
     else:
         raise AssertionError("Expected render_image() to raise for a missing asset by default")
 
     try:
-        export_project(project, assets, tmp_path / "out")
+        export_project(project, tmp_path, tmp_path / "out")
     except ValueError:
         pass
     else:

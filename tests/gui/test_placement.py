@@ -11,7 +11,14 @@ from genshin_thumbnail_studio.gui import MainWindow
 from genshin_thumbnail_studio.models import Placement
 from genshin_thumbnail_studio.renderer import art_pixel_size, max_offset, panel_target_size
 
-from .helpers import TEAM_NAMES, close_ignoring_unsaved_changes, create_test_assets, fill_window_teams, qapp
+from .helpers import (
+    TEAM_NAMES,
+    close_ignoring_unsaved_changes,
+    create_test_assets,
+    fill_window_teams,
+    publish_art,
+    qapp,
+)
 
 
 def _approx(expected: float, abs: float) -> Any:
@@ -57,6 +64,7 @@ def test_slot_drag_hover_reorders_live(tmp_path: Path, monkeypatch: pytest.Monke
     window = MainWindow()
     fill_window_teams(window, TEAM_NAMES)
     window.assets = create_test_assets(tmp_path / "assets", TEAM_NAMES)
+    publish_art(window.art_root, TEAM_NAMES)
 
     window.team_fields.on_drag_started(0, 0)
     window.team_fields.on_drag_hover(1, 3)
@@ -112,6 +120,7 @@ def test_offset_sliders_are_signed_and_span_the_reachable_range(
 
     fill_window_teams(window, TEAM_NAMES)
     window.assets = create_test_assets(tmp_path / "assets", TEAM_NAMES)
+    publish_art(window.art_root, TEAM_NAMES)
     window.select_slot(0, 0)
 
     member = window.current_member()
@@ -142,6 +151,7 @@ def _window_with_assets(tmp_path: Path, names: list[str]) -> MainWindow:
     window = MainWindow()
     fill_window_teams(window, names)
     window.assets = create_test_assets(tmp_path / "assets", names)
+    publish_art(window.art_root, names)
     window.select_slot(0, 0)
     return window
 
@@ -309,6 +319,7 @@ def _window_with_one_filled_slot(tmp_path: Path) -> MainWindow:
     window = MainWindow()
     fill_window_teams(window, TEAM_NAMES)
     window.assets = create_test_assets(tmp_path / "assets", TEAM_NAMES[:1])
+    publish_art(window.art_root, TEAM_NAMES[:1])
     window.select_slot(*FILLED_SLOT)
     return window
 

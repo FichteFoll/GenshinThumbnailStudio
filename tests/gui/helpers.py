@@ -44,6 +44,31 @@ def live_build(name: str) -> Build:
     )
 
 
+def write_build_files(root: Path, build: Build) -> None:
+    """Write art and weapon images where `build` says they belong under `root`.
+
+    That is all "this slot has its art" means now, so a test that wants a filled
+    slot publishes the files rather than filling a dict.
+    """
+    art_path = build.art_path(root)
+    art_path.parent.mkdir(parents=True, exist_ok=True)
+    art = Image.new("RGBA", (1200, 900), (25, 70, 100, 255))
+    ImageDraw.Draw(art).ellipse((250, 80, 950, 850), fill=(130, 180, 220, 255))
+    art.save(art_path)
+    weapon_path = build.weapon_path(root)
+    weapon_path.parent.mkdir(parents=True, exist_ok=True)
+    weapon = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+    ImageDraw.Draw(weapon).polygon([(128, 10), (190, 220), (128, 190), (66, 220)], fill="white")
+    weapon.save(weapon_path)
+
+
+def publish_art(root: Path, names: list[str]) -> None:
+    """Publish the files for each name's live build, the one `fill_window_teams()`
+    puts on the placements."""
+    for name in names:
+        write_build_files(root, live_build(name))
+
+
 def create_test_assets(directory: Path, names: list[str]) -> dict[str, Asset]:
     """One asset per name, keyed by `Build.key` the way the editor keys them."""
     directory.mkdir(parents=True, exist_ok=True)

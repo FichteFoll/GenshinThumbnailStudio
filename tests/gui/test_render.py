@@ -2,6 +2,7 @@
 
 import itertools
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -9,9 +10,43 @@ from PIL import Image
 
 from genshin_thumbnail_studio.gui import MainWindow, asset_loader
 from genshin_thumbnail_studio.gui.render_job import RenderJob
-from genshin_thumbnail_studio.models import Asset, Build
+from genshin_thumbnail_studio.models import Asset, Build, Placement
+from genshin_thumbnail_studio.renderer import (
+    clear_render_cache,
+    panel_background,
+    panel_metrics,
+    panel_target_size,
+    render_preview,
+)
 
-from .helpers import close_ignoring_unsaved_changes, create_test_assets, fill_window_teams, qapp, wait_for_render
+from .helpers import (
+    close_ignoring_unsaved_changes,
+    create_test_assets,
+    fill_window_teams,
+    live_build,
+    publish_art,
+    qapp,
+    wait_for_render,
+    write_build_files,
+)
+
+
+def renders_as_placeholder(window: MainWindow, member: Placement) -> bool:
+    """Whether slot (0, 0) of the window's compact preview is a bare placeholder.
+
+    Probes the same point `tests/renderer/test_panels.py` does, mapped from
+    panel-local to canvas coordinates the way the panel is pasted, and compares
+    it against the panel background a placeholder is made of.
+    """
+    clear_render_cache()  # the panel cache outlives a single test
+    preview = render_preview(window.project, window.art_root)
+    slant = panel_metrics(compact=True, scale=1)[2]
+    local_point = (188, 180)
+    rendered = preview.getpixel((local_point[0] - slant, local_point[1]))
+    expected = panel_background(panel_target_size(compact=True), member.color, compact=True)
+    bare = expected.getpixel(local_point)
+    assert isinstance(rendered, tuple) and isinstance(bare, tuple)
+    return rendered[:3] == bare[:3]
 
 
 def test_dispatch_render_marks_stale_while_job_running(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -242,12 +277,58 @@ def test_arriving_art_makes_its_slot_editable(tmp_path: Path, monkeypatch: pytes
     assert window.editor_panel.x_slider.isEnabled() is False
     assert window.editor_panel.preview._filled == set()
 
+    publish_art(window.art_root, ["Furina"])
     window._on_asset_ready("furina|live", assets["furina|live"])
 
     assert window.editor_panel.x_slider.isEnabled() is True
     assert window.editor_panel.zoom_slider.isEnabled() is True
     assert window.editor_panel.reset_button.isEnabled() is True
     assert (0, 0) in window.editor_panel.preview._filled
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+def test_changing_a_slots_build_renders_a_placeholder_until_the_new_art_arrives(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R5: a slot whose build changes falls back to a placeholder.
+
+    The new build's art lives at a path of its own, so the slot has nothing to
+    draw until that file exists - and it must not keep drawing the previous
+    build's portrait in the meantime.
+    """
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+    monkeypatch.setattr(window.asset_loader, "ensure", lambda: None)
+
+    live = live_build("Furina")
+    vape = replace(
+        live,
+        build_name="Vape",
+        art_url="https://example.invalid/furina-vape-art.png",
+        weapon_url="https://example.invalid/furina-vape-weapon.png",
+    )
+    window.builds = {"furina": [live, vape]}
+    write_build_files(window.art_root, live)
+    fill_window_teams(window, ["Furina"])
+    window.select_slot(0, 0)
+    window.sync_controls()
+
+    member = window.project.teams[0][0]
+    assert (0, 0) in window._filled_slots()
+    assert not renders_as_placeholder(window, member)
+
+    window.build_selected(0, 0, vape)
+
+    assert (0, 0) not in window._filled_slots()
+    assert renders_as_placeholder(window, member)
+
+    write_build_files(window.art_root, vape)
+    window.sync_controls()
+
+    assert (0, 0) in window._filled_slots()
+    assert not renders_as_placeholder(window, member)
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 

@@ -7,6 +7,7 @@ so these tests do not depend on the window's own wiring.
 
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pytest
 from PySide6.QtWidgets import QVBoxLayout, QWidget
@@ -40,6 +41,7 @@ class StubEditor:
     project: Project
     builds: dict[str, list[Build]] = field(default_factory=dict)
     assets: dict[str, Asset] = field(default_factory=dict)
+    art_root: Path = Path("assets")
     selected: tuple[int, int] = (0, 0)
     build_selected_calls: list[tuple[int, int, Build]] = field(default_factory=list)
 

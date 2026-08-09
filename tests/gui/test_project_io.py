@@ -26,6 +26,7 @@ from .helpers import (
     close_ignoring_unsaved_changes,
     create_test_assets,
     fill_window_teams,
+    publish_art,
     qapp,
     wait_for_render,
 )
@@ -528,6 +529,7 @@ def _prepare_export_window(window: MainWindow, tmp_path: Path, names: list[str])
     assets = create_test_assets(tmp_path / "assets", names)
     window.builds = {asset.build.name.casefold(): [asset.build] for asset in assets.values()}
     fill_window_teams(window, names)
+    publish_art(window.art_root, names)
     window.rebuild_team_fields()
     window.assets = assets
 

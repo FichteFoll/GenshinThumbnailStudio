@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter
 
-from ..models import Asset, Placement
+from ..models import Placement
 from .art import glow_zoom, panel_art, source_art
 from .cache import (
     BORDER_CACHE_MAX,
@@ -60,7 +61,7 @@ def panel_background(size: tuple[int, int], color: str, compact: bool) -> Image.
 def make_panel(
     canvas_width: int,
     member: Placement,
-    asset: Asset,
+    art_path: Path,
     index: int,
     row: int,
     num_rows: int,
@@ -71,13 +72,13 @@ def make_panel(
     compact: bool,
 ) -> Image.Image:
     target = panel_target_size(compact, scale)
-    art = source_art(asset, target, member.zoom, scale)
+    art = source_art(art_path, target, member.zoom, scale)
     # Both layers below are crops of the same art at different zooms; sharing
     # the portrait's own reachable range clamps them to the same offsets, so
     # the glow stops panning at the same moment the portrait does instead of
     # sticking at its own, narrower limit.
     limits = zoom_offset_limits(art.size, target, member.zoom)
-    color = card_color(member, asset)
+    color = card_color(member)
     background = panel_background(target, color, compact)
     glow_size = (max(1, target[0] // GLOW_DOWNSCALE), max(1, target[1] // GLOW_DOWNSCALE))
     glow = panel_art(
@@ -169,9 +170,9 @@ def placeholder_panel(
     scale: int,
     compact: bool,
 ) -> Image.Image:
-    """A panel for a slot with no downloaded asset yet: same size and mask
-    logic as make_panel(), but without character art, glow, shadow, or shade,
-    since there is no Asset to read art from."""
+    """A panel for a slot whose art has not been downloaded yet: same size and
+    mask logic as make_panel(), but without character art, glow, shadow, or
+    shade, since there is no file to read art from."""
     target = panel_target_size(compact, scale)
     panel = panel_background(target, member.color, compact)
     return apply_panel_mask(panel, index, row, num_rows, canvas_width, row_height, step, slant, scale)
@@ -180,7 +181,6 @@ def placeholder_panel(
 def add_card_borders(
     image: Image.Image,
     teams: list[list[Placement]],
-    assets: dict[str, Asset],
     row_height: int,
     step: float,
     slant: int,
@@ -198,8 +198,7 @@ def add_card_borders(
     overlay_size = (math.ceil(step) + 2 * slant + 1, row_height)
     for row, team in enumerate(teams):
         for index, member in enumerate(team):
-            asset = assets.get(member.asset_key) if member.asset_key else None
-            color = card_color(member, asset) if asset else member.color
+            color = card_color(member)
             origin_x, origin_y = panel_origin(index, row, row_height, step, slant)
             # overlay_size is fully derived from step, slant and row_height.
             overlay_key = (index, row, num_rows, width, row_height, step, slant, scale, color)

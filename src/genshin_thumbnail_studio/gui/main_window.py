@@ -42,6 +42,8 @@ class MainWindow(QMainWindow):
         self.project_path: Path | None = None
         self.builds: dict[str, list[Build]] = {}
         self.assets: dict[str, Asset] = {}
+        # The cache root every build resolves its own art and weapon icon under.
+        self.art_root = cache_dir() / "assets"
         self._presets = PresetStore.load()
         self._placement = PlacementController(self)
         self._history = HistoryController(self, self, self._history_restored)
@@ -49,7 +51,7 @@ class MainWindow(QMainWindow):
         self.selected = (0, 0)
         self._updating_controls = False
         self._thread_pool = QThreadPool(self)
-        self.asset_loader = AssetLoader(self, cache_dir() / "assets", self._thread_pool, self)
+        self.asset_loader = AssetLoader(self, self.art_root, self._thread_pool, self)
         self.asset_loader.asset_ready.connect(self._on_asset_ready)
         self.asset_loader.progress.connect(self.statusBar().showMessage)
         self.asset_loader.failed.connect(self._on_asset_download_failed)
@@ -228,12 +230,18 @@ class MainWindow(QMainWindow):
         return self.project.teams[team][slot]
 
     def _filled_slots(self) -> set[tuple[int, int]]:
-        """The `(team, slot)` pairs whose art is downloaded; the rest are placeholders."""
+        """The `(team, slot)` pairs whose art is downloaded; the rest are placeholders.
+
+        A file only exists at the path its build derives once it has been
+        downloaded *and* validated, so its presence is the same guarantee the
+        in-memory dict used to give - and it also notices a file removed behind
+        the app's back, which the dict could not.
+        """
         return {
             (team_index, slot_index)
             for team_index, team in enumerate(self.project.teams)
             for slot_index, member in enumerate(team)
-            if (build := selected_build(self, member)) is not None and build.key in self.assets
+            if (build := selected_build(self, member)) is not None and build.art_path(self.art_root).exists()
         }
 
     def select_slot(self, team: int, slot: int) -> None:

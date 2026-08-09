@@ -17,6 +17,7 @@ instead of capturing them at construction time, because `_mode_changed`,
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Protocol
 
 from ..models import Asset, Build, Project
@@ -28,3 +29,6 @@ class EditorState(Protocol):
     # downloaded art is keyed by `Build.key` instead, character *and* build.
     builds: dict[str, list[Build]]
     assets: dict[str, Asset]
+    # The cache root a build resolves its own art and weapon icon under, which
+    # is all the renderer needs beside the project.
+    art_root: Path

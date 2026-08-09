@@ -22,6 +22,7 @@ class StubState:
     project: Project
     builds: dict[str, list[Build]] = field(default_factory=dict)
     assets: dict[str, Asset] = field(default_factory=dict)
+    art_root: Path = Path("assets")
 
 
 def _build(name: str, costume_id: str | None = None) -> Build:

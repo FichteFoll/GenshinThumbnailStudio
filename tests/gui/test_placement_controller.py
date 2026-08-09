@@ -30,6 +30,7 @@ class StubState:
     project: Project
     builds: dict[str, list[Build]] = field(default_factory=dict)
     assets: dict[str, Asset] = field(default_factory=dict)
+    art_root: Path = Path("assets")
 
 
 def _state(tmp_path: Path, mode: Mode = "abyss", with_assets: bool = True) -> StubState:
@@ -38,7 +39,7 @@ def _state(tmp_path: Path, mode: Mode = "abyss", with_assets: bool = True) -> St
     member.name = "Furina"
     member.build = live_build("Furina")
     assets = create_test_assets(tmp_path / "assets", ["Furina"]) if with_assets else {}
-    return StubState(project=project, assets=assets)
+    return StubState(project=project, assets=assets, art_root=tmp_path / "assets")
 
 
 def _approx(expected: float) -> object:

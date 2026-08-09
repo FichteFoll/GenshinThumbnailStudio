@@ -8,7 +8,7 @@ import pytest
 from PIL import Image, ImageDraw
 
 import genshin_thumbnail_studio.renderer.art as art_module
-from genshin_thumbnail_studio.models import Asset, Project
+from genshin_thumbnail_studio.models import Build, Project
 from genshin_thumbnail_studio.renderer.art import cover_resize_offset
 from genshin_thumbnail_studio.renderer.cache import clear_render_cache
 from genshin_thumbnail_studio.renderer.colors import ELEMENT_COLORS, hex_to_rgba
@@ -23,15 +23,24 @@ from genshin_thumbnail_studio.renderer.geometry import (
 )
 from genshin_thumbnail_studio.renderer.panels import apply_panel_mask, panel_background
 
-from .helpers import asset_key, compact_layout, create_assets, fill_project, gray, rgb, rgba, two_tone_project
+from .helpers import (
+    compact_layout,
+    create_assets,
+    fill_project,
+    gray,
+    make_builds,
+    publish,
+    rgb,
+    rgba,
+    two_tone_project,
+)
 
 
 def test_card_gap_shows_background_between_panels(tmp_path: Path) -> None:
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
-    fill_project(project, names)
-    assets = create_assets(tmp_path, names)
-    preview = render_preview(project, assets)
+    fill_project(project, create_assets(tmp_path, names))
+    preview = render_preview(project, tmp_path)
 
     # Boundary between the first row's slot 0 and slot 1 (step = 1280 / 4 = 320),
     # sampled at the row's mid-height where the slanted card edges are centered
@@ -45,9 +54,8 @@ def test_card_gap_shows_background_between_panels(tmp_path: Path) -> None:
 def test_element_color_used_for_card_border(tmp_path: Path) -> None:
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
-    fill_project(project, names)
-    assets = create_assets(tmp_path, names, elements={names[0]: "Pyro"})
-    preview = render_preview(project, assets)
+    fill_project(project, create_assets(tmp_path, names, elements={names[0]: "Pyro"}))
+    preview = render_preview(project, tmp_path)
 
     # The leftmost card's outer edge is inset by only half the border width
     # (commit 4), so a pixel a couple of px in from the canvas edge, at a
@@ -61,9 +69,9 @@ def test_element_color_used_for_card_border(tmp_path: Path) -> None:
 def test_unknown_element_falls_back_to_placement_color(tmp_path: Path) -> None:
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
-    fill_project(project, names)
-    assets = create_assets(tmp_path, names)  # no elements set -> Build.element is None
-    preview = render_preview(project, assets)
+    # No elements set, so every Build.element is None.
+    fill_project(project, create_assets(tmp_path, names))
+    preview = render_preview(project, tmp_path)
 
     placement_color = project.teams[0][0].color
     pixel = preview.getpixel((3, 100))
@@ -77,11 +85,12 @@ def test_unknown_element_falls_back_to_placement_color(tmp_path: Path) -> None:
 def test_preview_renders_placeholder_panel_for_missing_asset(tmp_path: Path) -> None:
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
-    fill_project(project, names)
-    # Leave the first slot's asset undownloaded; every other slot has one.
-    assets = create_assets(tmp_path, names[1:])
+    builds = make_builds(names)
+    fill_project(project, builds)
+    # Leave the first slot's art undownloaded; every other slot has its file.
+    publish(tmp_path, builds[1:])
 
-    preview = render_preview(project, assets)
+    preview = render_preview(project, tmp_path)
     assert preview.size == (1280, 720)
 
     # A point well inside the first (placeholder) slot, away from borders and
@@ -118,18 +127,18 @@ def test_leftmost_slot_is_not_shifted_by_its_negative_panel_origin(tmp_path: Pat
     clear_render_cache()
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
-    fill_project(project, names)
-    assets = create_assets(tmp_path, names)
+    builds = create_assets(tmp_path, names)
+    fill_project(project, builds)
     art = Image.new("RGBA", (1200, 900), (0, 0, 0, 255))
     art_draw = ImageDraw.Draw(art)
     for x in range(art.width):
         art_draw.line((x, 0, x, art.height), fill=(x * 255 // art.width, 40, 200, 255))
-    art.save(assets[asset_key(names[0])].art_path)
+    art.save(builds[0].art_path(tmp_path))
     project.teams[0][1].name = project.teams[0][0].name
     project.teams[0][1].build = project.teams[0][0].build
     project.teams[0][1].color = project.teams[0][0].color
 
-    preview = render_preview(project, assets)
+    preview = render_preview(project, tmp_path)
 
     # Preview geometry for a compact (two-row) abyss team at scale 1.
     row_height, step, slant, _, _, panel_width = compact_layout()
@@ -185,9 +194,9 @@ def test_slanted_card_edge_is_antialiased(tmp_path: Path) -> None:
     step straight from one to the other."""
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
-    fill_project(project, names)
-    assets = create_assets(tmp_path, names)  # no elements -> placement colours
-    preview = render_preview(project, assets)
+    # No elements set, so every card falls back to its placement colour.
+    fill_project(project, create_assets(tmp_path, names))
+    preview = render_preview(project, tmp_path)
 
     # The left edge of the first row's slot 2, which slants across the shared
     # boundary at x = 2 * step. Both the layout numbers and the polygon come
@@ -220,17 +229,17 @@ def test_slanted_card_edge_is_antialiased(tmp_path: Path) -> None:
             ), (y, pixel)
 
 
-def _punch_a_transparent_hole(assets: dict[str, Asset]) -> None:
-    """Give every asset opaque red art with a transparent hole in it.
+def _punch_a_transparent_hole(root: Path, builds: list[Build]) -> None:
+    """Give every build opaque red art with a transparent hole in it.
 
     The glow is only ever visible where the character art is transparent, and
     the art's red is then the only red in the panel, so a red pixel outside the
     art can only have arrived through the blurred glow layer.
     """
-    for asset in assets.values():
+    for build in builds:
         art = Image.new("RGBA", (1200, 900), (255, 40, 40, 255))
         ImageDraw.Draw(art).ellipse((500, 350, 700, 550), fill=(0, 0, 0, 0))
-        art.save(asset.art_path)
+        art.save(build.art_path(root))
 
 
 def test_glow_reaches_into_a_transparent_gap_at_the_default_zoom(tmp_path: Path) -> None:
@@ -244,16 +253,17 @@ def test_glow_reaches_into_a_transparent_gap_at_the_default_zoom(tmp_path: Path)
     """
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
-    fill_project(project, names)
-    assets = create_assets(tmp_path, names)
-    _punch_a_transparent_hole(assets)
+    builds = create_assets(tmp_path, names)
+    fill_project(project, builds)
+    _punch_a_transparent_hole(tmp_path, builds)
 
     member = project.teams[0][1]
 
-    preview = render_preview(project, assets)
+    preview = render_preview(project, tmp_path)
 
     target = panel_target_size(compact=True)
-    art = Image.open(assets[member.asset_key].art_path).convert("RGBA")
+    assert member.build is not None
+    art = Image.open(member.build.art_path(tmp_path)).convert("RGBA")
     crop = cover_resize_offset(art, target, member.offset_x, member.offset_y, member.zoom)
     row = target[1] // 2
     gap = [x for x in range(target[0]) if rgba(crop, (x, row))[3] == 0]
@@ -284,7 +294,7 @@ def _reddish(pixel: tuple[int, ...]) -> bool:
 
 
 def test_flip_mirrors_the_panel_art(tmp_path: Path) -> None:
-    project, assets = two_tone_project(tmp_path)
+    project, art_root = two_tone_project(tmp_path)
     member = project.teams[0][1]
     member.offset_x = 0.0
 
@@ -301,13 +311,13 @@ def test_flip_mirrors_the_panel_art(tmp_path: Path) -> None:
     right_probe = (center_x + 60, row_height // 2)
 
     clear_render_cache()
-    unflipped = render_preview(project, assets)
+    unflipped = render_preview(project, art_root)
     assert _reddish(rgb(unflipped, left_probe))
     assert not _reddish(rgb(unflipped, right_probe))
 
     member.flip = True
     clear_render_cache()
-    flipped = render_preview(project, assets)
+    flipped = render_preview(project, art_root)
     assert not _reddish(rgb(flipped, left_probe))
     assert _reddish(rgb(flipped, right_probe))
 
@@ -328,8 +338,7 @@ def test_the_glow_and_the_crop_are_clamped_alike_in_a_rendered_panel(
     clear_render_cache()
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
-    fill_project(project, names)
-    assets = create_assets(tmp_path, names)
+    fill_project(project, create_assets(tmp_path, names))
     for member in (member for team in project.teams for member in team):
         member.zoom = 1.80
         member.offset_y = 0.3
@@ -348,7 +357,7 @@ def test_the_glow_and_the_crop_are_clamped_alike_in_a_rendered_panel(
 
     monkeypatch.setattr(art_module, "cover_resize_offset", recording_cover_resize_offset)
 
-    render_preview(project, assets)
+    render_preview(project, tmp_path)
 
     # Two panel_art() calls (glow, then crop) per member.
     assert len(recorded) == 2 * sum(len(team) for team in project.teams)

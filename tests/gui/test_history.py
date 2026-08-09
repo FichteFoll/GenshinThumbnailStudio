@@ -7,6 +7,7 @@ does need the offscreen platform that `tests/gui/conftest.py` sets.
 
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pytest
 from PySide6.QtCore import QDeadlineTimer
@@ -159,6 +160,7 @@ class StubState:
     project: Project
     builds: dict[str, list[Build]] = field(default_factory=dict)
     assets: dict[str, Asset] = field(default_factory=dict)
+    art_root: Path = Path("assets")
 
 
 @dataclass

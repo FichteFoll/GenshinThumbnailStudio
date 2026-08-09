@@ -217,7 +217,7 @@ class ProjectFiles:
             output_name.setText(stem)
             editor.project.output_name = stem
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            written = export_project(editor.project, editor.assets, directory)
+            written = export_project(editor.project, editor.art_root, directory)
             dialogs.show_export_finished(parent, written)
             parent.statusBar().showMessage(f"Exported {len(written)} thumbnail(s)", 7000)
         except Exception as error:

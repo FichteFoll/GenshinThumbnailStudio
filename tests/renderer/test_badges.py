@@ -13,21 +13,20 @@ from genshin_thumbnail_studio.renderer.badges import badge_geometry, badge_tile,
 from genshin_thumbnail_studio.renderer.colors import ELEMENT_COLORS, RARITY_COLORS, hex_to_rgba
 from genshin_thumbnail_studio.renderer.compose import render_preview
 
-from .helpers import asset_key, compact_layout, create_assets, fill_project, gray, rgb, rgba
+from .helpers import compact_layout, create_assets, fill_project, gray, rgb, rgba
 
 
 def test_badge_render_and_geometry_for_long_constellation_string(tmp_path: Path) -> None:
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
-    fill_project(project, names)
-    assets = create_assets(tmp_path, names)
+    builds = create_assets(tmp_path, names)
+    fill_project(project, builds)
     # Not a value the app would normally produce, but the box must not
     # overflow the canvas even for an unusually long "CxRy" string.
-    long_string_asset = assets[asset_key(names[0])]
-    long_string_asset.build.constellation = 10
-    long_string_asset.build.refinement = 5
+    builds[0].constellation = 10
+    builds[0].refinement = 5
 
-    preview = render_preview(project, assets)
+    preview = render_preview(project, tmp_path)
     assert preview.size == (1280, 720)
 
     # Mirror add_badges' own geometry for the leftmost slot of the first
@@ -72,13 +71,13 @@ def _color_present_in_box(
 def test_badge_constellation_and_refinement_use_distinct_rarity_colors(tmp_path: Path) -> None:
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
-    fill_project(project, names)
     # 5-star character, 4-star weapon: two rarities that map to visibly
     # distinct colors (gold vs. purple), unlike the fallback gold-on-gold
     # look this test would silently pass under if both runs still shared
     # one color.
-    assets = create_assets(tmp_path, names, rarities={names[0]: (5, 4)})
-    preview = render_preview(project, assets)
+    builds = create_assets(tmp_path, names, rarities={names[0]: (5, 4)})
+    fill_project(project, builds)
+    preview = render_preview(project, tmp_path)
 
     # Leftmost slot of the first (compact) abyss row; mirrors the geometry
     # used in the long-string badge test above.
@@ -90,7 +89,7 @@ def test_badge_constellation_and_refinement_use_distinct_rarity_colors(tmp_path:
     draw = ImageDraw.Draw(canvas)
     center = round(0 * step + step / 2)
     top_y = 0 * row_height + row_height - (68 if compact else 107) * scale
-    build = assets[asset_key(names[0])].build
+    build = builds[0]
     text = f"C{build.constellation}R{build.refinement}"
     geometry = badge_geometry(draw, text, font, center_x=center, top_y=top_y, scale=scale, compact=compact)
 
@@ -101,9 +100,9 @@ def test_badge_constellation_and_refinement_use_distinct_rarity_colors(tmp_path:
 def test_weapon_circle_outline_uses_element_color(tmp_path: Path) -> None:
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
-    fill_project(project, names)
-    assets = create_assets(tmp_path, names, elements={names[0]: "Pyro"})
-    preview = render_preview(project, assets)
+    builds = create_assets(tmp_path, names, elements={names[0]: "Pyro"})
+    fill_project(project, builds)
+    preview = render_preview(project, tmp_path)
 
     # Same leftmost-slot geometry as the badge tests above, but probing the
     # weapon icon's circle rather than the C/R box.
@@ -115,7 +114,7 @@ def test_weapon_circle_outline_uses_element_color(tmp_path: Path) -> None:
     draw = ImageDraw.Draw(canvas)
     center = round(0 * step + step / 2)
     top_y = 0 * row_height + row_height - (68 if compact else 107) * scale
-    build = assets[asset_key(names[0])].build
+    build = builds[0]
     text = f"C{build.constellation}R{build.refinement}"
     geometry = badge_geometry(draw, text, font, center_x=center, top_y=top_y, scale=scale, compact=compact)
 
@@ -146,15 +145,15 @@ def test_weapon_icon_visible_content_is_centered_in_the_circle_despite_source_pa
     # centered at (220, 307) - a 14px miss on both axes.
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
-    fill_project(project, names)
-    assets = create_assets(tmp_path, names)
+    builds = create_assets(tmp_path, names)
+    fill_project(project, builds)
 
-    weapon_path = assets[asset_key(names[0])].weapon_path
+    weapon_path = builds[0].weapon_path(tmp_path)
     weapon = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
     ImageDraw.Draw(weapon).rectangle((20, 20, 90, 90), fill=(255, 0, 255, 255))
     weapon.save(weapon_path)
 
-    preview = render_preview(project, assets)
+    preview = render_preview(project, tmp_path)
 
     # Same leftmost-slot geometry as the badge tests above.
     scale = 1
@@ -165,7 +164,7 @@ def test_weapon_icon_visible_content_is_centered_in_the_circle_despite_source_pa
     draw = ImageDraw.Draw(canvas)
     center = round(0 * step + step / 2)
     top_y = 0 * row_height + row_height - (68 if compact else 107) * scale
-    build = assets[asset_key(names[0])].build
+    build = builds[0]
     text = f"C{build.constellation}R{build.refinement}"
     geometry = badge_geometry(draw, text, font, center_x=center, top_y=top_y, scale=scale, compact=compact)
 
@@ -205,8 +204,7 @@ def _has_partial_coverage(coverage: Image.Image, box: tuple[int, int, int, int])
 
 def test_badge_shape_edges_are_antialiased(tmp_path: Path) -> None:
     names = ["Character 0"]
-    assets = create_assets(tmp_path, names, elements={names[0]: "Pyro"})
-    asset = assets[asset_key(names[0])]
+    build = create_assets(tmp_path, names, elements={names[0]: "Pyro"})[0]
 
     # Same leftmost-slot geometry as the badge tests above.
     scale = 1
@@ -216,10 +214,12 @@ def test_badge_shape_edges_are_antialiased(tmp_path: Path) -> None:
     draw = ImageDraw.Draw(Image.new("RGBA", (1280, 720), (0, 0, 0, 0)))
     center = round(0 * step + step / 2)
     top_y = 0 * row_height + row_height - (68 if compact else 107) * scale
-    text = f"C{asset.build.constellation}R{asset.build.refinement}"
+    text = f"C{build.constellation}R{build.refinement}"
     geometry = badge_geometry(draw, text, font, center_x=center, top_y=top_y, scale=scale, compact=compact)
 
-    tile, coverage = badge_tile(geometry, asset, ELEMENT_COLORS["pyro"], font, scale, compact)
+    tile, coverage = badge_tile(
+        geometry, build, build.weapon_path(tmp_path), ELEMENT_COLORS["pyro"], font, scale, compact
+    )
 
     origin_x, origin_y = badge_tile_origin(geometry)
     box_x0, box_y0, box_x1, box_y1 = (
@@ -270,8 +270,7 @@ def test_add_badges_serializes_font_use_across_threads(tmp_path: Path, monkeypat
     thread is ever inside it."""
     names = [f"Character {index}" for index in range(8)]
     project = Project.blank("abyss")
-    fill_project(project, names)
-    assets = create_assets(tmp_path, names)
+    fill_project(project, create_assets(tmp_path, names))
 
     probe_lock = threading.Lock()
     inside = 0
@@ -298,7 +297,7 @@ def test_add_badges_serializes_font_use_across_threads(tmp_path: Path, monkeypat
 
     def render() -> None:
         try:
-            render_preview(project, assets)
+            render_preview(project, tmp_path)
         except BaseException as error:  # re-raised in the main thread
             failures.append(error)
 

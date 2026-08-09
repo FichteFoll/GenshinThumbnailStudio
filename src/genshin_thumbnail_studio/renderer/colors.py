@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from ..models import Asset, Placement
+from ..models import Placement
 
 ELEMENT_COLORS = {
     "anemo": "#74c2a8",
@@ -40,10 +40,11 @@ def hex_to_rgba(value: str, alpha: int) -> tuple[int, int, int, int]:
     return (int(raw[0:2], 16), int(raw[2:4], 16), int(raw[4:6], 16), alpha)
 
 
-def card_color(member: Placement, asset: Asset) -> str:
+def card_color(member: Placement) -> str:
     """The card's element-inspired accent color, falling back to the
-    placement's own color when the element is unknown or missing."""
-    element = asset.build.element
+    placement's own color when the slot carries no build, or one whose element
+    is unknown or missing."""
+    element = member.build.element if member.build else None
     if element and element.casefold() in ELEMENT_COLORS:
         return ELEMENT_COLORS[element.casefold()]
     return member.color

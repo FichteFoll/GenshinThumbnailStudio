@@ -21,6 +21,7 @@ from .helpers import (
     create_test_assets,
     fill_window_teams,
     live_build,
+    publish_art,
     qapp,
 )
 
@@ -47,6 +48,7 @@ def _window_with_history_baseline(tmp_path: Path) -> MainWindow:
     window = MainWindow()
     fill_window_teams(window, TEAM_NAMES)
     window.assets = create_test_assets(tmp_path / "assets", TEAM_NAMES[:1])
+    publish_art(window.art_root, TEAM_NAMES[:1])
     window.rebuild_team_fields()
     window.select_slot(0, 0)
     window._history.reset()
