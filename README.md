@@ -8,6 +8,9 @@ Standalone desktop application for creating Genshin Impact team thumbnails.
   by Genshin UID or by Enka profile username.
 - Lets the user pick, per character, which of that profile's saved builds to use,
   the live showcase build being the default.
+  The live build shows up for a username load as well as a UID load,
+  and a build restored from the project file is marked `(project)` in the menu
+  wherever it differs from what the profile currently offers.
 - Remembers each character's build details
   (skin, weapon, constellation, refinement) in the project file,
   so a project still opens correctly after the Enka profile has changed.

@@ -121,7 +121,9 @@ All network interaction with Enka Network, over the `enka` PyPI package.
   which turns an Enka username into a hash and, when public, a UID.
 - `client.py` — `EnkaClient`, the synchronous facade:
   `load_profile(identifier)` runs the async work through `asyncio.run()`,
-  fetching the live showcase build when a UID is known
+  fetching the live showcase build when a UID is known,
+  falling back to the builds endpoint's `live: true` entries otherwise
+  (or when the showcase itself yields no characters),
   and the saved builds when a username resolves to a hash,
   and returns a `Profile`.
   `redirect_asset_files()` rewrites the third-party library's private,
@@ -269,6 +271,11 @@ and `storage.py` for persistence.
   onto the member), `BuildChoice` and `build_choices()`,
   which merges a profile's builds with a project's stored one
   into the labelled, ordered list the build menu renders.
+  Exactly those entries that carry the project's snapshot get a trailing
+  `" (project)"` on its label, display-only and never written back onto
+  `Build.build_name`; the profile's own entries keep their bare build names,
+  including the merged entry whose details match the snapshot,
+  which carries the profile's fresher `Build` and is indistinguishable from it.
 - `placement.py` — `MIN_ZOOM`, `MAX_ZOOM` and `PlacementController`:
   `offset_bounds()`, `pan()`, `zoom_by()`, `reset()`.
 - `presets.py` — `preset_key()`
@@ -280,7 +287,11 @@ and `storage.py` for persistence.
 - `team_slots.py` — `SLOT_MIME_TYPE` and `TeamSlotWidget`,
   which emits `drag_started`, `drag_hover` and `drag_ended` across a drag gesture,
   and `build_menu_requested` when its `build_button`
-  (the small arrow button next to the combo) is clicked.
+  (the arrow button next to the combo) is clicked.
+  `build_button` now carries the selected build's label beside its arrow,
+  set through `set_build_caption()`, which elides the label to
+  `MAX_BUILD_CAPTION_WIDTH` and puts the full label in the tooltip;
+  it is styled by the `QToolButton#buildButton` rule in `gui/style.py`.
 - `team_fields.py` — `clear_layout()`, `TeamFieldsController`
   and the `TeamFieldsEditor` Protocol it works through.
   The controller fills `ControlsPanel.team_layout` with one `TeamSlotWidget`
@@ -291,8 +302,12 @@ and `storage.py` for persistence.
   and `dragging`, which `MainWindow._on_asset_ready` reads),
   and answers each slot's `build_menu_requested`
   with `build_menu()` (the menu of that character's `build_choices()`,
-  each action checked exactly when selected)
+  each action checked exactly when selected,
+  and all of them sharing one exclusive `QActionGroup`,
+  which is what makes Qt draw them as radio buttons rather than check boxes)
   and `show_build_menu()` (popping it up under the slot's button).
+  `refresh_build_buttons()` also sets each slot's button caption to the
+  label of its currently selected build choice.
   Constructed once in `MainWindow.__init__` with the window as
   `TeamFieldsEditor`, the panel's layout and the window's `HistoryController`.
   `MainWindow` keeps thin `rebuild_team_fields()` and `populate_combo_items()`
