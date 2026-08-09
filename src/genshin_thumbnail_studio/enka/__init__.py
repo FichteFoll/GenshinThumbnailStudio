@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-# `Build`, `Asset` and `Profile` are re-exported because they are what
-# `load_profile()` and `download_assets()` return, and callers import them from
-# this package.
-from ..models import Asset, Build, Profile
+# `Build` and `Profile` are re-exported because they are what `load_profile()`
+# returns and what `download_assets()` takes, and callers import them from this
+# package.
+from ..models import Build, Profile
 from .assets import download_assets
 from .client import EnkaClient, redirect_asset_files
 from .errors import EnkaError
@@ -23,7 +23,6 @@ from .profile import Hoyo, is_uid, resolve_genshin_hoyo
 __all__ = [
     "UNKNOWN_WEAPON_NAME",
     "USER_AGENT",
-    "Asset",
     "Build",
     "EnkaClient",
     "EnkaError",

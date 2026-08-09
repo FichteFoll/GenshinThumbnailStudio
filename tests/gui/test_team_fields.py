@@ -7,6 +7,7 @@ so these tests do not depend on the window's own wiring.
 
 from collections.abc import Iterator
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import pytest
 from PySide6.QtWidgets import QVBoxLayout, QWidget
@@ -14,7 +15,7 @@ from PySide6.QtWidgets import QVBoxLayout, QWidget
 from genshin_thumbnail_studio.gui import team_slots
 from genshin_thumbnail_studio.gui.history import HistoryController
 from genshin_thumbnail_studio.gui.team_fields import TeamFieldsController
-from genshin_thumbnail_studio.models import LIVE_BUILD_NAME, Asset, Build, Project
+from genshin_thumbnail_studio.models import LIVE_BUILD_NAME, Build, Project
 
 from .helpers import qapp
 
@@ -39,7 +40,7 @@ class StubEditor:
 
     project: Project
     builds: dict[str, list[Build]] = field(default_factory=dict)
-    assets: dict[str, Asset] = field(default_factory=dict)
+    art_root: Path = Path("assets")
     selected: tuple[int, int] = (0, 0)
     build_selected_calls: list[tuple[int, int, Build]] = field(default_factory=list)
 

@@ -1,4 +1,4 @@
-"""Plain dataclasses for a build, a downloaded asset, a placement and a project.
+"""Plain dataclasses for a build, a placement and a project.
 
 No dependency on the rest of the package or on Qt, so every other module can
 import these without pulling in the network or GUI stack.
@@ -6,6 +6,9 @@ import these without pulling in the network or GUI stack.
 
 from __future__ import annotations
 
+import hashlib
+import re
+import urllib.parse
 from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +30,30 @@ DEFAULT_ZOOM: dict[Mode, float] = {"abyss": 1.0, "stygian": 1.18}
 # one of the builds they saved on Enka.
 LIVE_BUILD_NAME = "Live"
 
+_UNSAFE_NAME_RUN = re.compile(r"[^A-Za-z0-9._-]+")
+_CACHED_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
+
+
+def _cached_path(root: Path, kind: str, name: str, url: str) -> Path:
+    """Where a downloaded file for `name` at `url` belongs under `root`.
+
+    The scheme is `root/kind/{safe name}-{sha256(url)[:16]}{extension}` and is
+    deliberately unchanged from the one the downloader used to compute for
+    itself: changing it would orphan every user's cache and cost a full
+    re-download for no gain. The character name is there for legibility only;
+    it is the digest of the URL that keeps two builds of one character apart,
+    which is exactly the identity the renderer needs.
+
+    Pure: it creates no directories, so a caller that only asks whether a file
+    exists leaves nothing behind.
+    """
+    digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+    extension = Path(urllib.parse.urlparse(url).path).suffix.lower()
+    if extension not in _CACHED_EXTENSIONS:
+        extension = ".png"
+    safe = _UNSAFE_NAME_RUN.sub("_", name).strip("._") or "asset"
+    return root / kind / f"{safe}-{digest}{extension}"
+
 
 @dataclass
 class Build:
@@ -43,15 +70,13 @@ class Build:
     rarity: int | None = None
     weapon_rarity: int | None = None
 
-    @property
-    def key(self) -> str:
-        """Identify character *and* build, the key of the downloaded-art dict.
+    def art_path(self, root: Path) -> Path:
+        """This build's character art inside the cache rooted at `root`."""
+        return _cached_path(root, "characters", self.name, self.art_url)
 
-        Two slots holding different builds of one character must not share a
-        weapon icon or a skin, which a key of the character name alone would
-        force them to.
-        """
-        return f"{self.name.casefold()}|{self.build_name.casefold()}"
+    def weapon_path(self, root: Path) -> Path:
+        """This build's weapon icon inside the cache rooted at `root`."""
+        return _cached_path(root, "weapons", self.name, self.weapon_url)
 
     def details(self) -> tuple[str | None, str, int, int]:
         """The user-visible part of a build, which a project's snapshot is
@@ -85,13 +110,6 @@ class Profile:
 
 
 @dataclass
-class Asset:
-    build: Build
-    art_path: Path
-    weapon_path: Path
-
-
-@dataclass
 class Placement:
     """One character's framing inside its panel.
 
@@ -109,17 +127,6 @@ class Placement:
     color: str = "#78d7ff"
     flip: bool = False
     build: Build | None = None
-
-    @property
-    def asset_key(self) -> str:
-        """The key this slot's art is stored under, or `""` while unresolved.
-
-        The renderer receives only a `Project` and the `Asset` dict, never the
-        editor's build map, so the key has to travel on the placement itself.
-        An empty key matches no asset, which is the right outcome for a slot
-        whose build is not resolved yet.
-        """
-        return self.build.key if self.build else ""
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> Placement:

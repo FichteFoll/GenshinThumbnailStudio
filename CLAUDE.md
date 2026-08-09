@@ -66,7 +66,7 @@ since native Qt binaries aren't portable across OSes.
 A small layered pipeline, one concern per module,
 all under `src/genshin_thumbnail_studio/`:
 
-- `models.py` — the dataclasses (`Build`, `Asset`, `Placement`, `Project`)
+- `models.py` — the dataclasses (`Build`, `Placement`, `Project`)
   and the JSON project file format.
 - `storage.py` — project/preset persistence and the app data dir.
 - `enka/` — all network interaction with Enka Network, over the `enka` PyPI package.
@@ -85,14 +85,15 @@ Data flow: UID or username entered in the GUI ->
 `EnkaClient.load_profile` ->
 a `Profile` holding each character's builds, live first ->
 `AssetLoader.ensure()` ->
-`download_assets` on a worker thread ->
-one `asset_ready` per selected build into the `Asset` dict,
-keyed by `Build.key` (character plus build) rather than by name ->
-`render_preview`/`export_project` consume `Project.teams` plus the `Asset` dict
+`download_assets` on a worker thread,
+publishing each build's character art and weapon icon
+to the paths that build itself derives from the art root ->
+`render_preview`/`export_project` consume `Project.teams` and that same art root,
+each `Placement.build` resolving its own cached files from it,
 to produce images.
 Nothing waits for that download:
 the preview renders continuously,
-with a `placeholder_panel()` wherever the `Asset` has not arrived yet.
+with a `placeholder_panel()` wherever a slot's derived file has not arrived yet.
 
 ### Rules
 
@@ -105,9 +106,15 @@ with a `placeholder_panel()` wherever the `Asset` has not arrived yet.
   the facade `__all__`s and a per-module line-count tripwire.
   Read it before moving or adding a module, since it is the test that will fail.
 - `gui/state.py` must stay Qt-free; `EditorState` is what the Qt-free collaborators depend on.
-- `Placement.asset_key` (the selected `Build.key`) is the join key to the `Asset` dict,
+- A build resolves its own art: `Build.art_path(root)` and `Build.weapon_path(root)`
+  derive a slot's cached character and weapon files from nothing but the build
+  and an art root, so `Placement.build` is the only join key a slot needs,
   while `Placement.name` only names the character.
-  A project file now also encodes the selected build's details,
+  The renderer takes that root beside the `Project`
+  (`render_preview(project, art_root)`, `export_project(project, art_root, directory)`),
+  and a download's only job is to put the file where the build says it goes,
+  publishing it atomically once it is validated.
+  A project file still encodes the selected build's details,
   so it reopens with the framing *and* the C/R and weapon badges it was saved with,
   while the art itself is still re-fetched from Enka.
 

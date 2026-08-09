@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from ..models import Asset, Placement, Project
+from ..models import Placement, Project
 from . import panels
 from .badges import add_badges
 from .cache import PANEL_CACHE_MAX, cache_get, cache_put, clear_render_cache, panel_cache
@@ -24,7 +24,7 @@ def safe_name(value: str) -> str:
 
 def render_image(
     teams: list[list[Placement]],
-    assets: dict[str, Asset],
+    art_root: Path,
     compact: bool,
     scale: int = 1,
     output_size: tuple[int, int] = (BASE_W, BASE_H),
@@ -40,26 +40,33 @@ def render_image(
     num_rows = len(teams)
     for row, team in enumerate(teams):
         for index, member in enumerate(team):
-            has_asset = bool(member.asset_key) and member.asset_key in assets
-            if not has_asset and require_complete:
-                raise ValueError(f"No downloaded asset for slot {row + 1}-{index + 1}.")
-            asset = assets[member.asset_key] if has_asset else None
+            # Resolved once per member, here: the panel builders below are
+            # handed the path rather than deriving or re-checking it themselves.
+            build = member.build
+            art = build.art_path(art_root) if build else None
+            if art is None or not art.exists():
+                if require_complete:
+                    raise ValueError(f"No downloaded asset for slot {row + 1}-{index + 1}.")
+                art = None
             cache_key = (
                 index,
                 row,
                 num_rows,
-                # Character *and* build: two builds of one character must not
-                # serve each other's cached panel, weapon icon included.
-                member.asset_key or member.name.casefold(),
+                # The path *is* the identity, character and content included: it
+                # is derived from the character name and the art URL, so two
+                # builds of one character never serve each other's cached panel.
+                # `None` is a slot with no art yet, whose placeholder panel
+                # depends on nothing but the color and the geometry below.
+                str(art) if art is not None else None,
                 round(member.offset_x, 4),
                 round(member.offset_y, 4),
                 round(member.zoom, 4),
                 member.flip,
-                # Must track what make_panel() actually paints with
-                # (card_color(member, asset)), not the raw placement color,
-                # or a stale panel can survive an element change.
-                card_color(member, asset) if asset else member.color,
-                str(asset.art_path) if asset else None,
+                # Must track what the chosen builder actually paints with, or a
+                # stale panel can survive an element change. make_panel() uses
+                # the element color, placeholder_panel() the placement's own,
+                # and the two are not interchangeable in the key.
+                card_color(member) if art is not None else member.color,
                 row_height,
                 step,
                 slant,
@@ -72,11 +79,11 @@ def render_image(
                 # rather than bound into this module's globals, so a test (and any
                 # future instrumentation) can patch them on `renderer.panels` and
                 # still intercept a render that is already in flight.
-                if asset is not None:
+                if art is not None:
                     panel = panels.make_panel(
                         width,
                         member,
-                        asset,
+                        art,
                         index,
                         row,
                         num_rows,
@@ -105,22 +112,22 @@ def render_image(
             # offset, while the in-place composite clips the right one itself.
             origin_x, origin_y = panel_origin(index, row, row_height, step, slant)
             canvas.alpha_composite(panel, (max(0, origin_x), origin_y), (max(0, -origin_x), 0))
-    add_card_borders(canvas, teams, assets, row_height, step, slant, scale)
-    add_badges(canvas, teams, assets, row_height, step, scale, compact)
+    add_card_borders(canvas, teams, row_height, step, slant, scale)
+    add_badges(canvas, teams, art_root, row_height, step, scale, compact)
     # Pillow's Image.resize() stub leaves its overload partially unknown.
     return canvas.convert("RGB").resize(output_size, Image.Resampling.LANCZOS)  # pyright: ignore[reportUnknownMemberType]
 
 
-def render_preview(project: Project, assets: dict[str, Asset]) -> Image.Image:
+def render_preview(project: Project, art_root: Path) -> Image.Image:
     project.ensure_shape()
     if project.mode == "abyss":
-        return render_image(project.teams, assets, compact=True, scale=1, require_complete=False)
+        return render_image(project.teams, art_root, compact=True, scale=1, require_complete=False)
     return render_image(
-        [project.teams[project.active_team]], assets, compact=False, scale=1, require_complete=False
+        [project.teams[project.active_team]], art_root, compact=False, scale=1, require_complete=False
     )
 
 
-def export_project(project: Project, assets: dict[str, Asset], directory: Path) -> list[Path]:
+def export_project(project: Project, art_root: Path, directory: Path) -> list[Path]:
     project.ensure_shape()
     directory.mkdir(parents=True, exist_ok=True)
     scale = min(4, max(2, math.ceil(2 * project.output_height / BASE_H)))
@@ -129,14 +136,14 @@ def export_project(project: Project, assets: dict[str, Asset], directory: Path) 
     try:
         if project.mode == "abyss":
             target = directory / f"{safe_name(project.output_name)}.png"
-            render_image(project.teams, assets, compact=True, scale=scale, output_size=output_size).save(
+            render_image(project.teams, art_root, compact=True, scale=scale, output_size=output_size).save(
                 target, optimize=True
             )
             written.append(target)
         else:
             for index, team in enumerate(project.teams, start=1):
                 target = directory / f"{safe_name(project.output_name)}_boss{index}.png"
-                render_image([team], assets, compact=False, scale=scale, output_size=output_size).save(
+                render_image([team], art_root, compact=False, scale=scale, output_size=output_size).save(
                     target, optimize=True
                 )
                 written.append(target)

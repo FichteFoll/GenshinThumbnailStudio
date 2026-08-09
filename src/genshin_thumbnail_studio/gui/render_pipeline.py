@@ -2,9 +2,9 @@
 
 Owns the throttle timer, the token that identifies the newest request and the
 in-flight/stale flags, and turns a finished `RenderJob` into either a `QPixmap`
-or an error message. It reads `project` and `assets` off the `EditorState` on
-every dispatch rather than capturing them, because the window replaces both
-wholesale.
+or an error message. It reads `project` and `art_root` off the `EditorState` on
+every dispatch rather than capturing them, because the window replaces the
+project wholesale.
 """
 
 from __future__ import annotations
@@ -65,9 +65,8 @@ class RenderPipeline(QObject):
             teams=copy.deepcopy(project.teams),
             active_team=project.active_team,
         )
-        assets_snapshot = dict(self._state.assets)
         self.running = True
-        job = RenderJob(self.token, snapshot, assets_snapshot)
+        job = RenderJob(self.token, snapshot, self._state.art_root)
         job.signals.finished.connect(self._on_job_finished)
         self._pool.start(job)
 

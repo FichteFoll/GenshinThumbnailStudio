@@ -19,6 +19,20 @@ rather than through the package facade,
 because that is where a `monkeypatch.setattr()` has to land to take effect.
 This is the one place the facade rule is deliberately broken.
 
+## Test helpers
+
+`tests/renderer/helpers.py`'s `create_assets()` and `tests/gui/helpers.py`'s
+`create_test_assets()` no longer build a mapping to key into.
+Both write each generated character and weapon image straight to
+`build.art_path(root)`/`build.weapon_path(root)`, creating the parent
+directories as needed, which is the same place `download_assets()` would
+publish it, and return the `Build`s they created.
+A caller names the build it wants and reads its files back off that build,
+so no test spells an asset key out as a literal string any more
+(`"furina|live"`, `"nahida|live"` and friends are gone):
+a `Build`'s identity is its own name and URLs, not a name assigned to it
+by a test.
+
 ## The layout guard
 
 `tests/test_package_layout.py` guards the layout itself.

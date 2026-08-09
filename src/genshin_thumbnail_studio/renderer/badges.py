@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageFont
 
-from ..models import Asset, Placement
+from ..models import Build, Placement
 from .cache import (
     BADGE_CACHE_MAX,
     WEAPON_ICON_CACHE_MAX,
@@ -114,7 +114,8 @@ def badge_tile_origin(geometry: BadgeGeometry) -> tuple[int, int]:
 
 def badge_tile(
     geometry: BadgeGeometry,
-    asset: Asset,
+    build: Build,
+    weapon_path: Path,
     color: str,
     font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
     scale: int,
@@ -185,8 +186,8 @@ def badge_tile(
     painted = paint_through_coverage(tile, hex_to_rgba(color, 245), box_outline, painted)
 
     stroke_width = (3 if compact else 4) * scale
-    constellation_text = f"C{asset.build.constellation}"
-    refinement_text = f"R{asset.build.refinement}"
+    constellation_text = f"C{build.constellation}"
+    refinement_text = f"R{build.refinement}"
     constellation_left, _, constellation_right, _ = draw.textbbox(
         (0, 0), constellation_text, font=font, stroke_width=stroke_width
     )
@@ -207,7 +208,7 @@ def badge_tile(
         (text_x, text_y),
         constellation_text,
         font=font,
-        fill=hex_to_rgba(rarity_color(asset.build.rarity), 255),
+        fill=hex_to_rgba(rarity_color(build.rarity), 255),
         stroke_width=stroke_width,
         stroke_fill=(0, 0, 0, 255),
         anchor="lm",
@@ -216,7 +217,7 @@ def badge_tile(
         (text_x + constellation_w - stroke_width, text_y),
         refinement_text,
         font=font,
-        fill=hex_to_rgba(rarity_color(asset.build.weapon_rarity), 255),
+        fill=hex_to_rgba(rarity_color(build.weapon_rarity), 255),
         stroke_width=stroke_width,
         stroke_fill=(0, 0, 0, 255),
         anchor="lm",
@@ -236,10 +237,10 @@ def badge_tile(
     coverage = paint_through_coverage(tile, hex_to_rgba(color, 240), circle_outline, painted)
 
     icon_d = (48 if compact else 68) * scale
-    icon_key = (str(asset.weapon_path), icon_d)
+    icon_key = (str(weapon_path), icon_d)
     icon = cache_get(weapon_icon_cache, icon_key)
     if icon is None:
-        icon = Image.open(asset.weapon_path).convert("RGBA")
+        icon = Image.open(weapon_path).convert("RGBA")
         # Enka weapon PNGs can pad their visible art asymmetrically on the canvas,
         # so center on the art's own alpha bounding box, not the canvas it ships in.
         alpha_bbox = icon.getbbox()
@@ -261,7 +262,7 @@ def badge_tile(
 def add_badges(
     image: Image.Image,
     teams: list[list[Placement]],
-    assets: dict[str, Asset],
+    art_root: Path,
     row_height: int,
     step: float,
     scale: int,
@@ -275,27 +276,36 @@ def add_badges(
         font = find_font((38 if compact else 54) * scale)
         for row, team in enumerate(teams):
             for index, member in enumerate(team):
-                if not member.asset_key or member.asset_key not in assets:
+                build = member.build
+                if build is None:
                     continue
-                asset = assets[member.asset_key]
+                weapon_path = build.weapon_path(art_root)
+                # Both files, not just the weapon icon: a slot whose art has not
+                # arrived renders as a placeholder, which carries no badges.
+                if not build.art_path(art_root).exists() or not weapon_path.exists():
+                    continue
                 center = round(index * step + step / 2)
                 top_y = row * row_height + row_height - (68 if compact else 107) * scale
-                text = f"C{asset.build.constellation}R{asset.build.refinement}"
+                text = f"C{build.constellation}R{build.refinement}"
                 geometry = badge_geometry(draw, text, font, center, top_y, scale, compact)
-                color = card_color(member, asset)
+                color = card_color(member)
+                # The weapon path is derived from the character name and the
+                # weapon URL, so it identifies the icon's content; the four
+                # build fields beside it are the badge's whole remaining text
+                # and colouring.
                 tile_key = (
-                    asset.build.constellation,
-                    asset.build.refinement,
-                    asset.build.rarity,
-                    asset.build.weapon_rarity,
+                    build.constellation,
+                    build.refinement,
+                    build.rarity,
+                    build.weapon_rarity,
                     color,
-                    str(asset.weapon_path),
+                    str(weapon_path),
                     scale,
                     compact,
                 )
                 cached = cache_get(badge_cache, tile_key)
                 if cached is None:
-                    cached = badge_tile(geometry, asset, color, font, scale, compact)
+                    cached = badge_tile(geometry, build, weapon_path, color, font, scale, compact)
                     cache_put(badge_cache, tile_key, cached, BADGE_CACHE_MAX)
                 tile, coverage = cached
                 image.paste(tile, badge_tile_origin(geometry), coverage)

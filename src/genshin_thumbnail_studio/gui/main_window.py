@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..enka import EnkaClient, is_uid
-from ..models import Asset, Build, Placement, Project
+from ..models import Build, Placement, Project
 from ..storage import cache_dir, load_last_profile
 from . import dialogs, profile_io
 from .actions import ProjectActions
@@ -41,7 +41,8 @@ class MainWindow(QMainWindow):
         self.project = Project.blank("abyss")
         self.project_path: Path | None = None
         self.builds: dict[str, list[Build]] = {}
-        self.assets: dict[str, Asset] = {}
+        # The cache root every build resolves its own art and weapon icon under.
+        self.art_root = cache_dir() / "assets"
         self._presets = PresetStore.load()
         self._placement = PlacementController(self)
         self._history = HistoryController(self, self, self._history_restored)
@@ -49,7 +50,7 @@ class MainWindow(QMainWindow):
         self.selected = (0, 0)
         self._updating_controls = False
         self._thread_pool = QThreadPool(self)
-        self.asset_loader = AssetLoader(self, cache_dir() / "assets", self._thread_pool, self)
+        self.asset_loader = AssetLoader(self, self.art_root, self._thread_pool, self)
         self.asset_loader.asset_ready.connect(self._on_asset_ready)
         self.asset_loader.progress.connect(self.statusBar().showMessage)
         self.asset_loader.failed.connect(self._on_asset_download_failed)
@@ -160,7 +161,6 @@ class MainWindow(QMainWindow):
         self.project = Project.blank(mode, identifier if is_uid(identifier) else "")
         self.project.profile_name = "" if is_uid(identifier) else identifier
         self.set_project_path(None)
-        self.assets = {}
         self.selected = (0, 0)
         self.editor_panel.boss_combo.setVisible(mode == "stygian")
         self.rebuild_team_fields()
@@ -196,7 +196,6 @@ class MainWindow(QMainWindow):
         if member.name and member.name.casefold() != old_name.casefold():
             self._presets.apply_to(self, member)
         resolve_build(self, member)
-        self.assets = {key: value for key, value in self.assets.items() if key in self.selected_build_keys()}
         self.sync_controls()
         self._history.schedule()
         self.asset_loader.ensure()
@@ -208,17 +207,10 @@ class MainWindow(QMainWindow):
         member.build = build
         member.name = build.name
         self._presets.apply_to(self, member)  # The costume may differ, and `preset_key()` keys on it.
-        self.assets = {key: value for key, value in self.assets.items() if key in self.selected_build_keys()}
         self.sync_controls()
         self._history.schedule()
         self.asset_loader.ensure()
         self.schedule_render()
-
-    def selected_build_keys(self) -> set[str]:
-        """The `Build.key`s the named slots are framed with, which is what the
-        downloaded-art dict is keyed by."""
-        builds = (selected_build(self, member) for team in self.project.teams for member in team if member.name)
-        return {build.key for build in builds if build is not None}
 
     def _save_current_preset(self) -> None:
         self._presets.remember(self, self.current_member())
@@ -228,12 +220,18 @@ class MainWindow(QMainWindow):
         return self.project.teams[team][slot]
 
     def _filled_slots(self) -> set[tuple[int, int]]:
-        """The `(team, slot)` pairs whose art is downloaded; the rest are placeholders."""
+        """The `(team, slot)` pairs whose art is downloaded; the rest are placeholders.
+
+        A file only exists at the path its build derives once it has been
+        downloaded *and* validated, so its presence is the same guarantee the
+        in-memory dict used to give - and it also notices a file removed behind
+        the app's back, which the dict could not.
+        """
         return {
             (team_index, slot_index)
             for team_index, team in enumerate(self.project.teams)
             for slot_index, member in enumerate(team)
-            if (build := selected_build(self, member)) is not None and build.key in self.assets
+            if (build := selected_build(self, member)) is not None and build.art_path(self.art_root).exists()
         }
 
     def select_slot(self, team: int, slot: int) -> None:
@@ -337,16 +335,14 @@ class MainWindow(QMainWindow):
     def validate_team(self) -> list[Build]:
         return self.profile_loader.validate_team()
 
-    def _on_asset_ready(self, key: str, asset: Asset) -> None:
+    def _on_asset_ready(self, build: Build) -> None:
         # A download outliving `waitForDone(2000)` lands here during teardown,
         # where touching the widgets `sync_controls()` drives is pointless.
         if self._closing:
             return
-        self.assets[key] = asset
         for team in self.project.teams:
             for member in team:
-                build = selected_build(self, member)
-                if build is not None and build.key == key:
+                if selected_build(self, member) == build:
                     self._presets.apply_to(self, member)
         # The arriving portrait only stops being a placeholder once the controls
         # resync: `sync_controls()` is what re-derives `_filled_slots()` for the

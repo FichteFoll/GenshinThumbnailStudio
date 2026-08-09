@@ -7,7 +7,7 @@ from PIL import Image, ImageDraw
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from genshin_thumbnail_studio.gui import MainWindow, dialogs
-from genshin_thumbnail_studio.models import Asset, Build
+from genshin_thumbnail_studio.models import Build
 
 
 def qapp() -> QApplication:
@@ -30,8 +30,8 @@ def live_build(name: str) -> Build:
     """The minimal live build a placement carries in these tests.
 
     `Placement.build` is what the renderer and the editor resolve a slot's art
-    through, so a member filled in by hand needs one; its `key` is the key
-    `create_test_assets()` files that character's art under.
+    through, so a member filled in by hand needs one; the paths it derives are
+    where `create_test_assets()` writes that character's files.
     """
     return Build(
         name=name,
@@ -44,31 +44,35 @@ def live_build(name: str) -> Build:
     )
 
 
-def create_test_assets(directory: Path, names: list[str]) -> dict[str, Asset]:
-    """One asset per name, keyed by `Build.key` the way the editor keys them."""
-    directory.mkdir(parents=True, exist_ok=True)
-    assets: dict[str, Asset] = {}
-    for index, name in enumerate(names):
-        art_path = directory / f"art-{index}.png"
-        weapon_path = directory / f"weapon-{index}.png"
-        art = Image.new("RGBA", (1200, 900), (25 + index * 10, 70, 100, 255))
-        ImageDraw.Draw(art).ellipse((250, 80, 950, 850), fill=(130 + index * 8, 180, 220, 255))
-        art.save(art_path)
-        weapon = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
-        ImageDraw.Draw(weapon).polygon([(128, 10), (190, 220), (128, 190), (66, 220)], fill="white")
-        weapon.save(weapon_path)
-        build = Build(
-            name=name,
-            constellation=index % 7,
-            refinement=index % 5 + 1,
-            weapon_name="Weapon",
-            costume_id=None,
-            build_id=str(index),
-            art_url="https://example.invalid/art.png",
-            weapon_url="https://example.invalid/weapon.png",
-        )
-        assets[build.key] = Asset(build, art_path, weapon_path)
-    return assets
+def write_build_files(root: Path, build: Build) -> None:
+    """Write art and weapon images where `build` says they belong under `root`.
+
+    That is all "this slot has its art" means now, so a test that wants a filled
+    slot publishes the files rather than filling a dict.
+    """
+    art_path = build.art_path(root)
+    art_path.parent.mkdir(parents=True, exist_ok=True)
+    art = Image.new("RGBA", (1200, 900), (25, 70, 100, 255))
+    ImageDraw.Draw(art).ellipse((250, 80, 950, 850), fill=(130, 180, 220, 255))
+    art.save(art_path)
+    weapon_path = build.weapon_path(root)
+    weapon_path.parent.mkdir(parents=True, exist_ok=True)
+    weapon = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+    ImageDraw.Draw(weapon).polygon([(128, 10), (190, 220), (128, 190), (66, 220)], fill="white")
+    weapon.save(weapon_path)
+
+
+def create_test_assets(root: Path, names: list[str]) -> list[Build]:
+    """Publish each name's live build under the cache root `root`.
+
+    The window's `art_root` is what a test passes here, because that is the root
+    the editor and the renderer resolve every slot's files under; the returned
+    builds are the ones `fill_window_teams()` puts on the placements.
+    """
+    builds = [live_build(name) for name in names]
+    for build in builds:
+        write_build_files(root, build)
+    return builds
 
 
 def fill_window_teams(window: MainWindow, names: list[str]) -> None:

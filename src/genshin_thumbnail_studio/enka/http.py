@@ -22,6 +22,12 @@ def fetch_json(url: str) -> Any:
 
 
 def download(url: str, destination: Path) -> None:
+    """Write `url` to `destination`, which a failure may leave partially written.
+
+    Publishing a downloaded file atomically is the caller's job: `assets.py`
+    passes a temp path beside the cache entry and renames it into place once the
+    image validates.
+    """
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
         with urllib.request.urlopen(request, timeout=120) as response:

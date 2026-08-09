@@ -38,7 +38,7 @@ class ProjectEditor(EditorState, Protocol):
     `MainWindow` satisfies it structurally; nothing has to declare it.
     Like the other collaborators, `ProjectFiles` reads the attributes
     through the Protocol on every call rather than capturing them,
-    because the window replaces `project`, `builds` and `assets`
+    because the window replaces `project` and `builds`
     wholesale in several places; see `state.py`.
     """
 
@@ -50,7 +50,6 @@ class ProjectEditor(EditorState, Protocol):
     editor_panel: EditorPanel
 
     def validate_team(self) -> list[Build]: ...
-    def selected_build_keys(self) -> set[str]: ...
     def rebuild_team_fields(self) -> None: ...
     def sync_controls(self) -> None: ...
     def populate_combo_items(self) -> None: ...
@@ -145,7 +144,6 @@ class ProjectFiles:
             editor.project = project
             editor.set_project_path(Path(path))
             editor.selected = (project.active_team if project.mode == "stygian" else 0, 0)
-            editor.assets = {}
             controls.abyss_radio.blockSignals(True)
             controls.stygian_radio.blockSignals(True)
             controls.abyss_radio.setChecked(project.mode == "abyss")
@@ -195,13 +193,31 @@ class ProjectFiles:
         except Exception as error:
             dialogs.show_error(parent, "Could not open project", error)
 
+    def _every_named_slot_has_its_files(self) -> bool:
+        """Whether every named slot's art *and* weapon icon are cached.
+
+        `validate_team()` has just written a build onto every named placement,
+        so each one can be asked for its own two paths; a file exists there only
+        once it has been downloaded and validated.
+        """
+        editor = self._editor
+        root = editor.art_root
+        return all(
+            member.build is not None
+            and member.build.art_path(root).exists()
+            and member.build.weapon_path(root).exists()
+            for team in editor.project.teams
+            for member in team
+            if member.name
+        )
+
     def export(self) -> None:
         parent = self._parent
         editor = self._editor
         output_name = editor.controls_panel.output_name
         try:
             editor.validate_team()
-            if set(editor.selected_build_keys()) - set(editor.assets):
+            if not self._every_named_slot_has_its_files():
                 # The download can no longer be awaited here, so start it and
                 # let the user come back once the preview has filled in.
                 editor.asset_loader.ensure()
@@ -217,7 +233,7 @@ class ProjectFiles:
             output_name.setText(stem)
             editor.project.output_name = stem
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            written = export_project(editor.project, editor.assets, directory)
+            written = export_project(editor.project, editor.art_root, directory)
             dialogs.show_export_finished(parent, written)
             parent.statusBar().showMessage(f"Exported {len(written)} thumbnail(s)", 7000)
         except Exception as error:

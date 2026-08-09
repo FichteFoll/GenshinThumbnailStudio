@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import functools
+from pathlib import Path
 
 from PIL import Image
 
-from ..models import Asset, Placement
+from ..models import Placement
 from .cache import (
     ART_CACHE_MAX,
     WORK_CACHE_MAX,
@@ -151,7 +152,7 @@ def art_pixel_size(path: str) -> tuple[int, int]:
         return image.size
 
 
-def source_art(asset: Asset, target: tuple[int, int], zoom: float, scale: int) -> Image.Image:
+def source_art(art_path: Path, target: tuple[int, int], zoom: float, scale: int) -> Image.Image:
     """The image make_panel() should resample its panel art from.
 
     For a preview render this is a working copy pre-downscaled to what the
@@ -164,10 +165,10 @@ def source_art(asset: Asset, target: tuple[int, int], zoom: float, scale: int) -
     GUI thread, so they must be treated as read-only. Every consumer produces
     a new image via resize()/crop(), so no copy is made here.
     """
-    art_key = (str(asset.art_path),)
+    art_key = (str(art_path),)
     art = cache_get(art_cache, art_key)
     if art is None:
-        art = Image.open(asset.art_path).convert("RGBA")
+        art = Image.open(art_path).convert("RGBA")
         cache_put(art_cache, art_key, art, ART_CACHE_MAX)
     if scale != 1 or zoom > MAX_PLACEMENT_ZOOM:
         return art
@@ -180,7 +181,7 @@ def source_art(asset: Asset, target: tuple[int, int], zoom: float, scale: int) -
     if work[0] >= source_w or work[1] >= source_h:
         return art
 
-    work_key = (str(asset.art_path), *work)
+    work_key = (str(art_path), *work)
     working = cache_get(work_cache, work_key)
     if working is None:
         # Pillow's Image.resize() stub leaves its overload partially unknown.

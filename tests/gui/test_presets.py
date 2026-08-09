@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from genshin_thumbnail_studio.gui.presets import PresetStore, preset_key
-from genshin_thumbnail_studio.models import Asset, Build, Mode, Placement, Project
+from genshin_thumbnail_studio.models import Build, Mode, Placement, Project
 
 
 @dataclass
@@ -21,7 +21,7 @@ class StubState:
 
     project: Project
     builds: dict[str, list[Build]] = field(default_factory=dict)
-    assets: dict[str, Asset] = field(default_factory=dict)
+    art_root: Path = Path("assets")
 
 
 def _build(name: str, costume_id: str | None = None) -> Build:

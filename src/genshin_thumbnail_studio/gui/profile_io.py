@@ -31,7 +31,7 @@ class ProfileEditor(EditorState, Protocol):
     `MainWindow` satisfies it structurally; nothing has to declare it.
     Like the other collaborators, `ProfileLoader` reads the attributes
     through the Protocol on every call rather than capturing them,
-    because the window replaces `project`, `builds` and `assets`
+    because the window replaces `project` and `builds`
     wholesale in several places; see `state.py`.
     """
 
@@ -70,7 +70,6 @@ class ProfileLoader:
             editor.builds = profile.builds
             save_profile_cache(profile)
             save_last_profile(identifier)
-            editor.assets = {}
             for team in editor.project.teams:
                 for member in team:
                     if member.name:
@@ -105,14 +104,18 @@ class ProfileLoader:
             editor.team_fields.combos[team][slot].setCurrentText(name)
 
     def validate_team(self) -> list[Build]:
-        """The builds the named slots are framed with, deduplicated by build key.
+        """The builds the named slots are framed with, one per distinct download.
+
+        Deduplicated by the pair of URLs, which is what a download is determined
+        by, so two slots framed with the same art share one fetch while two
+        builds of one character that differ in their art do not.
 
         Writing each slot's resolved build onto its placement here is what puts
         the build details into every saved project (R9).
         """
         editor = self._editor
         missing: list[str] = []
-        selected: dict[str, Build] = {}
+        selected: dict[tuple[str, str], Build] = {}
         for team_index, row in enumerate(editor.team_fields.combos):
             for slot_index, combo in enumerate(row):
                 name = combo.currentText().strip()
@@ -124,7 +127,7 @@ class ProfileLoader:
                 if build is None:
                     missing.append(f"{team_index + 1}-{slot_index + 1}: {name or 'empty'}")
                 else:
-                    selected[build.key] = build
+                    selected[(build.art_url, build.weapon_url)] = build
         if missing:
             raise ValueError("Build not in the loaded profile: " + ", ".join(missing))
         return list(selected.values())

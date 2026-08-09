@@ -10,7 +10,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 from genshin_thumbnail_studio.enka import EnkaClient
 from genshin_thumbnail_studio.gui import MainWindow, asset_loader, dialogs, project_io
-from genshin_thumbnail_studio.models import LIVE_BUILD_NAME, Asset, Build, Profile, Project
+from genshin_thumbnail_studio.models import LIVE_BUILD_NAME, Build, Profile, Project
 from genshin_thumbnail_studio.storage import (
     load_last_profile,
     load_profile_cache,
@@ -28,6 +28,7 @@ from .helpers import (
     fill_window_teams,
     qapp,
     wait_for_render,
+    write_build_files,
 )
 
 
@@ -121,14 +122,14 @@ def prepare_cached_open(
     project_path = tmp_path / "project.json"
     write_project(project_path, uid)
     window = MainWindow()
-    assets = create_test_assets(tmp_path / "assets", TEAM_NAMES)
 
-    def fake_download_assets(*args: Any, **kwargs: Any) -> dict[str, Asset]:
-        on_asset = kwargs.get("on_asset")
-        if callable(on_asset):
-            for key, asset in assets.items():
-                on_asset(key, asset)
-        return assets
+    def fake_download_assets(builds: list[Build], root: Path, **kwargs: Any) -> None:
+        """Publish exactly the builds the loader asked for, where they say they belong."""
+        on_build = kwargs.get("on_build")
+        for build in builds:
+            write_build_files(root, build)
+            if callable(on_build):
+                on_build(build)
 
     monkeypatch.setattr(asset_loader, "download_assets", fake_download_assets)
     monkeypatch.setattr(
@@ -233,8 +234,8 @@ def test_the_profile_field_is_split_into_a_uid_or_a_username(
     def fake_load_profile(identifier: str) -> Profile:
         return profile
 
-    def fake_download_assets(*args: Any, **kwargs: Any) -> dict[str, Asset]:
-        return {}
+    def fake_download_assets(*args: Any, **kwargs: Any) -> None:
+        return None
 
     monkeypatch.setattr(window.client, "load_profile", fake_load_profile)
     monkeypatch.setattr(asset_loader, "download_assets", fake_download_assets)
@@ -259,7 +260,7 @@ def test_the_profile_field_is_split_into_a_uid_or_a_username(
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
-def test_load_profile_fills_the_builds_and_downloads_under_build_keys(
+def test_load_profile_fills_the_builds_and_downloads_the_selected_build(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """R1: the profile comes from Enka, and its art is fetched per character *and* build."""
@@ -285,10 +286,9 @@ def test_load_profile_fills_the_builds_and_downloads_under_build_keys(
     requested: list[list[str]] = []
 
     def fake_download_assets(
-        builds: list[Build], root: Path, progress: object = None, on_asset: object = None
-    ) -> dict[str, Asset]:
-        requested.append([build.key for build in builds])
-        return {}
+        builds: list[Build], root: Path, progress: object = None, on_build: object = None
+    ) -> None:
+        requested.append([build.name for build in builds])
 
     monkeypatch.setattr(asset_loader, "download_assets", fake_download_assets)
     window.project.teams[0][0].name = "Furina"
@@ -299,9 +299,9 @@ def test_load_profile_fills_the_builds_and_downloads_under_build_keys(
     app.processEvents()
 
     assert window.builds == {"furina": [live, saved]}
-    # The live build is the default, and its art is keyed by character and build.
+    # The live build is the default, and it is the only one the slot needs art for.
     assert window.project.teams[0][0].build == live
-    assert requested == [["furina|live"]]
+    assert requested == [["Furina"]]
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
@@ -313,8 +313,8 @@ def test_open_project_resolves_the_cached_profile_by_name_not_uid(
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
     monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
-    def no_downloads(*args: object, **kwargs: object) -> dict[str, Asset]:
-        return {}
+    def no_downloads(*args: object, **kwargs: object) -> None:
+        return None
 
     monkeypatch.setattr(asset_loader, "download_assets", no_downloads)
     save_profile_cache(make_profile("Algoinde", TEAM_NAMES, username="Algoinde"))
@@ -421,8 +421,8 @@ def test_choosing_a_build_snapshots_it_into_the_saved_and_reopened_project(
     app = qapp()
     monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
 
-    def no_downloads(*args: object, **kwargs: object) -> dict[str, Asset]:
-        return {}
+    def no_downloads(*args: object, **kwargs: object) -> None:
+        return None
 
     monkeypatch.setattr(asset_loader, "download_assets", no_downloads)
     uid = "700000042"
@@ -486,8 +486,8 @@ def test_new_project_resets_everything_but_the_profile(tmp_path: Path, monkeypat
     app = qapp()
     monkeypatch.setattr(dialogs, "QMessageBox", helpers.DiscardMessageBox)
 
-    def no_downloads(*args: object, **kwargs: object) -> dict[str, Asset]:
-        return {}
+    def no_downloads(*args: object, **kwargs: object) -> None:
+        return None
 
     monkeypatch.setattr(asset_loader, "download_assets", no_downloads)
     uid = "700000042"
@@ -524,12 +524,11 @@ def test_new_project_resets_everything_but_the_profile(tmp_path: Path, monkeypat
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
-def _prepare_export_window(window: MainWindow, tmp_path: Path, names: list[str]) -> None:
-    assets = create_test_assets(tmp_path / "assets", names)
-    window.builds = {asset.build.name.casefold(): [asset.build] for asset in assets.values()}
+def _prepare_export_window(window: MainWindow, names: list[str]) -> None:
+    builds = create_test_assets(window.art_root, names)
+    window.builds = {build.name.casefold(): [build] for build in builds}
     fill_window_teams(window, names)
     window.rebuild_team_fields()
-    window.assets = assets
 
 
 class RecordingCritical:
@@ -549,7 +548,7 @@ def test_export_refuses_a_team_whose_slot_names_no_loaded_build(
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
     window = MainWindow()
-    _prepare_export_window(window, tmp_path, TEAM_NAMES)
+    _prepare_export_window(window, TEAM_NAMES)
     # One slot names a character the loaded profile has no build for, which is
     # exactly the slot the preview would draw as a placeholder panel.
     window.team_fields.combos[1][3].setCurrentText("Somebody Else")
@@ -572,13 +571,57 @@ def test_export_refuses_a_team_whose_slot_names_no_loaded_build(
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
+def test_export_refuses_while_a_named_slot_is_still_missing_a_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R5: the export waits until every named slot's two files have landed.
+
+    Publication is per file, so a slot can have its art without its weapon icon;
+    both cases have to hold the export back.
+    """
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+
+    def no_downloads(*args: object, **kwargs: object) -> None:
+        return None
+
+    # The refusal restarts the loader, which must not reach the network here.
+    monkeypatch.setattr(asset_loader, "download_assets", no_downloads)
+    builds = [helpers.live_build(name) for name in TEAM_NAMES]
+    window.builds = {build.name.casefold(): [build] for build in builds}
+    fill_window_teams(window, TEAM_NAMES)
+    window.rebuild_team_fields()
+    # Six slots are fully published, the seventh has its art but not its weapon
+    # icon, and the eighth has nothing at all.
+    for build in builds[:-1]:
+        write_build_files(window.art_root, build)
+    builds[-2].weapon_path(window.art_root).unlink()
+
+    recorder = RecordingCritical()
+    monkeypatch.setattr(dialogs, "QMessageBox", recorder)
+    for chooser in ("getSaveFileName", "getExistingDirectory"):
+        monkeypatch.setattr(
+            project_io.QFileDialog,
+            chooser,
+            staticmethod(lambda *args, **kwargs: pytest.fail("a missing file must not reach the export dialog")),
+        )
+
+    window.export()
+
+    assert recorder.calls == [("Character art is still downloading", "Try the export again in a moment.")]
+    assert list(tmp_path.glob("*.png")) == []
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
 def test_export_abyss_writes_the_file_chosen_in_the_save_dialog(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
     window = MainWindow()
-    _prepare_export_window(window, tmp_path, TEAM_NAMES)
+    _prepare_export_window(window, TEAM_NAMES)
     window.controls_panel.output_name.setText("prefilled")
 
     monkeypatch.setattr(dialogs, "QMessageBox", StubMessageBox)
@@ -614,7 +657,7 @@ def test_export_stygian_still_asks_for_a_folder(tmp_path: Path, monkeypatch: pyt
     # Switching the mode replaces window.project, so fill the teams afterwards.
     window.controls_panel.stygian_radio.setChecked(True)
     names = [*TEAM_NAMES, "Xingqiu", "Ganyu", "Raiden Shogun", "Yelan"]
-    _prepare_export_window(window, tmp_path, names)
+    _prepare_export_window(window, names)
     window.controls_panel.output_name.setText("bosses")
 
     monkeypatch.setattr(dialogs, "QMessageBox", StubMessageBox)
@@ -652,7 +695,7 @@ def test_export_defaults_to_the_opened_project_folder(tmp_path: Path, monkeypatc
     )
     window.open_project()
 
-    _prepare_export_window(window, tmp_path, TEAM_NAMES)
+    _prepare_export_window(window, TEAM_NAMES)
     window.controls_panel.output_name.setText("prefilled")
     default_paths: list[str] = []
 
@@ -850,7 +893,7 @@ def test_export_defaults_to_the_saved_project_folder(tmp_path: Path, monkeypatch
     project_file = project_dir / "thumbnail-project.json"
 
     window = MainWindow()
-    _prepare_export_window(window, tmp_path, TEAM_NAMES)
+    _prepare_export_window(window, TEAM_NAMES)
     window.controls_panel.output_name.setText("prefilled")
 
     monkeypatch.setattr(dialogs, "QMessageBox", StubMessageBox)

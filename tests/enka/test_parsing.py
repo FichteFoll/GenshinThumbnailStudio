@@ -81,7 +81,6 @@ def test_build_from_character_fills_the_live_build() -> None:
     assert build.weapon_rarity == 5
     assert build.art_url == "https://enka.network/ui/UI_Costume_BennettCostumeSummer.png"
     assert build.weapon_url == "https://enka.network/ui/UI_EquipIcon_Test.png"
-    assert build.key == "bennett|live"
 
 
 def test_build_from_character_carries_a_saved_build_name_and_id() -> None:
@@ -91,4 +90,4 @@ def test_build_from_character_carries_a_saved_build_name_and_id() -> None:
 
     assert build.costume_id is None
     assert build.build_id == "42"
-    assert build.key == "amber|bow dps"
+    assert build.build_name == "Bow DPS"

@@ -4,11 +4,12 @@ Qt-free: it reads the editor state through `EditorState` on every call, see
 `state.py` for why.
 
 `Placement.build` is the single source of truth for which art a slot uses. The
-renderer receives only a `Project` and the `Asset` dict, never the editor's
-`builds` map, so it cannot resolve a live build from a bare character name; it
-reads `Placement.asset_key` and nothing else. `resolve_build()` is therefore
-called wherever a slot's character changes or a profile arrives, so that the
-snapshot is on the placement before anything renders.
+renderer receives only a `Project` and a cache root, never the editor's `builds`
+map, so it cannot resolve a live build from a bare character name; it asks
+`Placement.build` for its own cached files and draws a placeholder when there is
+no build or no file. `resolve_build()` is therefore called wherever a slot's
+character changes or a profile arrives, so that the snapshot is on the placement
+before anything renders.
 """
 
 from __future__ import annotations
@@ -32,10 +33,12 @@ def build_choices(profile_builds: list[Build], stored: Build | None) -> list[Bui
     """What a character's build list offers, and which entry is the current one.
 
     The profile's builds and the project's snapshot are merged by build name,
-    which is also what `Build.key` identifies art by. A snapshot whose name the
-    profile no longer offers is appended rather than dropped, and one whose
-    details drifted away from the live build of the same name is offered beside
-    it, so that neither the project's framing nor the current build is lost.
+    which is what the dropdown labels them by. A snapshot whose name the profile
+    no longer offers is appended rather than dropped, and one whose details
+    drifted away from the live build of the same name is offered beside it, so
+    that neither the project's framing nor the current build is lost. Two
+    entries may well share a build name; each still resolves art of its own,
+    because a build's cached files are derived from its URLs.
     Exactly those choices that carry the snapshot itself are labelled with a
     trailing `" (project)"`; every choice carrying one of the profile's own
     `Build`s keeps its bare `build_name`, including the merged entry whose

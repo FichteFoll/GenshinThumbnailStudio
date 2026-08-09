@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from genshin_thumbnail_studio.gui.placement import MAX_ZOOM, MIN_ZOOM, PlacementController
-from genshin_thumbnail_studio.models import DEFAULT_ZOOM, Asset, Build, Mode, Placement, Project
+from genshin_thumbnail_studio.models import DEFAULT_ZOOM, Build, Mode, Placement, Project
 from genshin_thumbnail_studio.renderer import (
     STANDARD_ART_SIZE,
     art_pixel_size,
@@ -29,7 +29,7 @@ class StubState:
 
     project: Project
     builds: dict[str, list[Build]] = field(default_factory=dict)
-    assets: dict[str, Asset] = field(default_factory=dict)
+    art_root: Path = Path("assets")
 
 
 def _state(tmp_path: Path, mode: Mode = "abyss", with_assets: bool = True) -> StubState:
@@ -37,8 +37,10 @@ def _state(tmp_path: Path, mode: Mode = "abyss", with_assets: bool = True) -> St
     member = project.teams[0][0]
     member.name = "Furina"
     member.build = live_build("Furina")
-    assets = create_test_assets(tmp_path / "assets", ["Furina"]) if with_assets else {}
-    return StubState(project=project, assets=assets)
+    root = tmp_path / "assets"
+    if with_assets:
+        create_test_assets(root, ["Furina"])
+    return StubState(project=project, art_root=root)
 
 
 def _approx(expected: float) -> object:
@@ -51,7 +53,7 @@ def test_offset_bounds_match_the_renderer_for_a_downloaded_asset(tmp_path: Path)
     controller = PlacementController(state)
     member = state.project.teams[0][0]
 
-    art_size = art_pixel_size(str(state.assets["furina|live"].art_path))
+    art_size = art_pixel_size(str(live_build("Furina").art_path(state.art_root)))
 
     assert controller.offset_bounds(member) == max_offset(art_size, True, member.zoom)
 
@@ -133,7 +135,7 @@ def test_offset_bounds_follow_a_replaced_project(tmp_path: Path) -> None:
     state = _state(tmp_path)
     controller = PlacementController(state)
     member = state.project.teams[0][0]
-    art_size = art_pixel_size(str(state.assets["furina|live"].art_path))
+    art_size = art_pixel_size(str(live_build("Furina").art_path(state.art_root)))
 
     before = controller.offset_bounds(member)
     assert before == max_offset(art_size, True, member.zoom)

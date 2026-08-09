@@ -11,7 +11,14 @@ from genshin_thumbnail_studio.gui import MainWindow
 from genshin_thumbnail_studio.models import Placement
 from genshin_thumbnail_studio.renderer import art_pixel_size, max_offset, panel_target_size
 
-from .helpers import TEAM_NAMES, close_ignoring_unsaved_changes, create_test_assets, fill_window_teams, qapp
+from .helpers import (
+    TEAM_NAMES,
+    close_ignoring_unsaved_changes,
+    create_test_assets,
+    fill_window_teams,
+    live_build,
+    qapp,
+)
 
 
 def _approx(expected: float, abs: float) -> Any:
@@ -56,7 +63,7 @@ def test_slot_drag_hover_reorders_live(tmp_path: Path, monkeypatch: pytest.Monke
     app = qapp()
     window = MainWindow()
     fill_window_teams(window, TEAM_NAMES)
-    window.assets = create_test_assets(tmp_path / "assets", TEAM_NAMES)
+    create_test_assets(window.art_root, TEAM_NAMES)
 
     window.team_fields.on_drag_started(0, 0)
     window.team_fields.on_drag_hover(1, 3)
@@ -111,11 +118,12 @@ def test_offset_sliders_are_signed_and_span_the_reachable_range(
     window = MainWindow()
 
     fill_window_teams(window, TEAM_NAMES)
-    window.assets = create_test_assets(tmp_path / "assets", TEAM_NAMES)
+    create_test_assets(window.art_root, TEAM_NAMES)
     window.select_slot(0, 0)
 
     member = window.current_member()
-    art_size = art_pixel_size(str(window.assets[member.asset_key].art_path))
+    assert member.build is not None
+    art_size = art_pixel_size(str(member.build.art_path(window.art_root)))
     max_x, max_y = max_offset(art_size, True, member.zoom)
 
     # Truncated, so the slider end never exceeds what the renderer can reach.
@@ -138,10 +146,10 @@ def test_offset_sliders_are_signed_and_span_the_reachable_range(
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
-def _window_with_assets(tmp_path: Path, names: list[str]) -> MainWindow:
+def _window_with_assets(names: list[str]) -> MainWindow:
     window = MainWindow()
     fill_window_teams(window, names)
-    window.assets = create_test_assets(tmp_path / "assets", names)
+    create_test_assets(window.art_root, names)
     window.select_slot(0, 0)
     return window
 
@@ -157,7 +165,7 @@ def test_drag_moves_the_offsets_by_one_canvas_pixel_per_mouse_pixel(
 ) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_assets(tmp_path, TEAM_NAMES)
+    window = _window_with_assets(TEAM_NAMES)
 
     target_w, target_h = panel_target_size(True)
     member = window.current_member()
@@ -175,7 +183,7 @@ def test_drag_moves_the_offsets_by_one_canvas_pixel_per_mouse_pixel(
 def test_drag_displaces_the_portrait_equally_on_both_axes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_assets(tmp_path, TEAM_NAMES)
+    window = _window_with_assets(TEAM_NAMES)
 
     target_w, target_h = panel_target_size(True)
     member = window.current_member()
@@ -197,7 +205,7 @@ def test_drag_displaces_the_portrait_equally_on_both_axes(tmp_path: Path, monkey
 def test_drag_past_the_reachable_range_stops_at_the_bounds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_assets(tmp_path, TEAM_NAMES)
+    window = _window_with_assets(TEAM_NAMES)
 
     max_x, max_y = window._placement.offset_bounds(window.current_member())
 
@@ -219,7 +227,7 @@ def test_drag_past_the_reachable_range_stops_at_the_bounds(tmp_path: Path, monke
 def test_flip_check_toggles_the_selected_member(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_assets(tmp_path, TEAM_NAMES)
+    window = _window_with_assets(TEAM_NAMES)
 
     assert window.current_member().flip is False
 
@@ -235,7 +243,7 @@ def test_flip_check_toggles_the_selected_member(tmp_path: Path, monkeypatch: pyt
 def test_sync_controls_shows_the_flip_without_writing_it_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_assets(tmp_path, TEAM_NAMES)
+    window = _window_with_assets(TEAM_NAMES)
 
     window.current_member().flip = True
     # Asserting the member still reads True would hold even without the
@@ -255,7 +263,7 @@ def test_sync_controls_shows_the_flip_without_writing_it_back(tmp_path: Path, mo
 def test_selecting_another_slot_shows_that_slots_flip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_assets(tmp_path, TEAM_NAMES)
+    window = _window_with_assets(TEAM_NAMES)
 
     window.editor_panel.flip_check.setChecked(True)
 
@@ -272,8 +280,8 @@ def test_selecting_another_slot_shows_that_slots_flip(tmp_path: Path, monkeypatc
 def test_flip_round_trips_through_the_presets(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_assets(tmp_path, TEAM_NAMES)
-    window.builds = {asset.build.name.casefold(): [asset.build] for asset in window.assets.values()}
+    window = _window_with_assets(TEAM_NAMES)
+    window.builds = {name.casefold(): [live_build(name)] for name in TEAM_NAMES}
 
     window.editor_panel.flip_check.setChecked(True)
 
@@ -287,7 +295,7 @@ def test_flip_round_trips_through_the_presets(tmp_path: Path, monkeypatch: pytes
 def test_reset_placement_clears_the_flip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_assets(tmp_path, TEAM_NAMES)
+    window = _window_with_assets(TEAM_NAMES)
 
     window.editor_panel.flip_check.setChecked(True)
 
@@ -305,10 +313,10 @@ FILLED_SLOT = (0, 0)
 PLACEHOLDER_SLOT = (0, 3)
 
 
-def _window_with_one_filled_slot(tmp_path: Path) -> MainWindow:
+def _window_with_one_filled_slot() -> MainWindow:
     window = MainWindow()
     fill_window_teams(window, TEAM_NAMES)
-    window.assets = create_test_assets(tmp_path / "assets", TEAM_NAMES[:1])
+    create_test_assets(window.art_root, TEAM_NAMES[:1])
     window.select_slot(*FILLED_SLOT)
     return window
 
@@ -316,7 +324,7 @@ def _window_with_one_filled_slot(tmp_path: Path) -> MainWindow:
 def test_clicking_a_placeholder_slot_does_not_select_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_one_filled_slot(tmp_path)
+    window = _window_with_one_filled_slot()
     # `_image_rect()` is empty without a pixmap, which would swallow the click
     # before it ever reached the placeholder check.
     window.editor_panel.preview.resize(1280, 720)
@@ -350,7 +358,7 @@ def test_clicking_a_placeholder_slot_does_not_select_it(tmp_path: Path, monkeypa
 def test_dragging_a_placeholder_slot_does_not_move_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_one_filled_slot(tmp_path)
+    window = _window_with_one_filled_slot()
     window.select_slot(*PLACEHOLDER_SLOT)
     member = window.current_member()
     before_x, before_y = member.offset_x, member.offset_y
@@ -366,7 +374,7 @@ def test_dragging_a_placeholder_slot_does_not_move_it(tmp_path: Path, monkeypatc
 def test_zooming_a_placeholder_slot_does_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_one_filled_slot(tmp_path)
+    window = _window_with_one_filled_slot()
     window.select_slot(*PLACEHOLDER_SLOT)
     member = window.current_member()
     before_zoom = member.zoom
@@ -383,7 +391,7 @@ def test_placement_controls_are_disabled_for_a_placeholder_slot(
 ) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_one_filled_slot(tmp_path)
+    window = _window_with_one_filled_slot()
     editor = window.editor_panel
     controls = [editor.x_slider, editor.y_slider, editor.zoom_slider, editor.flip_check, editor.reset_button]
 
