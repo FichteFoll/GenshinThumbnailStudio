@@ -8,10 +8,8 @@ import copy
 from collections.abc import Callable
 from pathlib import Path
 
-from PIL import Image
-from PIL.ImageQt import ImageQt
-from PySide6.QtCore import Qt, QThreadPool, QTimer
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence, QPixmap
+from PySide6.QtCore import Qt, QThreadPool
+from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -46,13 +44,9 @@ from .lineup import parse_lineup
 from .placement import PlacementController
 from .presets import PresetStore
 from .preview import PreviewWidget
-from .render_job import RenderJob
+from .render_pipeline import RenderPipeline
 from .style import MAIN_STYLESHEET
 from .team_slots import TeamSlotWidget
-
-# Delay between a placement change and the preview render it triggers.
-RENDER_THROTTLE_MS = 80
-
 
 RESOLUTION_OPTIONS = [
     ("720p", 720),
@@ -79,21 +73,19 @@ class MainWindow(QMainWindow):
         self._drag_snapshot: list[list[Placement]] | None = None
         self._drag_position: tuple[int, int] | None = None
         self._updating_controls = False
-        self._render_timer = QTimer(self)
-        self._render_timer.setSingleShot(True)
-        self._render_timer.timeout.connect(self._dispatch_render)
         self._thread_pool = QThreadPool(self)
         self.asset_loader = AssetLoader(self, cache_dir() / "assets", self._thread_pool, self)
         self.asset_loader.asset_ready.connect(self._on_asset_ready)
         self.asset_loader.progress.connect(self.statusBar().showMessage)
         self.asset_loader.failed.connect(self._on_asset_download_failed)
-        self._render_token = 0
-        self._render_job_running = False
-        self._render_stale = False
+        self._render = RenderPipeline(self, self._thread_pool, self)
         self._closing = False
         self.client = AkashaWebClient(cache_dir())
         self.team_combos: list[list[QComboBox]] = []
         self._build_ui()
+        # Connected only now: the preview does not exist before `_build_ui()`.
+        self._render.rendered.connect(self.preview.set_preview)
+        self._render.failed.connect(self._on_render_failed)
         self.rebuild_team_fields()
         self.sync_controls()
         self.saved_snapshot = copy.deepcopy(self.project)
@@ -124,7 +116,7 @@ class MainWindow(QMainWindow):
         # and `client.close()` spins the loops that deliver them. The flag stops
         # a late one from restarting the timer or re-dispatching onto the pool.
         self._closing = True
-        self._render_timer.stop()
+        self._render.stop()
         self._thread_pool.waitForDone(2000)
         self.client.close()
         super().closeEvent(event)
@@ -599,10 +591,7 @@ class MainWindow(QMainWindow):
         self._history.commit_now()
 
     def schedule_render(self) -> None:
-        # A throttle, not a debounce: restarting the timer on every
-        # mouse-move event would mean it never fires during a drag.
-        if not self._closing and not self._render_timer.isActive():
-            self._render_timer.start(RENDER_THROTTLE_MS)
+        self._render.schedule()
 
     def load_profile(self) -> None:
         uid = self.uid_edit.text().strip()
@@ -695,37 +684,8 @@ class MainWindow(QMainWindow):
         # background must not interrupt what the user is typing.
         self.statusBar().showMessage(str(error), 8000)
 
-    def _dispatch_render(self) -> None:
-        if self._closing:
-            return
-        self._render_token += 1
-        if self._render_job_running:
-            self._render_stale = True
-            return
-        snapshot = Project(
-            mode=self.project.mode,
-            uid=self.project.uid,
-            output_name=self.project.output_name,
-            output_height=self.project.output_height,
-            teams=copy.deepcopy(self.project.teams),
-            active_team=self.project.active_team,
-        )
-        assets_snapshot = dict(self.assets)
-        self._render_job_running = True
-        job = RenderJob(self._render_token, snapshot, assets_snapshot)
-        job.signals.finished.connect(self._on_render_finished)
-        self._thread_pool.start(job)
-
-    def _on_render_finished(self, token: int, image: Image.Image | None, error: Exception | None) -> None:
-        self._render_job_running = False
-        if token == self._render_token:
-            if error is None:
-                self.preview.set_preview(QPixmap.fromImage(ImageQt(image)))
-            else:
-                self.statusBar().showMessage(str(error), 8000)
-        if self._render_stale:
-            self._render_stale = False
-            self._dispatch_render()
+    def _on_render_failed(self, message: str) -> None:
+        self.statusBar().showMessage(message, 8000)
 
     def export(self) -> None:
         project_io.export(self, self)

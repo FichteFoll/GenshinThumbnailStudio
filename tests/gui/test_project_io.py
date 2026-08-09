@@ -127,7 +127,7 @@ def settle_downloads_and_render(window: MainWindow, app: QApplication) -> None:
     """
     window._thread_pool.waitForDone(5000)
     app.processEvents()
-    window._dispatch_render()
+    window._render.dispatch()
     wait_for_render(window, app)
 
 

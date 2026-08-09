@@ -15,11 +15,12 @@ from .dialogs import (
 )
 from .history import HISTORY_DEBOUNCE_MS, HISTORY_LIMIT, HistoryController, PlacementHistory
 from .lineup import parse_lineup
-from .main_window import RENDER_THROTTLE_MS, RESOLUTION_OPTIONS, MainWindow
+from .main_window import RESOLUTION_OPTIONS, MainWindow
 from .placement import MAX_ZOOM, MIN_ZOOM, PlacementController
 from .presets import PresetStore, preset_key
 from .preview import PreviewWidget
 from .render_job import RenderJob, RenderJobSignals
+from .render_pipeline import RENDER_THROTTLE_MS, RenderPipeline
 from .state import EditorState
 from .team_slots import SLOT_MIME_TYPE, TeamSlotWidget
 
@@ -43,6 +44,7 @@ __all__ = [
     "PreviewWidget",
     "RenderJob",
     "RenderJobSignals",
+    "RenderPipeline",
     "TeamSlotWidget",
     "ask_export_target",
     "ask_lineup_text",

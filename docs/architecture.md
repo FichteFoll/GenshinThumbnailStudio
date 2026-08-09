@@ -148,8 +148,8 @@ and `storage.py` for persistence.
   `__main__.py` and `launch.py`.
 - `style.py` — `MAIN_STYLESHEET`, the whole application's QSS,
   applied once to the main window.
-- `main_window.py` — `RENDER_THROTTLE_MS`, `RESOLUTION_OPTIONS` and `MainWindow`:
-  profile loading, placement editing, the render throttle,
+- `main_window.py` — `RESOLUTION_OPTIONS` and `MainWindow`:
+  profile loading, placement editing,
   the four project `QAction`s (`Ctrl+O`, `Ctrl+S`, `Ctrl+Shift+S`, `Ctrl+E`),
   team-slot reordering, and the close sequence.
   The largest module by far.
@@ -176,6 +176,12 @@ and `storage.py` for persistence.
   which emits `drag_started`, `drag_hover` and `drag_ended` across a drag gesture.
 - `render_job.py` — `RenderJobSignals` and `RenderJob`,
   rendering a `Project` snapshot on a `QThreadPool` worker.
+- `render_pipeline.py` — `RENDER_THROTTLE_MS` and `RenderPipeline`,
+  the throttled preview loop:
+  `schedule()`, `dispatch()`, `stop()`,
+  the public `timer`, `token`, `running`, `stale` and `closing`,
+  and the `rendered`/`failed` signals the window connects
+  to the preview and the status bar.
 - `asset_loader.py` — `AssetJobSignals`, `AssetJob` and `AssetLoader`,
   the background character-art downloads.
   `AssetLoader.ensure()` starts one `AssetJob` for the named members
@@ -198,6 +204,8 @@ Import direction: `lineup`, `style`, `state` and `dialogs` import nothing from t
 and `asset_loader` reaches `download_assets` through `..akasha`);
 `preview`, `team_slots` and `render_job` import nothing from the package
 (`render_job` reaches the renderer through `..renderer`);
+`render_pipeline` imports `state` and `render_job`,
+and reaches `Project` through `..models`;
 `project_io` imports `state`, `dialogs`, `history` and `asset_loader`,
 and reaches `..models`, `..storage` and `..renderer` outside the package;
 `main_window` imports every sibling except `state`,

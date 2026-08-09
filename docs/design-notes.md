@@ -70,13 +70,24 @@ and intercept a render already in flight.
 
 ### Decomposition
 
-`main_window.py` was reduced by moving the blocking dialogs to `dialogs.py`
-and the project file flows to `project_io.py`.
-What remains is Qt-bound throughout,
-so it was not split further.
-Both extracted modules take the window as a parameter
-rather than importing `MainWindow`,
+`main_window.py` was reduced by moving the blocking dialogs to `dialogs.py`,
+the project file flows to `project_io.py`,
+and the throttled preview loop to `render_pipeline.py`.
+The extracted modules take the window, or the state Protocol it satisfies,
+as a parameter rather than importing `MainWindow`,
 which is what keeps the package acyclic.
+
+`RenderPipeline` owns the throttle timer, the request token
+and the in-flight/stale flags,
+and reports back over `rendered` and `failed`
+rather than writing to the preview or the status bar itself,
+so it needs no widget at all.
+`MainWindow.schedule_render()` is a one-line delegate to it,
+kept because `project_io.ProjectEditor` requires the method.
+Its throttle is deliberately not a debounce:
+restarting the timer on every mouse-move event
+would mean it never fires during a drag.
+(`HistoryController.schedule()` is the debounce, for the opposite reason.)
 
 `project_io`'s functions take the window twice,
 as `parent: QMainWindow` for the dialogs and status bar
@@ -165,16 +176,18 @@ into an editable portrait.
 
 `closeEvent` first confirms discarding unsaved changes
 through the same `dialogs.confirm_discard_changes()` `_mode_changed` uses,
-then sets `_closing`, stops `_render_timer`,
+then sets `_closing`, calls `RenderPipeline.stop()`,
 drains the pool (`waitForDone(2000)`)
 and finally calls `AkashaWebClient.close()`.
 Draining alone is not enough:
 both job kinds signal the GUI thread over a queued connection,
 so `waitForDone()` returns with their slots still in the event queue,
 and the `client.close()` that follows spins the loops that deliver them.
-That is why `schedule_render()` and `_dispatch_render()` both bail on `_closing`
+That is why `RenderPipeline.schedule()` and `dispatch()`
+both bail on its own `closing` flag
 rather than reviving the timer or re-dispatching onto the drained pool,
-and why `_on_asset_ready` bails on it too.
+and why `_on_asset_ready` bails on the window's `_closing` too.
+The window keeps a flag of its own because that handler reads it.
 
 ### Undo/redo
 

@@ -64,7 +64,7 @@ def test_slot_drag_hover_reorders_live(tmp_path: Path, monkeypatch: pytest.Monke
     assert window.project.teams[1][3].name == TEAM_NAMES[0]
     assert window.team_combos[1][3].currentText() == TEAM_NAMES[0]
     assert window.selected == (1, 3)
-    assert window._render_timer.isActive()
+    assert window._render.timer.isActive()
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
