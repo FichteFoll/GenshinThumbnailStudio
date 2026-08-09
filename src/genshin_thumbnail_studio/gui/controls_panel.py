@@ -1,6 +1,6 @@
 """`ControlsPanel`, the window's left column.
 
-Owns the mode radios, the UID entry, the team slot container, the output
+Owns the mode radios, the profile entry, the team slot container, the output
 settings and the project buttons, and reports user intent over its own signals
 rather than being connected into by the window. The widgets stay public
 attributes, which is what `project_io.ProjectEditor` and the tests reach
@@ -66,15 +66,15 @@ class ControlsPanel(QWidget):
         controls_layout.addLayout(mode_row)
         self.abyss_radio.toggled.connect(self.mode_changed)
 
-        uid_row = QHBoxLayout()
-        self.uid_edit = QLineEdit()
-        self.uid_edit.setPlaceholderText("Genshin UID")
-        self.uid_edit.setMaxLength(12)
+        profile_row = QHBoxLayout()
+        self.profile_edit = QLineEdit()
+        self.profile_edit.setPlaceholderText("Genshin UID or Enka username")
+        self.profile_edit.setMaxLength(32)
         self.load_button = QPushButton("Load profile")
         self.load_button.clicked.connect(self.profile_requested)
-        uid_row.addWidget(self.uid_edit, 1)
-        uid_row.addWidget(self.load_button)
-        controls_layout.addLayout(uid_row)
+        profile_row.addWidget(self.profile_edit, 1)
+        profile_row.addWidget(self.load_button)
+        controls_layout.addLayout(profile_row)
 
         self.profile_status = QLabel("No profile loaded")
         self.profile_status.setObjectName("secondary")

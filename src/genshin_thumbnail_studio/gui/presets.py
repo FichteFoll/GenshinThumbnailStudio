@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from ..models import Placement
 from ..storage import load_presets, save_presets
+from .build_choices import selected_build
 from .state import EditorState
 
 
@@ -18,7 +19,7 @@ def preset_key(state: EditorState, member: Placement) -> str:
     The identity falls back from the costume id (a skin frames differently from
     the default outfit) to the casefolded name.
     """
-    build = state.builds.get(member.name.casefold())
+    build = selected_build(state, member)
     identity = build.costume_id if build and build.costume_id else member.name.casefold()
     return f"{state.project.mode}|{identity}"
 

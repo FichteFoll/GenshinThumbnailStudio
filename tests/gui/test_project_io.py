@@ -1,6 +1,6 @@
 """Tests for `MainWindow`'s profile loading and project save/open flows."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -8,7 +8,7 @@ import pytest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from genshin_thumbnail_studio.gui import MainWindow, asset_loader, dialogs, project_io
-from genshin_thumbnail_studio.models import Asset, Build, Project
+from genshin_thumbnail_studio.models import LIVE_BUILD_NAME, Asset, Build, Profile, Project
 from genshin_thumbnail_studio.storage import load_profile_cache, load_project, save_profile_cache, save_project
 
 from .helpers import (
@@ -21,19 +21,32 @@ from .helpers import (
 )
 
 
-def make_build(name: str) -> Build:
+def make_build(name: str, build_name: str = LIVE_BUILD_NAME) -> Build:
     return Build(
         name=name,
         constellation=1,
         refinement=2,
         weapon_name="Splendor of Tranquil Waters",
         costume_id=None,
-        build_id=f"{name}-build",
+        build_name=build_name,
+        build_id=f"{name}-{build_name}",
         art_url=f"https://enka.network/ui/{name}.png",
         weapon_url="https://enka.network/ui/weapon.png",
         element="Hydro",
         rarity=5,
         weapon_rarity=5,
+    )
+
+
+def make_profile(
+    identifier: str, names: list[str], username: str = "", fetched_at: datetime | None = None
+) -> Profile:
+    return Profile(
+        identifier=identifier,
+        uid="" if username else identifier,
+        username=username,
+        builds={name.casefold(): [make_build(name)] for name in names},
+        fetched_at=fetched_at or datetime.now(),
     )
 
 
@@ -91,11 +104,10 @@ class ForbiddenMessageBox(StubMessageBox):
 
 
 def prepare_cached_open(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, last_update: datetime
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fetched_at: datetime
 ) -> tuple[MainWindow, str]:
     uid = "700000042"
-    builds = [make_build(name) for name in TEAM_NAMES]
-    save_profile_cache(uid, builds, last_update)
+    save_profile_cache(make_profile(uid, TEAM_NAMES, fetched_at=fetched_at))
     project_path = tmp_path / "project.json"
     write_project(project_path, uid)
     window = MainWindow()
@@ -132,7 +144,7 @@ def test_open_project_loads_cached_profile_and_previews(tmp_path: Path, monkeypa
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
     monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
-    window, uid = prepare_cached_open(tmp_path, monkeypatch, datetime.now(timezone.utc) - timedelta(minutes=5))
+    window, uid = prepare_cached_open(tmp_path, monkeypatch, datetime.now() - timedelta(minutes=5))
 
     window.open_project()
     settle_downloads_and_render(window, app)
@@ -150,16 +162,11 @@ def test_open_project_with_stale_cache_offers_refresh(tmp_path: Path, monkeypatc
     app = qapp()
     StubMessageBox.instances = []
     monkeypatch.setattr(dialogs, "QMessageBox", StubMessageBox)
-    window, _ = prepare_cached_open(tmp_path, monkeypatch, datetime.now(timezone.utc) - timedelta(hours=2))
-    refreshed: list[bool] = []
-
-    def fake_refresh_profile(*args: Any, **kwargs: Any) -> None:
-        refreshed.append(True)
+    window, _ = prepare_cached_open(tmp_path, monkeypatch, datetime.now() - timedelta(hours=2))
 
     def forbidden_load_profile(*args: Any, **kwargs: Any) -> None:
         pytest.fail("live profile load must not happen")
 
-    monkeypatch.setattr(window.client, "refresh_profile", fake_refresh_profile)
     monkeypatch.setattr(window.client, "load_profile", forbidden_load_profile)
 
     window.open_project()
@@ -167,7 +174,6 @@ def test_open_project_with_stale_cache_offers_refresh(tmp_path: Path, monkeypatc
 
     assert len(StubMessageBox.instances) == 1
     assert "2.0 hours" in StubMessageBox.instances[0].text
-    assert not refreshed
     assert sorted(window.builds) == sorted(name.casefold() for name in TEAM_NAMES)
     assert window.editor_panel.preview._pixmap is not None
 
@@ -195,35 +201,114 @@ def test_open_project_without_cache_shows_hint(tmp_path: Path, monkeypatch: pyte
     app.processEvents()
 
 
+def test_load_profile_fills_the_builds_and_downloads_under_build_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R1: the profile comes from Enka, and its art is fetched per character *and* build."""
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+    live = make_build("Furina")
+    saved = make_build("Furina", "Bow DPS")
+    profile = Profile(
+        identifier="700000042",
+        uid="700000042",
+        username="",
+        builds={"furina": [live, saved]},
+        fetched_at=datetime(2026, 8, 3, 10, 30, 15),
+    )
+    def fake_load_profile(identifier: str) -> Profile:
+        return profile
+
+    # `ProfileLoader.load()` funnels every exception into a real modal dialog,
+    # which would hang the headless run instead of failing it.
+    monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
+    monkeypatch.setattr(window.client, "load_profile", fake_load_profile)
+    requested: list[list[str]] = []
+
+    def fake_download_assets(
+        builds: list[Build], root: Path, progress: object = None, on_asset: object = None
+    ) -> dict[str, Asset]:
+        requested.append([build.key for build in builds])
+        return {}
+
+    monkeypatch.setattr(asset_loader, "download_assets", fake_download_assets)
+    window.project.teams[0][0].name = "Furina"
+    window.controls_panel.profile_edit.setText("700000042")
+
+    window.load_profile()
+    window._thread_pool.waitForDone(5000)
+    app.processEvents()
+
+    assert window.builds == {"furina": [live, saved]}
+    # The live build is the default, and its art is keyed by character and build.
+    assert window.project.teams[0][0].build == live
+    assert requested == [["furina|live"]]
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+def test_open_project_resolves_the_cached_profile_by_name_not_uid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R4: a project's profile name takes priority over its UID."""
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
+    def no_downloads(*args: object, **kwargs: object) -> dict[str, Asset]:
+        return {}
+
+    monkeypatch.setattr(asset_loader, "download_assets", no_downloads)
+    save_profile_cache(make_profile("Algoinde", TEAM_NAMES, username="Algoinde"))
+    save_profile_cache(make_profile("900000099", ["Nobody"]))
+
+    project = Project.blank("abyss", "900000099")
+    project.profile_name = "Algoinde"
+    for index, member in enumerate(member for team in project.teams for member in team):
+        member.name = TEAM_NAMES[index]
+    project_path = tmp_path / "named-project.json"
+    save_project(project, project_path)
+    monkeypatch.setattr(
+        project_io.QFileDialog, "getOpenFileName", staticmethod(lambda *args, **kwargs: (str(project_path), ""))
+    )
+    window = MainWindow()
+
+    window.open_project()
+
+    assert sorted(window.builds) == sorted(name.casefold() for name in TEAM_NAMES)
+    assert window.controls_panel.profile_edit.text() == "Algoinde"
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
 def test_load_profile_persists_profile_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
     window = MainWindow()
 
     uid = "700000042"
-    builds = [make_build("Furina"), make_build("Nahida")]
-    last_update = datetime(2026, 8, 3, 10, 30, 15, tzinfo=timezone.utc)
+    profile = make_profile(uid, ["Furina", "Nahida"], fetched_at=datetime(2026, 8, 3, 10, 30, 15))
 
-    def fake_load_profile(*args: Any, **kwargs: Any) -> tuple[list[Build], float, datetime]:
-        return builds, 5.0, last_update
+    def fake_load_profile(identifier: str) -> Profile:
+        return profile
 
     monkeypatch.setattr(window.client, "load_profile", fake_load_profile)
-    window.controls_panel.uid_edit.setText(uid)
+    window.controls_panel.profile_edit.setText(uid)
 
     window.load_profile()
 
     cached = load_profile_cache(uid)
     assert cached is not None
-    cached_builds, cached_last_update = cached
-    assert cached_builds == builds
-    assert cached_last_update == last_update
+    assert cached.builds == profile.builds
+    assert cached.fetched_at == profile.fetched_at
+    assert cached.identifier == uid
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
 def _prepare_export_window(window: MainWindow, tmp_path: Path, names: list[str]) -> None:
     assets = create_test_assets(tmp_path / "assets", names)
-    window.builds = {key: asset.build for key, asset in assets.items()}
+    window.builds = {asset.build.name.casefold(): [asset.build] for asset in assets.values()}
     fill_window_teams(window, names)
     window.rebuild_team_fields()
     window.assets = assets
@@ -398,7 +483,7 @@ def test_opening_a_project_takes_its_dirty_baseline_before_the_art_arrives(
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
     monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
-    window, _ = prepare_cached_open(tmp_path, monkeypatch, datetime.now(timezone.utc) - timedelta(minutes=5))
+    window, _ = prepare_cached_open(tmp_path, monkeypatch, datetime.now() - timedelta(minutes=5))
 
     # Inside the range `sync_controls()` clamps to, so the assertions below
     # read the preset back rather than the reachable maximum.
@@ -427,7 +512,7 @@ def test_saving_an_opened_project_overwrites_it_without_a_dialog(
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
     monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
-    window, _ = prepare_cached_open(tmp_path, monkeypatch, datetime.now(timezone.utc) - timedelta(minutes=5))
+    window, _ = prepare_cached_open(tmp_path, monkeypatch, datetime.now() - timedelta(minutes=5))
 
     window.open_project()
     settle_downloads_and_render(window, app)

@@ -157,7 +157,7 @@ class StubState:
     """The minimal `EditorState` the controller needs."""
 
     project: Project
-    builds: dict[str, Build] = field(default_factory=dict)
+    builds: dict[str, list[Build]] = field(default_factory=dict)
     assets: dict[str, Asset] = field(default_factory=dict)
 
 

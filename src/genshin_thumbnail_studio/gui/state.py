@@ -24,5 +24,7 @@ from ..models import Asset, Build, Project
 
 class EditorState(Protocol):
     project: Project
-    builds: dict[str, Build]
+    # One list per casefolded character name, the live build first; the
+    # downloaded art is keyed by `Build.key` instead, character *and* build.
+    builds: dict[str, list[Build]]
     assets: dict[str, Asset]

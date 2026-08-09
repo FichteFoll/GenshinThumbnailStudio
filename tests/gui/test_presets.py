@@ -1,7 +1,7 @@
 """Tests for `gui.presets.preset_key()` and `PresetStore`, needing no Qt environment.
 
 Both are Qt-free: they construct no widget and need no display, so these tests run
-without `QT_QPA_PLATFORM` or `QTWEBENGINE_CHROMIUM_FLAGS` being set. (PySide6 still
+without `QT_QPA_PLATFORM` being set. (PySide6 still
 ends up imported, because reaching `gui.presets` executes the `gui` package's
 facade, but nothing here uses it.)
 """
@@ -20,7 +20,7 @@ class StubState:
     """The minimal `EditorState` the store needs."""
 
     project: Project
-    builds: dict[str, Build] = field(default_factory=dict)
+    builds: dict[str, list[Build]] = field(default_factory=dict)
     assets: dict[str, Asset] = field(default_factory=dict)
 
 
@@ -39,7 +39,7 @@ def _build(name: str, costume_id: str | None = None) -> Build:
 def _state(mode: Mode = "abyss", builds: list[Build] | None = None) -> StubState:
     return StubState(
         project=Project.blank(mode),
-        builds={build.name.casefold(): build for build in (builds or [])},
+        builds={build.name.casefold(): [build] for build in (builds or [])},
     )
 
 

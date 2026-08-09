@@ -1,4 +1,4 @@
-"""Fetching an Akasha profile and entering a lineup by hand, as a
+"""Fetching a profile from Enka and entering a lineup by hand, as a
 `ProfileLoader` collaborator wired once to the window it acts on.
 
 Nothing here imports `MainWindow`, so the window can call into this module
@@ -14,10 +14,11 @@ from typing import Protocol
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QMainWindow
 
-from ..akasha import AkashaError, AkashaWebClient, Build, StaleProfileError
+from ..enka import Build, EnkaClient, is_uid
 from ..storage import save_profile_cache
 from . import dialogs
 from .asset_loader import AssetLoader
+from .build_choices import resolve_build
 from .controls_panel import ControlsPanel
 from .lineup import parse_lineup
 from .state import EditorState
@@ -34,7 +35,7 @@ class ProfileEditor(EditorState, Protocol):
     wholesale in several places; see `state.py`.
     """
 
-    client: AkashaWebClient
+    client: EnkaClient
     asset_loader: AssetLoader
     controls_panel: ControlsPanel
     team_fields: TeamFieldsController
@@ -57,37 +58,29 @@ class ProfileLoader:
     def load(self) -> None:
         editor = self._editor
         controls = editor.controls_panel
-        uid = controls.uid_edit.text().strip()
-        editor.project.uid = uid
+        identifier = controls.profile_edit.text().strip()
+        # Exactly one of the two: the field holds either a UID or a username,
+        # and `Project.identifier` reads the name first.
+        editor.project.uid = identifier if is_uid(identifier) else ""
+        editor.project.profile_name = "" if is_uid(identifier) else identifier
         controls.load_button.setEnabled(False)
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            try:
-                builds, age, last = editor.client.load_profile(uid)
-            except StaleProfileError as stale:
-                choice = dialogs.choose_stale_profile_action(self._parent, stale.age_minutes)
-                if choice == "refresh":
-                    self._parent.statusBar().showMessage("Refreshing Akasha ...")
-                    QApplication.restoreOverrideCursor()
-                    if not editor.client.refresh_profile(
-                        uid, progress=lambda text: self._parent.statusBar().showMessage(text)
-                    ):
-                        raise AkashaError("Akasha refresh did not finish within 90 seconds.") from None
-                    QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-                    builds, age, last = editor.client.load_profile(uid)
-                elif choice == "stale":
-                    builds, age, last = editor.client.load_profile(uid, allow_stale=True)
-                else:
-                    return
-            editor.builds = {build.name.casefold(): build for build in builds}
-            save_profile_cache(uid, builds, last)
+            profile = editor.client.load_profile(identifier)
+            editor.builds = profile.builds
+            save_profile_cache(profile)
             editor.assets = {}
+            for team in editor.project.teams:
+                for member in team:
+                    if member.name:
+                        resolve_build(editor, member)
             editor.team_fields.populate_items()
-            local = last.astimezone().strftime("%Y-%m-%d %H:%M")
+            label = profile.username or f"UID {profile.uid}"
+            local = profile.fetched_at.astimezone().strftime("%Y-%m-%d %H:%M")
             controls.profile_status.setText(
-                f"{len(builds)} builds \u00b7 last updated {local} \u00b7 {age:.0f} min ago"
+                f"{len(profile.builds)} characters \u00b7 {label} \u00b7 fetched {local}"
             )
-            self._parent.statusBar().showMessage("Akasha profile loaded", 5000)
+            self._parent.statusBar().showMessage("Enka profile loaded", 5000)
             editor.asset_loader.ensure()
             editor.schedule_render()
         except Exception as error:
@@ -111,19 +104,26 @@ class ProfileLoader:
             editor.team_fields.combos[team][slot].setCurrentText(name)
 
     def validate_team(self) -> list[Build]:
+        """The builds the named slots are framed with, deduplicated by build key.
+
+        Writing each slot's resolved build onto its placement here is what puts
+        the build details into every saved project (R9).
+        """
         editor = self._editor
         missing: list[str] = []
-        selected: list[Build] = []
+        selected: dict[str, Build] = {}
         for team_index, row in enumerate(editor.team_fields.combos):
             for slot_index, combo in enumerate(row):
                 name = combo.currentText().strip()
-                editor.project.teams[team_index][slot_index].name = name
-                build = editor.builds.get(name.casefold())
+                member = editor.project.teams[team_index][slot_index]
+                member.name = name
+                if member.build and member.build.name.casefold() != name.casefold():
+                    member.build = None
+                build = resolve_build(editor, member)
                 if build is None:
                     missing.append(f"{team_index + 1}-{slot_index + 1}: {name or 'empty'}")
                 else:
-                    selected.append(build)
+                    selected[build.key] = build
         if missing:
             raise ValueError("Build not in the loaded profile: " + ", ".join(missing))
-        unique: dict[str, Build] = {build.name.casefold(): build for build in selected}
-        return list(unique.values())
+        return list(selected.values())

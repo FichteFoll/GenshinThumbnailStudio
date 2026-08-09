@@ -23,7 +23,7 @@ from genshin_thumbnail_studio.renderer.geometry import (
 )
 from genshin_thumbnail_studio.renderer.panels import apply_panel_mask, panel_background
 
-from .helpers import compact_layout, create_assets, fill_project, gray, rgb, rgba, two_tone_project
+from .helpers import asset_key, compact_layout, create_assets, fill_project, gray, rgb, rgba, two_tone_project
 
 
 def test_card_gap_shows_background_between_panels(tmp_path: Path) -> None:
@@ -124,8 +124,9 @@ def test_leftmost_slot_is_not_shifted_by_its_negative_panel_origin(tmp_path: Pat
     art_draw = ImageDraw.Draw(art)
     for x in range(art.width):
         art_draw.line((x, 0, x, art.height), fill=(x * 255 // art.width, 40, 200, 255))
-    art.save(assets[names[0].casefold()].art_path)
+    art.save(assets[asset_key(names[0])].art_path)
     project.teams[0][1].name = project.teams[0][0].name
+    project.teams[0][1].build = project.teams[0][0].build
     project.teams[0][1].color = project.teams[0][0].color
 
     preview = render_preview(project, assets)
@@ -252,7 +253,7 @@ def test_glow_reaches_into_a_transparent_gap_at_the_default_zoom(tmp_path: Path)
     preview = render_preview(project, assets)
 
     target = panel_target_size(compact=True)
-    art = Image.open(assets[member.name.casefold()].art_path).convert("RGBA")
+    art = Image.open(assets[member.asset_key].art_path).convert("RGBA")
     crop = cover_resize_offset(art, target, member.offset_x, member.offset_y, member.zoom)
     row = target[1] // 2
     gap = [x for x in range(target[0]) if rgba(crop, (x, row))[3] == 0]

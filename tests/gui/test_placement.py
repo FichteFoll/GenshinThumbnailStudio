@@ -115,7 +115,7 @@ def test_offset_sliders_are_signed_and_span_the_reachable_range(
     window.select_slot(0, 0)
 
     member = window.current_member()
-    art_size = art_pixel_size(str(window.assets[member.name.casefold()].art_path))
+    art_size = art_pixel_size(str(window.assets[member.asset_key].art_path))
     max_x, max_y = max_offset(art_size, True, member.zoom)
 
     # Truncated, so the slider end never exceeds what the renderer can reach.
@@ -273,7 +273,7 @@ def test_flip_round_trips_through_the_presets(tmp_path: Path, monkeypatch: pytes
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
     window = _window_with_assets(tmp_path, TEAM_NAMES)
-    window.builds = {name: asset.build for name, asset in window.assets.items()}
+    window.builds = {asset.build.name.casefold(): [asset.build] for asset in window.assets.values()}
 
     window.editor_panel.flip_check.setChecked(True)
 

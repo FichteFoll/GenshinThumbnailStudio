@@ -42,24 +42,6 @@ def confirm_discard_changes(
     return False
 
 
-def choose_stale_profile_action(parent: QWidget, age_minutes: float) -> str:
-    """Ask what to do with an Akasha profile older than an hour.
-
-    Returns "refresh", "stale" (load it as it is) or "cancel".
-    """
-    dialog = QMessageBox(parent)
-    dialog.setWindowTitle("Akasha profile is older than one hour")
-    dialog.setText(f"Last updated {age_minutes / 60:.1f} hours ago.")
-    refresh_button = dialog.addButton("Refresh now", QMessageBox.ButtonRole.AcceptRole)
-    stale_button = dialog.addButton("Load anyway", QMessageBox.ButtonRole.ActionRole)
-    dialog.addButton(QMessageBox.StandardButton.Cancel)
-    dialog.exec()
-    clicked = dialog.clickedButton()
-    if clicked == refresh_button:
-        return "refresh"
-    return "stale" if clicked == stale_button else "cancel"
-
-
 def confirm_cache_refresh(parent: QWidget, age_minutes: float) -> bool:
     """Ask whether to refresh a cached profile older than an hour."""
     dialog = QMessageBox(parent)

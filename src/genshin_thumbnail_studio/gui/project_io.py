@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Protocol
 
@@ -20,10 +20,12 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow
 
 from .. import storage
+from ..enka import is_uid
 from ..models import Build, Project
 from ..renderer import export_project, safe_name
 from . import dialogs
 from .asset_loader import AssetLoader
+from .build_choices import resolve_build
 from .controls_panel import ControlsPanel
 from .editor_panel import EditorPanel
 from .history import HistoryController
@@ -48,7 +50,7 @@ class ProjectEditor(EditorState, Protocol):
     editor_panel: EditorPanel
 
     def validate_team(self) -> list[Build]: ...
-    def selected_name_keys(self) -> set[str]: ...
+    def selected_build_keys(self) -> set[str]: ...
     def rebuild_team_fields(self) -> None: ...
     def sync_controls(self) -> None: ...
     def populate_combo_items(self) -> None: ...
@@ -91,7 +93,9 @@ class ProjectFiles:
         controls = editor.controls_panel
         with contextlib.suppress(ValueError):
             editor.validate_team()
-        editor.project.uid = controls.uid_edit.text().strip()
+        identifier = controls.profile_edit.text().strip()
+        editor.project.uid = identifier if is_uid(identifier) else ""
+        editor.project.profile_name = "" if is_uid(identifier) else identifier
         editor.project.output_name = controls.output_name.text().strip() or "genshin_thumbnail"
         storage.save_project(editor.project, path)
         editor.set_project_path(path)
@@ -117,28 +121,36 @@ class ProjectFiles:
             controls.stygian_radio.setChecked(project.mode == "stygian")
             controls.abyss_radio.blockSignals(False)
             controls.stygian_radio.blockSignals(False)
-            controls.uid_edit.setText(project.uid)
+            controls.profile_edit.setText(project.identifier)
             controls.output_name.setText(project.output_name)
             boss_combo = editor.editor_panel.boss_combo
             boss_combo.setVisible(project.mode == "stygian")
             boss_combo.setCurrentIndex(project.active_team)
             editor.rebuild_team_fields()
             editor.sync_controls()
-            cached = storage.load_profile_cache(project.uid)
+            # By `identifier`, so a project carrying a profile name loads
+            # through the name rather than through the UID beside it.
+            cached = storage.load_profile_cache(project.identifier)
             if cached is None:
                 parent.statusBar().showMessage(
-                    "Project opened \u00b7 no cached profile found for this UID", 8000
+                    "Project opened \u00b7 no cached profile found for this profile", 8000
                 )
                 self._history.reset()
                 editor.saved_snapshot = copy.deepcopy(editor.project)
                 return
-            builds, last_update = cached
-            editor.builds = {build.name.casefold(): build for build in builds}
+            editor.builds = cached.builds
+            for team in editor.project.teams:
+                for member in team:
+                    if member.name:
+                        resolve_build(editor, member)
             editor.populate_combo_items()
-            age_minutes = max(0.0, (datetime.now(timezone.utc) - last_update).total_seconds() / 60)
-            local = last_update.astimezone().strftime("%Y-%m-%d %H:%M")
+            # `astimezone()` on both sides, because the cache is written from a
+            # naive local timestamp and has to compare against the local clock.
+            fetched = cached.fetched_at.astimezone()
+            age_minutes = max(0.0, (datetime.now().astimezone() - fetched).total_seconds() / 60)
+            local = fetched.strftime("%Y-%m-%d %H:%M")
             controls.profile_status.setText(
-                f"{len(builds)} builds · from cache · last updated {local} · {age_minutes:.0f} min ago"
+                f"{len(cached.builds)} characters · from cache · fetched {local} · {age_minutes:.0f} min ago"
             )
             editor.asset_loader.ensure()
             editor.schedule_render()
@@ -158,7 +170,7 @@ class ProjectFiles:
         output_name = editor.controls_panel.output_name
         try:
             editor.validate_team()
-            if set(editor.selected_name_keys()) - set(editor.assets):
+            if set(editor.selected_build_keys()) - set(editor.assets):
                 # The download can no longer be awaited here, so start it and
                 # let the user come back once the preview has filled in.
                 editor.asset_loader.ensure()

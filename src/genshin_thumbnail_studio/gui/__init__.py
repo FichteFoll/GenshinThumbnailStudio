@@ -9,7 +9,6 @@ from .controls_panel import RESOLUTION_OPTIONS, ControlsPanel
 from .dialogs import (
     ask_export_target,
     ask_lineup_text,
-    choose_stale_profile_action,
     confirm_cache_refresh,
     confirm_discard_changes,
     show_error,
@@ -60,7 +59,6 @@ __all__ = [
     "TeamSlotWidget",
     "ask_export_target",
     "ask_lineup_text",
-    "choose_stale_profile_action",
     "confirm_cache_refresh",
     "confirm_discard_changes",
     "parse_lineup",

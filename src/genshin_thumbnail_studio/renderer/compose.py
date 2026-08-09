@@ -40,15 +40,17 @@ def render_image(
     num_rows = len(teams)
     for row, team in enumerate(teams):
         for index, member in enumerate(team):
-            has_asset = bool(member.name) and member.name.casefold() in assets
+            has_asset = bool(member.asset_key) and member.asset_key in assets
             if not has_asset and require_complete:
-                raise ValueError(f"No downloaded Akasha asset for slot {row + 1}-{index + 1}.")
-            asset = assets[member.name.casefold()] if has_asset else None
+                raise ValueError(f"No downloaded asset for slot {row + 1}-{index + 1}.")
+            asset = assets[member.asset_key] if has_asset else None
             cache_key = (
                 index,
                 row,
                 num_rows,
-                member.name.casefold(),
+                # Character *and* build: two builds of one character must not
+                # serve each other's cached panel, weapon icon included.
+                member.asset_key or member.name.casefold(),
                 round(member.offset_x, 4),
                 round(member.offset_y, 4),
                 round(member.zoom, 4),

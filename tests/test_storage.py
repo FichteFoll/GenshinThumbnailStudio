@@ -1,13 +1,13 @@
 """Tests for `genshin_thumbnail_studio.storage`."""
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import cast
 
 import pytest
 
-from genshin_thumbnail_studio.models import Build
+from genshin_thumbnail_studio.models import Build, Profile
 from genshin_thumbnail_studio.renderer import STANDARD_ART_SIZE, panel_target_size, resized_art_size
 from genshin_thumbnail_studio.storage import (
     app_data_dir,
@@ -39,18 +39,39 @@ def make_build(name: str) -> Build:
     )
 
 
+def make_profile(identifier: str, names: list[str], username: str = "") -> Profile:
+    return Profile(
+        identifier=identifier,
+        uid="" if username else identifier,
+        username=username,
+        builds={name.casefold(): [make_build(name)] for name in names},
+        fetched_at=datetime(2026, 8, 3, 10, 30, 15),
+    )
+
+
 def test_profile_cache_round_trip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    builds = [make_build("Furina"), make_build("Nahida")]
-    last_update = datetime(2026, 8, 3, 10, 30, 15, tzinfo=timezone.utc)
+    profile = make_profile("700000001", ["Furina", "Nahida"])
 
-    save_profile_cache("700000001", builds, last_update)
+    save_profile_cache(profile)
     cached = load_profile_cache("700000001")
 
-    assert cached is not None
-    loaded_builds, loaded_last_update = cached
-    assert loaded_builds == builds
-    assert loaded_last_update == last_update
+    assert cached == profile
+
+
+def test_profile_cache_is_keyed_by_a_sanitized_identifier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A username is free text, so it cannot reach the file system unsanitized."""
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    profile = make_profile("../Algo inde", ["Furina"], username="../Algo inde")
+
+    save_profile_cache(profile)
+
+    path = profile_cache_path("../Algo inde")
+    assert path.name == "Algo_inde.json"
+    assert path.parent == tmp_path / "app-data" / "cache" / "profiles"
+    assert load_profile_cache("../Algo inde") == profile
 
 
 def test_load_profile_cache_without_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

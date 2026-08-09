@@ -14,12 +14,13 @@ from PySide6.QtWidgets import (
     QSplitter,
 )
 
-from ..akasha import AkashaWebClient, Build
-from ..models import Asset, Placement, Project
+from ..enka import EnkaClient, is_uid
+from ..models import Asset, Build, Placement, Project
 from ..storage import cache_dir
 from . import dialogs, profile_io
 from .actions import ProjectActions
 from .asset_loader import AssetLoader
+from .build_choices import resolve_build, selected_build
 from .controls_panel import ControlsPanel
 from .editor_panel import EditorPanel
 from .history import HistoryController
@@ -39,7 +40,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1020, 680)
         self.project = Project.blank("abyss")
         self.project_path: Path | None = None
-        self.builds: dict[str, Build] = {}
+        self.builds: dict[str, list[Build]] = {}
         self.assets: dict[str, Asset] = {}
         self._presets = PresetStore.load()
         self._placement = PlacementController(self)
@@ -54,7 +55,7 @@ class MainWindow(QMainWindow):
         self.asset_loader.failed.connect(self._on_asset_download_failed)
         self._render = RenderPipeline(self, self._thread_pool, self)
         self._closing = False
-        self.client = AkashaWebClient(cache_dir())
+        self.client = EnkaClient(cache_dir() / "enka")
         self._build_ui()
         # Connected only now: the preview does not exist before `_build_ui()`.
         self._render.rendered.connect(self.editor_panel.preview.set_preview)
@@ -74,6 +75,14 @@ class MainWindow(QMainWindow):
 
     def _history_restored(self) -> None:
         """Show the teams an undo or redo just put back on the project."""
+        # A state snapshotted before the profile arrived carries no build, and
+        # the restore reaches the combos before their signals are connected, so
+        # `member_changed()` never runs to resolve one. Without this the slot
+        # renders as a placeholder for good while still counting as filled.
+        for team in self.project.teams:
+            for member in team:
+                if member.name:
+                    resolve_build(self, member)
         self.rebuild_team_fields()
         self.sync_controls()
         self._save_current_preset()
@@ -91,12 +100,11 @@ class MainWindow(QMainWindow):
         # The preview renders on its own now, so a job may well be in flight.
         # Draining is not enough: both jobs signal the GUI thread over a queued
         # connection, so `waitForDone()` returns with their slots still queued
-        # and `client.close()` spins the loops that deliver them. The flag stops
-        # a late one from restarting the timer or re-dispatching onto the pool.
+        # and the event loop then delivers them. The flag stops a late one from
+        # restarting the timer or re-dispatching onto the pool.
         self._closing = True
         self._render.stop()
         self._thread_pool.waitForDone(2000)
-        self.client.close()
         super().closeEvent(event)
 
     def _build_ui(self) -> None:
@@ -146,8 +154,9 @@ class MainWindow(QMainWindow):
             self.controls_panel.abyss_radio.setChecked(self.project.mode == "abyss")
             self.controls_panel.stygian_radio.setChecked(self.project.mode == "stygian")
             return
-        uid = self.controls_panel.uid_edit.text().strip()
-        self.project = Project.blank(mode, uid)
+        identifier = self.controls_panel.profile_edit.text().strip()
+        self.project = Project.blank(mode, identifier if is_uid(identifier) else "")
+        self.project.profile_name = "" if is_uid(identifier) else identifier
         self.set_project_path(None)
         self.assets = {}
         self.selected = (0, 0)
@@ -178,16 +187,24 @@ class MainWindow(QMainWindow):
         member = self.project.teams[team][slot]
         old_name = member.name
         member.name = name.strip()
+        if member.build and member.build.name.casefold() != member.name.casefold():
+            # The snapshot belongs to the character that was here before, so the
+            # retyped slot falls back to the new character's live build.
+            member.build = None
         if member.name and member.name.casefold() != old_name.casefold():
             self._presets.apply_to(self, member)
-        self.assets = {key: value for key, value in self.assets.items() if key in self.selected_name_keys()}
+        resolve_build(self, member)
+        self.assets = {key: value for key, value in self.assets.items() if key in self.selected_build_keys()}
         self.sync_controls()
         self._history.schedule()
         self.asset_loader.ensure()
         self.schedule_render()
 
-    def selected_name_keys(self) -> set[str]:
-        return {member.name.casefold() for team in self.project.teams for member in team if member.name}
+    def selected_build_keys(self) -> set[str]:
+        """The `Build.key`s the named slots are framed with, which is what the
+        downloaded-art dict is keyed by."""
+        builds = (selected_build(self, member) for team in self.project.teams for member in team if member.name)
+        return {build.key for build in builds if build is not None}
 
     def _save_current_preset(self) -> None:
         self._presets.remember(self, self.current_member())
@@ -202,7 +219,7 @@ class MainWindow(QMainWindow):
             (team_index, slot_index)
             for team_index, team in enumerate(self.project.teams)
             for slot_index, member in enumerate(team)
-            if member.name and member.name.casefold() in self.assets
+            if (build := selected_build(self, member)) is not None and build.key in self.assets
         }
 
     def select_slot(self, team: int, slot: int) -> None:
@@ -314,7 +331,8 @@ class MainWindow(QMainWindow):
         self.assets[key] = asset
         for team in self.project.teams:
             for member in team:
-                if member.name.casefold() == key:
+                build = selected_build(self, member)
+                if build is not None and build.key == key:
                     self._presets.apply_to(self, member)
         # The arriving portrait only stops being a placeholder once the controls
         # resync: `sync_controls()` is what re-derives `_filled_slots()` for the

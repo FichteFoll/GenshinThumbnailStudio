@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from collections.abc import Callable
 from datetime import datetime
@@ -17,7 +18,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from . import renderer
-from .models import Build, Placement, Project
+from .models import Build, Placement, Profile, Project
 
 
 def app_data_dir() -> Path:
@@ -141,32 +142,50 @@ def load_project(path: Path) -> Project:
     return Project.from_dict(migrate_project_data(cast(dict[str, Any], raw)))
 
 
-def profile_cache_path(uid: str) -> Path:
+def profile_cache_path(identifier: str) -> Path:
+    """The cache file for a UID or an Enka username.
+
+    A username is free text, so it is sanitized the way the downloaded art's
+    file names are before it becomes a path component.
+    """
     target = cache_dir() / "profiles"
     target.mkdir(parents=True, exist_ok=True)
-    return target / f"{uid}.json"
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", identifier).strip("._") or "profile"
+    return target / f"{safe}.json"
 
 
-def save_profile_cache(uid: str, builds: list[Build], last_update: datetime) -> None:
-    path = profile_cache_path(uid)
+def save_profile_cache(profile: Profile) -> None:
+    path = profile_cache_path(profile.identifier)
     payload = {
-        "uid": uid,
-        "lastProfileUpdate": last_update.isoformat(),
-        "builds": [build.to_dict() for build in builds],
+        "identifier": profile.identifier,
+        "uid": profile.uid,
+        "username": profile.username,
+        "fetchedAt": profile.fetched_at.isoformat(),
+        "builds": {
+            name: [build.to_dict() for build in builds] for name, builds in profile.builds.items()
+        },
     }
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def load_profile_cache(uid: str) -> tuple[list[Build], datetime] | None:
-    path = profile_cache_path(uid)
+def load_profile_cache(identifier: str) -> Profile | None:
+    """The cached profile for `identifier`, or None when there is none that reads."""
+    path = profile_cache_path(identifier)
     if not path.exists():
         return None
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-        last_update = datetime.fromisoformat(value["lastProfileUpdate"])
-        builds = [Build.from_dict(item) for item in value["builds"]]
-        return builds, last_update
-    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+        value = cast("dict[str, Any]", json.loads(path.read_text(encoding="utf-8")))
+        raw_builds = cast("dict[str, list[dict[str, Any]]]", value["builds"])
+        return Profile(
+            identifier=str(value["identifier"]),
+            uid=str(value.get("uid", "")),
+            username=str(value.get("username", "")),
+            builds={
+                name: [Build.from_dict(item) for item in builds] for name, builds in raw_builds.items()
+            },
+            fetched_at=datetime.fromisoformat(str(value["fetchedAt"])),
+        )
+    except (OSError, json.JSONDecodeError, AttributeError, KeyError, TypeError, ValueError):
         return None
 
 

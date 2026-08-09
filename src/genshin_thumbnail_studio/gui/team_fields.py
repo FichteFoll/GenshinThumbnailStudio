@@ -172,8 +172,11 @@ class TeamFieldsController(QObject):
         # slot would record an arrangement that a cancelled drag then reverts.
 
     def populate_items(self) -> None:
-        builds = self._editor.builds
-        names = [build.name for build in sorted(builds.values(), key=lambda item: item.name.casefold())]
+        # One entry per character, spelled the way its builds spell it.
+        names = sorted(
+            (builds[0].name for builds in self._editor.builds.values() if builds),
+            key=str.casefold,
+        )
         for row in self.combos:
             for combo in row:
                 current = combo.currentText()

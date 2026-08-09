@@ -56,7 +56,6 @@ jobs:
       - name: Test
         env:
           QT_QPA_PLATFORM: offscreen
-          QTWEBENGINE_CHROMIUM_FLAGS: --no-sandbox
         run: uv run pytest
       - name: Build
         run: uv run pyinstaller --noconfirm --clean --windowed --name GenshinThumbnailStudio --paths src launch.py

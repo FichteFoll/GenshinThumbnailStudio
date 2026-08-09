@@ -14,7 +14,7 @@ from genshin_thumbnail_studio.renderer.cache import clear_render_cache
 from genshin_thumbnail_studio.renderer.colors import ELEMENT_COLORS
 from genshin_thumbnail_studio.renderer.compose import export_project, render_preview
 
-from .helpers import create_assets, fill_project, two_tone_project
+from .helpers import asset_key, create_assets, fill_project, live_build, two_tone_project
 
 
 def _render_cache(name: str) -> Any:
@@ -192,6 +192,7 @@ def test_slots_with_identical_badge_state_share_one_cached_tile(tmp_path: Path) 
     assets = create_assets(tmp_path, names[:1], elements={names[0]: "Pyro"})
     for member in (member for team in project.teams for member in team):
         member.name = names[0]
+        member.build = live_build(names[0])
 
     render_preview(project, assets)
 
@@ -212,15 +213,16 @@ def test_badge_cache_key_separates_builds_differing_only_in_c_and_r(tmp_path: Pa
     project = Project.blank("abyss")
     for member in (member for team in project.teams for member in team):
         member.name = name
+        member.build = live_build(name)
     # A pinned element fixes the card colour across slots, so the only thing
     # varying below is the badge text itself.
     assets = create_assets(tmp_path, [name], elements={name: "Pyro"})
-    asset = assets[name.casefold()]
+    asset = assets[asset_key(name)]
 
     def render_with(constellation: int, refinement: int) -> Image.Image:
         # Same tmp_path, hence the same weapon path, and no clear_render_cache()
         # in between: all three renders share one warm badge_cache.
-        assets[name.casefold()] = Asset(
+        assets[asset_key(name)] = Asset(
             replace(asset.build, constellation=constellation, refinement=refinement),
             asset.art_path,
             asset.weapon_path,
@@ -277,7 +279,7 @@ def test_flip_is_part_of_the_panel_cache_key(tmp_path: Path) -> None:
 def test_changing_asset_element_invalidates_stale_panel_cache(tmp_path: Path) -> None:
     """Regression test: panel_cache must key on the resolved card_color(),
     not the raw placement color. card_color() prefers asset.build.element
-    over member.color, so changing only the element (e.g. after an Akasha
+    over member.color, so changing only the element (e.g. after an Enka
     profile refresh) while member.color stays the same must not serve a
     stale, wrongly-colored panel from the cache."""
     clear_render_cache()
@@ -291,7 +293,7 @@ def test_changing_asset_element_invalidates_stale_panel_cache(tmp_path: Path) ->
     first_member_color = project.teams[0][0].color
     pyro_color = ELEMENT_COLORS["pyro"]
     assert first_member_color != pyro_color
-    assets[names[0].casefold()].build.element = "Pyro"
+    assets[asset_key(names[0])].build.element = "Pyro"
 
     warm = render_preview(project, assets)  # deliberately no cache clear
 

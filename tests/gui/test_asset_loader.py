@@ -24,7 +24,7 @@ class StubState:
     """The minimal `EditorState` the loader needs."""
 
     project: Project
-    builds: dict[str, Build] = field(default_factory=dict)
+    builds: dict[str, list[Build]] = field(default_factory=dict)
     assets: dict[str, Asset] = field(default_factory=dict)
 
 
@@ -71,10 +71,9 @@ def fake_downloader(requested: list[list[str]]) -> DownloadAssets:
         requested.append([build.name for build in builds])
         downloaded: dict[str, Asset] = {}
         for build in builds:
-            key = build.name.casefold()
-            downloaded[key] = make_asset(root, build)
+            downloaded[build.key] = make_asset(root, build)
             if on_asset:
-                on_asset(key, downloaded[key])
+                on_asset(build.key, downloaded[build.key])
         return downloaded
 
     return fake_download_assets
@@ -85,7 +84,7 @@ def make_loader(names: list[str], root: Path) -> tuple[AssetLoader, StubState, I
     members = [member for team in project.teams for member in team]
     for member, name in zip(members, names, strict=False):
         member.name = name
-    state = StubState(project=project, builds={name.casefold(): make_build(name) for name in names})
+    state = StubState(project=project, builds={name.casefold(): [make_build(name)] for name in names})
     pool = InlinePool()
     loader = AssetLoader(state, root, cast(QThreadPool, pool))
     return loader, state, pool
@@ -98,7 +97,7 @@ def test_ensure_requests_only_the_builds_that_are_missing(
     # A third slot names a character the profile does not know, and a fourth is
     # already downloaded; neither may reach the downloader.
     state.project.teams[0][2].name = "Unknown Traveler"
-    state.assets["nahida"] = make_asset(tmp_path, state.builds["nahida"])
+    state.assets["nahida|live"] = make_asset(tmp_path, state.builds["nahida"][0])
     requested: list[list[str]] = []
     monkeypatch.setattr(asset_loader, "download_assets", fake_downloader(requested))
 
@@ -121,7 +120,7 @@ def test_ensure_emits_asset_ready_per_downloaded_character(
 
     loader.ensure()
 
-    assert arrived == ["furina", "nahida"]
+    assert arrived == ["furina|live", "nahida|live"]
 
 
 def test_progress_reports_the_batch_finishing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

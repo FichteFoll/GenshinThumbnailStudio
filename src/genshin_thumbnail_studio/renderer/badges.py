@@ -275,9 +275,9 @@ def add_badges(
         font = find_font((38 if compact else 54) * scale)
         for row, team in enumerate(teams):
             for index, member in enumerate(team):
-                if not member.name or member.name.casefold() not in assets:
+                if not member.asset_key or member.asset_key not in assets:
                     continue
-                asset = assets[member.name.casefold()]
+                asset = assets[member.asset_key]
                 center = round(index * step + step / 2)
                 top_y = row * row_height + row_height - (68 if compact else 107) * scale
                 text = f"C{asset.build.constellation}R{asset.build.refinement}"
