@@ -26,7 +26,26 @@ def qapp() -> QApplication:
 TEAM_NAMES = ["Furina", "Nahida", "Xilonen", "Neuvillette", "Kazuha", "Bennett", "Xiangling", "Zhongli"]
 
 
+def live_build(name: str) -> Build:
+    """The minimal live build a placement carries in these tests.
+
+    `Placement.build` is what the renderer and the editor resolve a slot's art
+    through, so a member filled in by hand needs one; its `key` is the key
+    `create_test_assets()` files that character's art under.
+    """
+    return Build(
+        name=name,
+        constellation=0,
+        refinement=1,
+        weapon_name="Weapon",
+        costume_id=None,
+        art_url="https://example.invalid/art.png",
+        weapon_url="https://example.invalid/weapon.png",
+    )
+
+
 def create_test_assets(directory: Path, names: list[str]) -> dict[str, Asset]:
+    """One asset per name, keyed by `Build.key` the way the editor keys them."""
     directory.mkdir(parents=True, exist_ok=True)
     assets: dict[str, Asset] = {}
     for index, name in enumerate(names):
@@ -45,19 +64,23 @@ def create_test_assets(directory: Path, names: list[str]) -> dict[str, Asset]:
             weapon_name="Weapon",
             costume_id=None,
             build_id=str(index),
-            build_md5=str(index),
-            last_build_update=None,
             art_url="https://example.invalid/art.png",
             weapon_url="https://example.invalid/weapon.png",
         )
-        assets[name.casefold()] = Asset(build, art_path, weapon_path)
+        assets[build.key] = Asset(build, art_path, weapon_path)
     return assets
 
 
 def fill_window_teams(window: MainWindow, names: list[str]) -> None:
+    """Write the names straight onto the placements, with their live build.
+
+    Bypasses `member_changed()`, so the build the editor would resolve there has
+    to be put on the placement here.
+    """
     members = [member for team in window.project.teams for member in team]
     for member, name in zip(members, names, strict=False):
         member.name = name
+        member.build = live_build(name)
 
 
 class DiscardMessageBox:

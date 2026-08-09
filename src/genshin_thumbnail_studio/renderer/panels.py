@@ -198,7 +198,7 @@ def add_card_borders(
     overlay_size = (math.ceil(step) + 2 * slant + 1, row_height)
     for row, team in enumerate(teams):
         for index, member in enumerate(team):
-            asset = assets.get(member.name.casefold()) if member.name else None
+            asset = assets.get(member.asset_key) if member.asset_key else None
             color = card_color(member, asset) if asset else member.color
             origin_x, origin_y = panel_origin(index, row, row_height, step, slant)
             # overlay_size is fully derived from step, slant and row_height.

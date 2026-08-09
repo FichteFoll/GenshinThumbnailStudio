@@ -5,7 +5,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RELEASE="$ROOT/release"
 
 uv sync --directory "$ROOT" --extra dev
-QT_QPA_PLATFORM=offscreen QTWEBENGINE_CHROMIUM_FLAGS=--no-sandbox uv run --directory "$ROOT" pytest
+QT_QPA_PLATFORM=offscreen uv run --directory "$ROOT" pytest
 
 rm -rf "$ROOT/build" "$ROOT/dist"
 uv run --directory "$ROOT" pyinstaller \

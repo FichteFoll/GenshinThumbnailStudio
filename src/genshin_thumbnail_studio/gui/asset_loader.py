@@ -11,8 +11,9 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 
-from ..akasha import download_assets
+from ..enka import download_assets
 from ..models import Asset, Build
+from .build_choices import selected_build
 from .state import EditorState
 
 
@@ -58,8 +59,8 @@ class AssetLoader(QObject):
         self._root = root
         self._pool = pool
         self._token = 0
-        # Keyed by token rather than one flat set, so a job's names are released
-        # by the job that carried them and not by whichever finishes first.
+        # Keyed by token rather than one flat set, so a job's build keys are
+        # released by the job that carried them and not by whichever finishes first.
         self._in_flight: dict[int, set[str]] = {}
 
     def ensure(self) -> None:
@@ -68,7 +69,7 @@ class AssetLoader(QObject):
         if not missing:
             return
         self._token += 1
-        self._in_flight[self._token] = {build.name.casefold() for build in missing}
+        self._in_flight[self._token] = {build.key for build in missing}
         job = AssetJob(self._token, missing, self._root)
         job.signals.asset_ready.connect(self.asset_ready)
         job.signals.finished.connect(self._job_finished)
@@ -78,16 +79,16 @@ class AssetLoader(QObject):
     def _missing_builds(self) -> list[Build]:
         # Read the editor through the Protocol on every call, see state.py.
         state = self._state
-        pending = {name for names in self._in_flight.values() for name in names}
+        pending = {key for keys in self._in_flight.values() for key in keys}
         missing: dict[str, Build] = {}
         for team in state.project.teams:
             for member in team:
-                key = member.name.casefold()
-                if not key or key in state.assets or key in pending or key in missing:
+                if not member.name:
                     continue
-                build = state.builds.get(key)
-                if build is not None:
-                    missing[key] = build
+                build = selected_build(state, member)
+                if build is None or build.key in state.assets or build.key in pending or build.key in missing:
+                    continue
+                missing[build.key] = build
         return list(missing.values())
 
     def _job_finished(self, token: int, error: Exception | None) -> None:

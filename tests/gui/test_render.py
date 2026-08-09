@@ -100,11 +100,11 @@ def test_on_asset_ready_populates_incrementally_and_schedules_render(
     window._render.timer.stop()
     assert not window._render.timer.isActive()
 
-    window._on_asset_ready("furina", all_assets["furina"])
+    window._on_asset_ready("furina|live", all_assets["furina|live"])
 
     # Only the first of several builds' assets has arrived, but the GUI is
     # already render-able: it does not wait for the whole batch.
-    assert set(window.assets) == {"furina"}
+    assert set(window.assets) == {"furina|live"}
     assert window._render.timer.isActive()
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
@@ -197,8 +197,8 @@ def test_closing_the_window_stops_rendering(tmp_path: Path, monkeypatch: pytest.
     """A render must not be scheduled or dispatched into a window being torn down.
 
     Both jobs signal the GUI thread across a queued connection, so draining the
-    pool in `closeEvent` leaves their slots in the event queue; `client.close()`
-    then spins the loops that deliver them.
+    pool in `closeEvent` leaves their slots in the event queue, which the event
+    loop then delivers.
     """
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
@@ -215,7 +215,9 @@ def test_closing_the_window_stops_rendering(tmp_path: Path, monkeypatch: pytest.
     window.schedule_render()
     window._render.dispatch()
     # A download can outlive the drain and land here mid-teardown.
-    window._on_asset_ready("furina", create_test_assets(tmp_path / "assets", ["Furina"])["furina"])
+    window._on_asset_ready(
+        "furina|live", create_test_assets(tmp_path / "assets", ["Furina"])["furina|live"]
+    )
 
     assert not window._render.timer.isActive()
     assert started_jobs == []
@@ -240,7 +242,7 @@ def test_arriving_art_makes_its_slot_editable(tmp_path: Path, monkeypatch: pytes
     assert window.editor_panel.x_slider.isEnabled() is False
     assert window.editor_panel.preview._filled == set()
 
-    window._on_asset_ready("furina", assets["furina"])
+    window._on_asset_ready("furina|live", assets["furina|live"])
 
     assert window.editor_panel.x_slider.isEnabled() is True
     assert window.editor_panel.zoom_slider.isEnabled() is True
@@ -275,7 +277,7 @@ def test_typing_a_member_name_downloads_its_art_in_the_background(
     window = MainWindow()
 
     assets = create_test_assets(tmp_path / "assets", ["Furina"])
-    window.builds = {"furina": assets["furina"].build}
+    window.builds = {"furina": [assets["furina|live"].build]}
     requested: list[list[str]] = []
 
     def fake_download_assets(
@@ -286,7 +288,7 @@ def test_typing_a_member_name_downloads_its_art_in_the_background(
     ) -> dict[str, Asset]:
         requested.append([build.name for build in builds])
         if callable(on_asset):
-            on_asset("furina", assets["furina"])
+            on_asset("furina|live", assets["furina|live"])
         return assets
 
     monkeypatch.setattr(asset_loader, "download_assets", fake_download_assets)
@@ -298,7 +300,7 @@ def test_typing_a_member_name_downloads_its_art_in_the_background(
     app.processEvents()
 
     assert requested == [["Furina"]]
-    assert set(window.assets) == {"furina"}
+    assert set(window.assets) == {"furina|live"}
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 

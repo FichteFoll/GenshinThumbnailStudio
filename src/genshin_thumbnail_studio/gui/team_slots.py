@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QMimeData, QPoint, Qt, Signal
 from PySide6.QtGui import QDrag, QDragEnterEvent, QDropEvent, QMouseEvent
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QWidget
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QToolButton, QWidget
 
 SLOT_MIME_TYPE = "application/x-genshin-slot"
 
@@ -50,6 +50,7 @@ class TeamSlotWidget(QWidget):
     drag_started = Signal(int, int)  # source team, slot
     drag_hover = Signal(int, int)  # this widget's team, slot
     drag_ended = Signal(bool)  # accepted
+    build_menu_requested = Signal(int, int)  # this widget's team, slot
 
     def __init__(self, team: int, slot: int, combo: QComboBox) -> None:
         super().__init__()
@@ -62,6 +63,12 @@ class TeamSlotWidget(QWidget):
         self.handle = _SlotDragHandle(self)
         layout.addWidget(self.handle)
         layout.addWidget(combo, 1)
+        self.build_button = QToolButton()
+        self.build_button.setArrowType(Qt.ArrowType.DownArrow)
+        self.build_button.setFixedWidth(18)
+        self.build_button.setToolTip("Choose build")
+        self.build_button.clicked.connect(lambda: self.build_menu_requested.emit(self.team, self.slot))
+        layout.addWidget(self.build_button)
 
     def _set_drop_target(self, active: bool) -> None:
         self.setProperty("dropTarget", active)

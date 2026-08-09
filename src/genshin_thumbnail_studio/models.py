@@ -6,9 +6,10 @@ import these without pulling in the network or GUI stack.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 Mode = Literal["abyss", "stygian"]
 
@@ -22,6 +23,10 @@ TEAM_COLORS = [
 # Reset button so the two cannot drift apart.
 DEFAULT_ZOOM: dict[Mode, float] = {"abyss": 1.0, "stygian": 1.18}
 
+# The name of the build taken from the player's current showcase, as opposed to
+# one of the builds they saved on Enka.
+LIVE_BUILD_NAME = "Live"
+
 
 @dataclass
 class Build:
@@ -30,22 +35,53 @@ class Build:
     refinement: int
     weapon_name: str
     costume_id: str | None
-    build_id: str
-    build_md5: str
-    last_build_update: str | None
     art_url: str
     weapon_url: str
+    build_name: str = LIVE_BUILD_NAME
+    build_id: str = ""
     element: str | None = None
     rarity: int | None = None
     weapon_rarity: int | None = None
-    raw: dict[str, Any] = field(default_factory=dict, repr=False)
+
+    @property
+    def key(self) -> str:
+        """Identify character *and* build, the key of the downloaded-art dict.
+
+        Two slots holding different builds of one character must not share a
+        weapon icon or a skin, which a key of the character name alone would
+        force them to.
+        """
+        return f"{self.name.casefold()}|{self.build_name.casefold()}"
+
+    def details(self) -> tuple[str | None, str, int, int]:
+        """The user-visible part of a build, which a project's snapshot is
+        compared against the live build by."""
+        return (self.costume_id, self.weapon_name, self.constellation, self.refinement)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> Build:
-        return cls(**value)
+        """Read the known keys, ignoring unknown ones, so that a build written
+        by an older version loads with defaults instead of raising."""
+        known = {field_.name for field_ in fields(cls)}
+        return cls(**{key: item for key, item in value.items() if key in known})
+
+
+@dataclass
+class Profile:
+    """Everything one fetch from Enka yielded, keyed by casefolded character name.
+
+    It lives here rather than in the `enka` package because `storage` caches it
+    on disk and must not import the network layer to do so.
+    """
+
+    identifier: str
+    uid: str
+    username: str
+    builds: dict[str, list[Build]]
+    fetched_at: datetime
 
 
 @dataclass
@@ -62,6 +98,8 @@ class Placement:
     `offset_x`/`offset_y` are signed fractions of the panel size, measured from
     the centered position: positive values move the portrait right/down.
     `flip` mirrors the character art horizontally.
+    `build` is the snapshot of the build the character was framed with, so that
+    the framing survives the profile changing on Enka.
     """
 
     name: str = ""
@@ -70,12 +108,25 @@ class Placement:
     zoom: float = 1.0
     color: str = "#78d7ff"
     flip: bool = False
+    build: Build | None = None
+
+    @property
+    def asset_key(self) -> str:
+        """The key this slot's art is stored under, or `""` while unresolved.
+
+        The renderer receives only a `Project` and the `Asset` dict, never the
+        editor's build map, so the key has to travel on the placement itself.
+        An empty key matches no asset, which is the right outcome for a slot
+        whose build is not resolved yet.
+        """
+        return self.build.key if self.build else ""
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> Placement:
         """Read the known keys, ignoring unknown ones, so that a legacy payload
         loads with default framing instead of raising."""
         defaults = cls()
+        raw_build = value.get("build")
         return cls(
             name=str(value.get("name", defaults.name)),
             offset_x=float(value.get("offset_x", defaults.offset_x)),
@@ -83,6 +134,7 @@ class Placement:
             zoom=float(value.get("zoom", defaults.zoom)),
             color=str(value.get("color", defaults.color)),
             flip=bool(value.get("flip", defaults.flip)),
+            build=Build.from_dict(cast("dict[str, Any]", raw_build)) if isinstance(raw_build, dict) else None,
         )
 
 
@@ -90,6 +142,7 @@ class Placement:
 class Project:
     mode: Mode = "abyss"
     uid: str = ""
+    profile_name: str = ""
     output_name: str = "genshin_thumbnail"
     output_height: int = 1080
     teams: list[list[Placement]] = field(default_factory=list)
@@ -98,6 +151,12 @@ class Project:
     @property
     def output_size(self) -> tuple[int, int]:
         return (self.output_height * 16 // 9, self.output_height)
+
+    @property
+    def identifier(self) -> str:
+        """What the profile is loaded by: the Enka username when there is one,
+        the UID otherwise."""
+        return self.profile_name or self.uid
 
     @classmethod
     def blank(cls, mode: Mode = "abyss", uid: str = "") -> Project:
@@ -119,9 +178,10 @@ class Project:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "schemaVersion": 3,
+            "schemaVersion": 4,
             "mode": self.mode,
             "uid": self.uid,
+            "profileName": self.profile_name,
             "outputName": self.output_name,
             "outputHeight": self.output_height,
             "activeTeam": self.active_team,
@@ -145,6 +205,7 @@ class Project:
         project = cls(
             mode=mode,
             uid=str(value.get("uid", "")),
+            profile_name=str(value.get("profileName", "")),
             output_name=str(value.get("outputName", "genshin_thumbnail")),
             output_height=output_height,
             active_team=int(value.get("activeTeam", 0)),

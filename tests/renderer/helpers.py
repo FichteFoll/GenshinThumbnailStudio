@@ -68,6 +68,7 @@ def create_assets(
     elements: dict[str, str] | None = None,
     rarities: dict[str, tuple[int | None, int | None]] | None = None,
 ) -> dict[str, Asset]:
+    """One asset per name, keyed by `Build.key` the way the editor keys them."""
     result: dict[str, Asset] = {}
     for index, name in enumerate(names):
         art_path = directory / f"art-{index}.png"
@@ -87,21 +88,44 @@ def create_assets(
             weapon_name="Weapon",
             costume_id=None,
             build_id=str(index),
-            build_md5=str(index),
-            last_build_update=None,
             art_url="https://example.invalid/art.png",
             weapon_url="https://example.invalid/weapon.png",
             element=(elements or {}).get(name),
             rarity=rarity,
             weapon_rarity=weapon_rarity,
         )
-        result[name.casefold()] = Asset(build, art_path, weapon_path)
+        result[build.key] = Asset(build, art_path, weapon_path)
     return result
+
+
+def asset_key(name: str) -> str:
+    """The key `create_assets()` files a character's art under: `Build.key` for
+    that character's live build."""
+    return live_build(name).key
+
+
+def live_build(name: str) -> Build:
+    """The minimal live build a placement carries in these tests.
+
+    The renderer resolves a slot's art through `Placement.asset_key` alone, so a
+    placement needs a build whose `key` matches the one `create_assets()` filed
+    that character's art under.
+    """
+    return Build(
+        name=name,
+        constellation=0,
+        refinement=1,
+        weapon_name="Weapon",
+        costume_id=None,
+        art_url="https://example.invalid/art.png",
+        weapon_url="https://example.invalid/weapon.png",
+    )
 
 
 def fill_project(project: Project, names: list[str]) -> None:
     for index, member in enumerate(member for team in project.teams for member in team):
         member.name = names[index]
+        member.build = live_build(names[index])
 
 
 def marked_source() -> Image.Image:

@@ -11,7 +11,7 @@ from pathlib import Path
 from PIL import Image
 
 from ..models import Asset, Build
-from .errors import AkashaError
+from .errors import EnkaError
 from .http import download
 
 
@@ -32,6 +32,11 @@ def download_assets(
     progress: Callable[[int, int, str], None] | None = None,
     on_asset: Callable[[str, Asset], None] | None = None,
 ) -> dict[str, Asset]:
+    """Fetch every build's art, keyed by `Build.key`.
+
+    The key covers character *and* build, so that two slots holding different
+    builds of one character do not share a weapon icon or a skin.
+    """
     assets: dict[str, Asset] = {}
     for index, build in enumerate(builds, start=1):
         if progress:
@@ -45,14 +50,13 @@ def download_assets(
         try:
             with Image.open(art) as image:
                 if image.width < 700 or image.height < 500:
-                    raise AkashaError(f"Enka returned no full character art for {build.name}.")
+                    raise EnkaError(f"Enka returned no full character art for {build.name}.")
             with Image.open(weapon) as image:
                 image.verify()
         except (OSError, ValueError) as error:
             art.unlink(missing_ok=True)
-            raise AkashaError(f"Downloaded image validation failed for {build.name}.") from error
-        key = build.name.casefold()
-        assets[key] = Asset(build=build, art_path=art, weapon_path=weapon)
+            raise EnkaError(f"Downloaded image validation failed for {build.name}.") from error
+        assets[build.key] = Asset(build=build, art_path=art, weapon_path=weapon)
         if on_asset:
-            on_asset(key, assets[key])
+            on_asset(build.key, assets[build.key])
     return assets

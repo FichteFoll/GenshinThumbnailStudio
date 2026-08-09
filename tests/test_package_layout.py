@@ -4,7 +4,7 @@ The assertions here are structural on purpose: they say which modules exist,
 that sibling modules are reached by relative import, that each package's facade
 re-exports only names it actually binds, and that no module has grown back past
 the size that made the split necessary. Behavior is covered by the per-package
-suites under `tests/akasha/`, `tests/renderer/` and `tests/gui/`.
+suites under `tests/enka/`, `tests/renderer/` and `tests/gui/`.
 
 This module is deliberately static: it walks the filesystem and parses sources
 with `ast`, and imports neither `genshin_thumbnail_studio` nor PySide6. That is
@@ -25,13 +25,13 @@ EXPECTED_MODULES = {
     "__main__.py",
     "models.py",
     "storage.py",
-    "akasha/__init__.py",
-    "akasha/errors.py",
-    "akasha/http.py",
-    "akasha/parsing.py",
-    "akasha/rarities.py",
-    "akasha/client.py",
-    "akasha/assets.py",
+    "enka/__init__.py",
+    "enka/errors.py",
+    "enka/http.py",
+    "enka/parsing.py",
+    "enka/profile.py",
+    "enka/client.py",
+    "enka/assets.py",
     "renderer/__init__.py",
     "renderer/geometry.py",
     "renderer/colors.py",
@@ -53,6 +53,7 @@ EXPECTED_MODULES = {
     "gui/project_io.py",
     "gui/profile_io.py",
     "gui/state.py",
+    "gui/build_choices.py",
     "gui/placement.py",
     "gui/presets.py",
     "gui/preview.py",
@@ -67,11 +68,11 @@ EXPECTED_MODULES = {
 
 PACKAGE_NAME = "genshin_thumbnail_studio"
 
-FACADES = ("akasha/__init__.py", "renderer/__init__.py", "gui/__init__.py")
+FACADES = ("enka/__init__.py", "renderer/__init__.py", "gui/__init__.py")
 
-TEST_PACKAGES = ("akasha", "renderer", "gui")
+TEST_PACKAGES = ("enka", "renderer", "gui")
 
-RETIRED_TEST_FILES = ("test_akasha.py", "test_renderer.py", "test_gui_smoke.py", "test_lineup.py")
+RETIRED_TEST_FILES = ("test_renderer.py", "test_gui_smoke.py", "test_lineup.py")
 
 # A regression tripwire, not a design target, set to the next multiple of 50
 # above the largest module. `gui/main_window.py` still holds that spot, but only
@@ -102,7 +103,7 @@ def test_every_expected_module_exists() -> None:
 
 
 def test_the_flat_modules_are_gone() -> None:
-    for name in ("akasha.py", "renderer.py", "gui.py"):
+    for name in ("enka.py", "renderer.py", "gui.py"):
         flat = PACKAGE_ROOT / name
         assert not flat.exists(), f"{relative_name(flat)} is back as a flat module; it should be a sub-package"
 

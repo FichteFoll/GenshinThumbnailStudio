@@ -1,7 +1,7 @@
 """Tests for `gui.placement.PlacementController`, needing no Qt environment.
 
 The controller is Qt-free: it constructs no widget and needs no display, so these
-tests run without `QT_QPA_PLATFORM` or `QTWEBENGINE_CHROMIUM_FLAGS` being set.
+tests run without `QT_QPA_PLATFORM` being set.
 (PySide6 still ends up imported, because reaching `gui.placement` executes the
 `gui` package's facade, but nothing here uses it.)
 """
@@ -20,7 +20,7 @@ from genshin_thumbnail_studio.renderer import (
     panel_target_size,
 )
 
-from .helpers import create_test_assets
+from .helpers import create_test_assets, live_build
 
 
 @dataclass
@@ -28,13 +28,15 @@ class StubState:
     """The minimal `EditorState` the controller needs."""
 
     project: Project
-    builds: dict[str, Build] = field(default_factory=dict)
+    builds: dict[str, list[Build]] = field(default_factory=dict)
     assets: dict[str, Asset] = field(default_factory=dict)
 
 
 def _state(tmp_path: Path, mode: Mode = "abyss", with_assets: bool = True) -> StubState:
     project = Project.blank(mode)
-    project.teams[0][0].name = "Furina"
+    member = project.teams[0][0]
+    member.name = "Furina"
+    member.build = live_build("Furina")
     assets = create_test_assets(tmp_path / "assets", ["Furina"]) if with_assets else {}
     return StubState(project=project, assets=assets)
 
@@ -49,7 +51,7 @@ def test_offset_bounds_match_the_renderer_for_a_downloaded_asset(tmp_path: Path)
     controller = PlacementController(state)
     member = state.project.teams[0][0]
 
-    art_size = art_pixel_size(str(state.assets["furina"].art_path))
+    art_size = art_pixel_size(str(state.assets["furina|live"].art_path))
 
     assert controller.offset_bounds(member) == max_offset(art_size, True, member.zoom)
 
@@ -131,13 +133,14 @@ def test_offset_bounds_follow_a_replaced_project(tmp_path: Path) -> None:
     state = _state(tmp_path)
     controller = PlacementController(state)
     member = state.project.teams[0][0]
-    art_size = art_pixel_size(str(state.assets["furina"].art_path))
+    art_size = art_pixel_size(str(state.assets["furina|live"].art_path))
 
     before = controller.offset_bounds(member)
     assert before == max_offset(art_size, True, member.zoom)
 
     stygian = Project.blank("stygian")
     stygian.teams[0][0].name = member.name
+    stygian.teams[0][0].build = member.build
     state.project = stygian
 
     after = controller.offset_bounds(member)

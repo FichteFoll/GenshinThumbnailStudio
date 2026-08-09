@@ -25,6 +25,7 @@ class ProjectActionHost(Protocol):
     `MainWindow` satisfies it structurally; nothing has to declare it.
     """
 
+    def new_project(self) -> None: ...
     def open_project(self) -> None: ...
     def save_project(self) -> None: ...
     def save_project_as(self) -> None: ...
@@ -48,6 +49,7 @@ class ProjectActions(QObject):
         # Deliberately `QAction`s and not `QShortcut`s like `history.py` uses:
         # the "Save as..." menu entry needs an action anyway, and a sequence
         # bound to both would be ambiguous and fire neither.
+        self.new = self._action("New project", "Ctrl+N", lambda: host.new_project())
         self.open = self._action("Open project", "Ctrl+O", lambda: host.open_project())
         self.save = self._action("Save project", "Ctrl+S", lambda: host.save_project())
         self.save_as = self._action("Save as...", "Ctrl+Shift+S", lambda: host.save_project_as())
@@ -72,9 +74,11 @@ class ProjectActions(QObject):
     def bind_buttons(self, panel: ControlsPanel) -> None:
         """Let the panel's project buttons trigger these actions."""
         self._panel = panel
+        panel.new_button.clicked.connect(self.new.trigger)
         panel.open_button.clicked.connect(self.open.trigger)
         panel.save_button.clicked.connect(self.save.trigger)
         panel.export_button.clicked.connect(self.export.trigger)
+        panel.new_button.setToolTip("New project (Ctrl+N)")
         panel.open_button.setToolTip("Open project (Ctrl+O)")
         panel.export_button.setToolTip("Export PNG (Ctrl+E)")
 

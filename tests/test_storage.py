@@ -1,20 +1,25 @@
 """Tests for `genshin_thumbnail_studio.storage`."""
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 import pytest
 
-from genshin_thumbnail_studio.models import Build
+from genshin_thumbnail_studio.models import Build, Profile
 from genshin_thumbnail_studio.renderer import STANDARD_ART_SIZE, panel_target_size, resized_art_size
 from genshin_thumbnail_studio.storage import (
     app_data_dir,
+    load_last_profile,
     load_presets,
     load_profile_cache,
     load_project,
+    migrate_project_data,
     profile_cache_path,
+    save_last_profile,
     save_profile_cache,
+    settings_path,
 )
 
 
@@ -26,29 +31,47 @@ def make_build(name: str) -> Build:
         weapon_name="Splendor of Tranquil Waters",
         costume_id=None,
         build_id=f"{name}-build",
-        build_md5="0123456789abcdef",
-        last_build_update="2026-08-01T12:00:00+00:00",
         art_url=f"https://enka.network/ui/{name}.png",
         weapon_url="https://enka.network/ui/weapon.png",
         element="Hydro",
         rarity=5,
         weapon_rarity=5,
-        raw={"name": name, "stats": {"critRate": 0.75}},
+    )
+
+
+def make_profile(identifier: str, names: list[str], username: str = "") -> Profile:
+    return Profile(
+        identifier=identifier,
+        uid="" if username else identifier,
+        username=username,
+        builds={name.casefold(): [make_build(name)] for name in names},
+        fetched_at=datetime(2026, 8, 3, 10, 30, 15),
     )
 
 
 def test_profile_cache_round_trip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
-    builds = [make_build("Furina"), make_build("Nahida")]
-    last_update = datetime(2026, 8, 3, 10, 30, 15, tzinfo=timezone.utc)
+    profile = make_profile("700000001", ["Furina", "Nahida"])
 
-    save_profile_cache("700000001", builds, last_update)
+    save_profile_cache(profile)
     cached = load_profile_cache("700000001")
 
-    assert cached is not None
-    loaded_builds, loaded_last_update = cached
-    assert loaded_builds == builds
-    assert loaded_last_update == last_update
+    assert cached == profile
+
+
+def test_profile_cache_is_keyed_by_a_sanitized_identifier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A username is free text, so it cannot reach the file system unsanitized."""
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    profile = make_profile("../Algo inde", ["Furina"], username="../Algo inde")
+
+    save_profile_cache(profile)
+
+    path = profile_cache_path("../Algo inde")
+    assert path.name == "Algo_inde.json"
+    assert path.parent == tmp_path / "app-data" / "cache" / "profiles"
+    assert load_profile_cache("../Algo inde") == profile
 
 
 def test_load_profile_cache_without_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -116,6 +139,80 @@ def test_load_project_keeps_a_saturated_focal_point_at_the_art_edge(tmp_path: Pa
     # The crop lands on the same row the legacy focal point produced.
     legacy_top = min(round(1.0 * resized_h - target_h / 2), resized_h - target_h)
     assert round((resized_h - target_h) / 2 - migrated.offset_y * target_h) == legacy_top
+
+
+def test_migrate_project_data_lifts_a_v3_payload_to_v4() -> None:
+    """R12: a v3 file gains the profile name and a per-placement build slot."""
+    payload: dict[str, object] = {
+        "schemaVersion": 3,
+        "mode": "abyss",
+        "uid": "700000042",
+        "teams": [[{"name": "Furina", "offset_x": 0.1}] * 4] * 2,
+    }
+
+    migrated = migrate_project_data(payload)
+
+    assert migrated["schemaVersion"] == 4
+    assert migrated["profileName"] == ""
+    teams = cast("list[list[dict[str, object]]]", migrated["teams"])
+    assert all(member["build"] is None for team in teams for member in team)
+    # The already-migrated payload passes through untouched.
+    assert migrate_project_data(migrated) == migrated
+
+
+def test_migrate_project_data_still_converts_a_pre_v3_focal_point() -> None:
+    payload: dict[str, object] = {
+        "schemaVersion": 2,
+        "mode": "abyss",
+        "teams": [[{"name": "Furina", "fx": 0.541, "fy": 0.52, "zoom": 1.06}] * 4] * 2,
+    }
+
+    migrated = migrate_project_data(payload)
+
+    member = cast("list[list[dict[str, object]]]", migrated["teams"])[0][0]
+    assert "fx" not in member and "fy" not in member
+    assert (member["offset_x"], member["offset_y"]) == _expected_offsets(0.541, 0.52, 1.06, compact=True)
+    assert migrated["schemaVersion"] == 4
+    assert member["build"] is None
+
+
+def test_migrate_project_data_pins_v1_output_height() -> None:
+    """Bumping the schema version must not hide a v1 file's 720p rendering
+    from `Project.from_dict()`, which keys that rule on the version it reads."""
+    payload: dict[str, object] = {
+        "schemaVersion": 1,
+        "mode": "abyss",
+        "uid": "700000042",
+        "teams": [[{"name": "Furina"}] * 4] * 2,
+    }
+
+    migrated = migrate_project_data(payload)
+
+    assert migrated["outputHeight"] == 720
+    assert migrated["schemaVersion"] == 4
+
+
+def test_last_profile_round_trips(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """R13: the identifier the user last loaded is remembered globally."""
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+
+    assert load_last_profile() == ""
+
+    save_last_profile("Algoinde")
+    assert load_last_profile() == "Algoinde"
+
+    save_last_profile("700000042")
+    assert load_last_profile() == "700000042"
+
+
+def test_load_last_profile_survives_a_malformed_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    settings_path().write_text("{not json", encoding="utf-8")
+
+    assert load_last_profile() == ""
+
+    settings_path().write_text(json.dumps(["not", "an", "object"]), encoding="utf-8")
+    assert load_last_profile() == ""
 
 
 def test_load_presets_migrates_legacy_focal_points(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,6 +1,6 @@
 """Tests for `genshin_thumbnail_studio.models`."""
 
-from genshin_thumbnail_studio.models import Build, Placement, Project
+from genshin_thumbnail_studio.models import LIVE_BUILD_NAME, Build, Placement, Project
 
 
 def test_build_round_trip() -> None:
@@ -10,18 +10,18 @@ def test_build_round_trip() -> None:
         refinement=3,
         weapon_name="Splendor of Tranquil Waters",
         costume_id="costume-42",
-        build_id="build-123",
-        build_md5="abcdef0123456789",
-        last_build_update="2026-08-01T12:00:00+00:00",
         art_url="https://example.com/furina.png",
         weapon_url="https://example.com/weapon.png",
+        build_name="Vape",
+        build_id="build-123",
         element="Hydro",
         rarity=5,
         weapon_rarity=4,
-        raw={"nested": {"value": 1}, "list": [1, 2, 3]},
     )
     restored = Build.from_dict(build.to_dict())
     assert restored == build
+    assert build.key == "furina|vape"
+    assert build.details() == ("costume-42", "Splendor of Tranquil Waters", 2, 3)
 
     build_with_nones = Build(
         name="Navia",
@@ -29,18 +29,30 @@ def test_build_round_trip() -> None:
         refinement=1,
         weapon_name="Crimson Moon's Semblance",
         costume_id=None,
-        build_id="build-456",
-        build_md5="0123456789abcdef",
-        last_build_update=None,
         art_url="https://example.com/navia.png",
         weapon_url="https://example.com/weapon2.png",
-        element=None,
-        rarity=None,
-        weapon_rarity=None,
-        raw={},
     )
     restored_with_nones = Build.from_dict(build_with_nones.to_dict())
     assert restored_with_nones == build_with_nones
+    # The live build is the default, and its key is the character alone.
+    assert build_with_nones.key == "navia|live"
+
+
+def test_build_from_dict_tolerates_a_payload_without_the_newer_keys() -> None:
+    build = Build.from_dict(
+        {
+            "name": "Navia",
+            "constellation": 0,
+            "refinement": 1,
+            "weapon_name": "Verdict",
+            "costume_id": None,
+            "art_url": "https://example.com/navia.png",
+            "weapon_url": "https://example.com/weapon.png",
+            "build_md5": "no longer a field",
+        }
+    )
+    assert build.build_name == LIVE_BUILD_NAME
+    assert build.build_id == ""
 
 
 def test_project_round_trip() -> None:
@@ -49,7 +61,7 @@ def test_project_round_trip() -> None:
     project.teams[1][2].offset_x = 0.42
     project.teams[1][2].flip = True
     project.output_height = 1440
-    assert project.to_dict()["schemaVersion"] == 3
+    assert project.to_dict()["schemaVersion"] == 4
     restored = Project.from_dict(project.to_dict())
     assert restored.mode == "stygian"
     assert len(restored.teams) == 3
@@ -59,6 +71,44 @@ def test_project_round_trip() -> None:
     assert restored.teams[1][3].flip is False
     assert restored.output_height == 1440
     assert restored.output_size == (2560, 1440)
+
+
+def test_project_round_trips_the_profile_name_and_the_placement_build() -> None:
+    """R3/R9: the Enka username lives in a field of its own, and every placement
+    carries the build it was framed with, so the framing survives the profile
+    changing on Enka."""
+    project = Project.blank("abyss", "700000042")
+    project.profile_name = "Algoinde"
+    build = Build(
+        name="Furina",
+        constellation=2,
+        refinement=3,
+        weapon_name="Splendor of Tranquil Waters",
+        costume_id="200301",
+        art_url="https://enka.network/ui/furina.png",
+        weapon_url="https://enka.network/ui/weapon.png",
+        build_name="Vape",
+        build_id="build-7",
+        element="Hydro",
+        rarity=5,
+        weapon_rarity=5,
+    )
+    project.teams[0][0].name = "Furina"
+    project.teams[0][0].build = build
+
+    value = project.to_dict()
+    assert value["schemaVersion"] == 4
+    assert value["profileName"] == "Algoinde"
+
+    restored = Project.from_dict(value)
+    assert restored.profile_name == "Algoinde"
+    assert restored.uid == "700000042"
+    assert restored.teams[0][0].build == build
+    assert restored.teams[0][1].build is None
+    # The profile name takes priority over the UID (R4).
+    assert restored.identifier == "Algoinde"
+    restored.profile_name = ""
+    assert restored.identifier == "700000042"
 
 
 def test_placement_from_dict_ignores_unknown_keys() -> None:

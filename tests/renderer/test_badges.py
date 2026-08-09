@@ -13,7 +13,7 @@ from genshin_thumbnail_studio.renderer.badges import badge_geometry, badge_tile,
 from genshin_thumbnail_studio.renderer.colors import ELEMENT_COLORS, RARITY_COLORS, hex_to_rgba
 from genshin_thumbnail_studio.renderer.compose import render_preview
 
-from .helpers import compact_layout, create_assets, fill_project, gray, rgb, rgba
+from .helpers import asset_key, compact_layout, create_assets, fill_project, gray, rgb, rgba
 
 
 def test_badge_render_and_geometry_for_long_constellation_string(tmp_path: Path) -> None:
@@ -23,7 +23,7 @@ def test_badge_render_and_geometry_for_long_constellation_string(tmp_path: Path)
     assets = create_assets(tmp_path, names)
     # Not a value the app would normally produce, but the box must not
     # overflow the canvas even for an unusually long "CxRy" string.
-    long_string_asset = assets[names[0].casefold()]
+    long_string_asset = assets[asset_key(names[0])]
     long_string_asset.build.constellation = 10
     long_string_asset.build.refinement = 5
 
@@ -90,7 +90,7 @@ def test_badge_constellation_and_refinement_use_distinct_rarity_colors(tmp_path:
     draw = ImageDraw.Draw(canvas)
     center = round(0 * step + step / 2)
     top_y = 0 * row_height + row_height - (68 if compact else 107) * scale
-    build = assets[names[0].casefold()].build
+    build = assets[asset_key(names[0])].build
     text = f"C{build.constellation}R{build.refinement}"
     geometry = badge_geometry(draw, text, font, center_x=center, top_y=top_y, scale=scale, compact=compact)
 
@@ -115,7 +115,7 @@ def test_weapon_circle_outline_uses_element_color(tmp_path: Path) -> None:
     draw = ImageDraw.Draw(canvas)
     center = round(0 * step + step / 2)
     top_y = 0 * row_height + row_height - (68 if compact else 107) * scale
-    build = assets[names[0].casefold()].build
+    build = assets[asset_key(names[0])].build
     text = f"C{build.constellation}R{build.refinement}"
     geometry = badge_geometry(draw, text, font, center_x=center, top_y=top_y, scale=scale, compact=compact)
 
@@ -149,7 +149,7 @@ def test_weapon_icon_visible_content_is_centered_in_the_circle_despite_source_pa
     fill_project(project, names)
     assets = create_assets(tmp_path, names)
 
-    weapon_path = assets[names[0].casefold()].weapon_path
+    weapon_path = assets[asset_key(names[0])].weapon_path
     weapon = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
     ImageDraw.Draw(weapon).rectangle((20, 20, 90, 90), fill=(255, 0, 255, 255))
     weapon.save(weapon_path)
@@ -165,7 +165,7 @@ def test_weapon_icon_visible_content_is_centered_in_the_circle_despite_source_pa
     draw = ImageDraw.Draw(canvas)
     center = round(0 * step + step / 2)
     top_y = 0 * row_height + row_height - (68 if compact else 107) * scale
-    build = assets[names[0].casefold()].build
+    build = assets[asset_key(names[0])].build
     text = f"C{build.constellation}R{build.refinement}"
     geometry = badge_geometry(draw, text, font, center_x=center, top_y=top_y, scale=scale, compact=compact)
 
@@ -206,7 +206,7 @@ def _has_partial_coverage(coverage: Image.Image, box: tuple[int, int, int, int])
 def test_badge_shape_edges_are_antialiased(tmp_path: Path) -> None:
     names = ["Character 0"]
     assets = create_assets(tmp_path, names, elements={names[0]: "Pyro"})
-    asset = assets[names[0].casefold()]
+    asset = assets[asset_key(names[0])]
 
     # Same leftmost-slot geometry as the badge tests above.
     scale = 1

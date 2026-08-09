@@ -33,7 +33,7 @@ class PlacementController:
     def offset_bounds(self, member: Placement) -> tuple[float, float]:
         """Reachable +/- offset per axis for the member's art and zoom."""
         state = self._state
-        asset = state.assets.get(member.name.casefold()) if member.name else None
+        asset = state.assets.get(member.asset_key) if member.asset_key else None
         art_size = art_pixel_size(str(asset.art_path)) if asset else STANDARD_ART_SIZE
         return max_offset(art_size, state.project.mode == "abyss", member.zoom)
 

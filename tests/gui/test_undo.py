@@ -20,6 +20,7 @@ from .helpers import (
     close_ignoring_unsaved_changes,
     create_test_assets,
     fill_window_teams,
+    live_build,
     qapp,
 )
 
@@ -343,7 +344,7 @@ def test_undoing_back_to_a_name_re_requests_its_art(
     window = _window_with_history_baseline(tmp_path)
     restored: list[list[str]] = []
     monkeypatch.setattr(
-        window.asset_loader, "ensure", lambda: restored.append(sorted(window.selected_name_keys()))
+        window.asset_loader, "ensure", lambda: restored.append(sorted(window.selected_build_keys()))
     )
 
     window.member_changed(0, 0, "")
@@ -354,7 +355,37 @@ def test_undoing_back_to_a_name_re_requests_its_art(
     window._history.undo()
 
     assert window.current_member().name == TEAM_NAMES[0]
-    assert restored == [sorted(name.casefold() for name in TEAM_NAMES)]
+    assert restored == [sorted(f"{name.casefold()}|live" for name in TEAM_NAMES)]
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+def test_undo_resolves_a_build_onto_a_state_snapshotted_before_the_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A state recorded before the profile arrived carries no build snapshot.
+
+    `Placement.build` is what the renderer resolves art through, and a restore
+    reaches the combos before their signals are connected, so `member_changed`
+    never runs to fill one in. Without a resolve of its own the slot would keep
+    an empty `asset_key` and render as a placeholder for good, while still
+    counting as filled everywhere the editor resolves through the builds map.
+    """
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+
+    window.member_changed(0, 0, TEAM_NAMES[0])  # No profile loaded, so no build.
+    window._history.commit_now()
+    assert window.current_member().asset_key == ""
+
+    window.builds = {TEAM_NAMES[0].casefold(): [live_build(TEAM_NAMES[0])]}
+    window.current_member().zoom = 1.4
+    window._history.commit_now()
+
+    window._history.undo()
+
+    assert window.current_member().asset_key == f"{TEAM_NAMES[0].casefold()}|live"
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
@@ -376,7 +407,7 @@ def test_art_arriving_mid_drag_leaves_the_debounce_disarmed(
     window.team_fields.on_drag_started(0, 0)
     window.team_fields.on_drag_hover(1, 3)
 
-    window._on_asset_ready(TEAM_NAMES[1].casefold(), arriving[TEAM_NAMES[1].casefold()])
+    window._on_asset_ready(f"{TEAM_NAMES[1].casefold()}|live", arriving[f"{TEAM_NAMES[1].casefold()}|live"])
 
     assert window._history._timer.isActive() is False
 

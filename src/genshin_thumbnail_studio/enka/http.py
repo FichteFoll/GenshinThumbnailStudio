@@ -8,12 +8,11 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from .errors import AkashaError
+from .errors import EnkaError
 
-USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36"
-)
+# Enka's docs ask API users for a User-Agent that identifies them; nothing here
+# has to look like a browser any more.
+USER_AGENT = "GenshinThumbnailStudio/0.1 (+https://github.com/)"
 
 
 def fetch_json(url: str) -> Any:
@@ -28,4 +27,4 @@ def download(url: str, destination: Path) -> None:
         with urllib.request.urlopen(request, timeout=120) as response:
             destination.write_bytes(response.read())
     except (urllib.error.URLError, OSError) as error:
-        raise AkashaError(f"Could not download {url}: {error}") from error
+        raise EnkaError(f"Could not download {url}: {error}") from error
