@@ -7,9 +7,10 @@ when working with code in this repository.
 
 Standalone PySide6 desktop app that builds Genshin Impact team thumbnails
 (Spiral Abyss or Stygian Onslaught)
-from a player's public Akasha profile,
+from character builds on Enka Network,
+by Genshin UID or by profile username,
 without any AI image generation.
-Fetches character/weapon art via Akasha/Enka,
+Fetches character/weapon art via Enka,
 lets the user drag-position each character in a preview,
 and exports supersampled PNGs.
 
@@ -26,11 +27,10 @@ uv run basedpyright               # strict type check (configured in pyproject.t
 uv run ruff check                 # lint the source and tests
 ```
 
-Headless/CI runs need an offscreen Qt platform and a sandbox-free QtWebEngine,
-since Akasha access goes through a real `QWebEnginePage`:
+Headless/CI runs need an offscreen Qt platform:
 
 ```bash
-QT_QPA_PLATFORM=offscreen QTWEBENGINE_CHROMIUM_FLAGS=--no-sandbox uv run pytest
+QT_QPA_PLATFORM=offscreen uv run pytest
 ```
 
 A fresh git worktree gets its own `.venv`,
@@ -69,24 +69,25 @@ all under `src/genshin_thumbnail_studio/`:
 - `models.py` — the dataclasses (`Build`, `Asset`, `Placement`, `Project`)
   and the JSON project file format.
 - `storage.py` — project/preset persistence and the app data dir.
-- `akasha/` — all network and browser interaction with Akasha and Enka.
+- `enka/` — all network interaction with Enka Network, over the `enka` PyPI package.
 - `renderer/` — pure Pillow compositing, no Qt or network.
 - `gui/` — the PySide6 application.
 
 Dependency order:
 `models` depends on nothing in the package,
-`akasha` and `renderer` depend on `models` only,
+`enka` and `renderer` depend on `models` only,
 `storage` depends on `models` and `renderer`,
 `gui` depends on all four,
 and nothing depends on `gui`.
 There are no cycles, inside a package or between them.
 
-Data flow: UID entered in GUI ->
-`AkashaWebClient.load_profile` ->
-`Build` list ->
+Data flow: UID or username entered in the GUI ->
+`EnkaClient.load_profile` ->
+a `Profile` holding each character's builds, live first ->
 `AssetLoader.ensure()` ->
 `download_assets` on a worker thread ->
-one `asset_ready` per character into the `Asset` dict (keyed by casefolded character name) ->
+one `asset_ready` per selected build into the `Asset` dict,
+keyed by `Build.key` (character plus build) rather than by name ->
 `render_preview`/`export_project` consume `Project.teams` plus the `Asset` dict
 to produce images.
 Nothing waits for that download:
@@ -105,8 +106,9 @@ with a `placeholder_panel()` wherever the `Asset` has not arrived yet.
   Read it before moving or adding a module, since it is the test that will fail.
 - `gui/state.py` must stay Qt-free; `EditorState` is what the Qt-free collaborators depend on.
 - `Placement.name` is the join key to the `Asset` dict.
-  A project file encodes placements and colors, not art,
-  so re-opening a project requires re-fetching from Akasha.
+  A project file now also encodes the selected build's details,
+  so it reopens with the framing *and* the C/R and weapon badges it was saved with,
+  while the art itself is still re-fetched from Enka.
 
 ## Docs
 

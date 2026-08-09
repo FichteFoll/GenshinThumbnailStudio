@@ -4,12 +4,16 @@ Standalone desktop application for creating Genshin Impact team thumbnails.
 
 ## Features
 
-- Loads public character builds from Akasha using a Genshin UID.
-- Checks whether the Akasha profile was refreshed within the last hour.
+- Loads character builds from Enka Network,
+  by Genshin UID or by Enka profile username.
+- Lets the user pick, per character, which of that profile's saved builds to use,
+  the live showcase build being the default.
+- Remembers each character's build details
+  (skin, weapon, constellation, refinement) in the project file,
+  so a project still opens correctly after the Enka profile has changed.
 - Supports one two-team Spiral Abyss thumbnail
   or three four-character Stygian Onslaught thumbnails.
-- Uses the exact Enka asset stem and costume ID returned by Akasha,
-  including equipped skins.
+- Character art, skins and weapon icons come from Enka's own asset URLs.
 - Downloads original character artwork and weapon icons into a local cache.
 - Shows C/R labels and weapon icons without additional thumbnail text.
 - Renders the preview continuously,
@@ -21,6 +25,8 @@ Standalone desktop application for creating Genshin Impact team thumbnails.
   so one facing out of the thumbnail can face into it,
   all apply to those slots as well.
 - Saves reusable placement presets and JSON project files.
+  A "New project" button, also bound to `Ctrl+N`,
+  resets to a blank project while keeping the profile field.
   Projects are opened with `Ctrl+O`
   and saved with `Ctrl+S`,
   which overwrites the project's own file once it has one
@@ -29,6 +35,8 @@ Standalone desktop application for creating Genshin Impact team thumbnails.
   `Ctrl+Shift+S` saves under a new name,
   as does the dropdown on the save button,
   which appears once the project has a file.
+  The profile field itself is restored from the last session,
+  so it is ready to use as soon as the application opens.
 - Exports supersampled PNG files at the configured resolution,
   on `Ctrl+E` or the export button.
 
@@ -57,12 +65,14 @@ uv run pytest
 Each script runs the tests and creates a platform-specific package in `release/`.
 The Windows and Linux packages are separate
 because native Qt binaries cannot be shared across operating systems.
-End users do not need Python, Node.js, Codex, or a separate Chromium installation.
+End users do not need Python, Node.js, or Codex.
 
-## Akasha refresh behavior
+## Data source
 
-If the profile is older than one hour,
-the application offers to press Akasha's public `Refresh builds` control automatically.
-It can also continue with the stale profile or cancel.
-Akasha and Enka are external services,
-so changes to their website or rate limits may require a future application update.
+Enka's showcase is what the game last published,
+so a profile is refreshed by opening the character showcase in game,
+rather than by any control in this application.
+Saved builds come from a verified, public Enka account
+and are reached by entering that account's username.
+Enka is an external service,
+so its rate limits or changes may require a future application update.

@@ -5,24 +5,44 @@ Read the entry for a module before changing it;
 each of these was arrived at by fixing something.
 For what lives where, see [architecture.md](architecture.md).
 
-## `akasha/`
+## `enka/`
 
-**Enka asset naming is the fragile part.**
-`exact_art_url()` reconstructs the exact Enka asset stem
-(including costume/skin IDs) from the Akasha character icon URL.
-This is what breaks first if Akasha or Enka change their asset naming.
+**`character.icon.gacha` ignores an equipped costume.**
+It is a full URL to the *default* gacha art regardless of what the character is wearing,
+so `parsing.art_url()` reads `costume.data["Art"]` instead when a costume is equipped,
+falling back to `icon.gacha` only when the costume carries no usable `Art` entry.
 
-**`client.py` drives a browser, not HTTP.**
-Akasha requires a real browser context,
-so `AkashaWebClient` loads `akasha.cv` API endpoints through an offscreen `QWebEnginePage`
-and reads the JSON back.
+**Never touch `costume.icon`.**
+It is a computed pydantic property that reads a `sideIconName` key,
+which the current asset data does not have;
+merely `repr()`-ing a costume with an equipped skin raises `KeyError: 'sideIconName'`.
 
-**Teardown order is manual.**
-`close()` releases the `QWebEnginePage` before its `QWebEngineProfile`,
-spinning the event loop between the two.
-Qt does not do this automatically:
-the profile passed to the page's constructor is not its Qt parent,
-and QtWebEngine's cleanup is deferred.
+**The library's asset directory is CWD-relative, with no public setting.**
+`enka`'s `ASSET_PATH` is `.enka_py/assets`, about 5 MB across seven files,
+resolved relative to the working directory rather than the app data dir.
+`client.redirect_asset_files()` rewrites the private `_path` of every entry
+on the library's asset manager before the first client starts,
+which is the only way to move it.
+
+**The live build comes from the showcase, not from the builds endpoint's `live: true` entries.**
+The saved-builds endpoint marks entries the user snapshotted
+the last time they pressed "refresh" on enka.network, which may be arbitrarily old.
+`fetch_showcase(uid)` is genuinely current, so that is what becomes the build
+named `"Live"`, and `live: true` entries from the builds endpoint are dropped as duplicates.
+
+**The downloaded-art dict is keyed by character *and* build.**
+Two stygian bosses can use different builds of one character,
+which means different weapon icons and possibly a different skin,
+so a key of the bare character name would let one slot's asset
+overwrite or be served to the other's.
+
+**That key travels on the `Placement` as `asset_key`, rather than being resolved where it is needed.**
+The renderer never sees the editor's `builds` map,
+so it cannot turn a bare character name into "whichever build this slot has selected".
+The editor therefore assigns `Placement.build` eagerly, as soon as a build is resolvable,
+and both sides read the one key off it.
+The panel render cache keys on `asset_key` for the same reason:
+without it, two builds of one character would serve each other's cached panel.
 
 ## `renderer/`
 
@@ -269,14 +289,12 @@ into an editable portrait.
 
 `closeEvent` first confirms discarding unsaved changes
 through the same `dialogs.confirm_discard_changes()` `_mode_changed` uses,
-then sets `_closing`, calls `RenderPipeline.stop()`,
-drains the pool (`waitForDone(2000)`)
-and finally calls `AkashaWebClient.close()`.
-Draining alone is not enough:
-both job kinds signal the GUI thread over a queued connection,
-so `waitForDone()` returns with their slots still in the event queue,
-and the `client.close()` that follows spins the loops that deliver them.
-That is why `RenderPipeline.schedule()` and `dispatch()`
+then sets `_closing`, calls `RenderPipeline.stop()`
+and drains the pool (`waitForDone(2000)`).
+`EnkaClient` holds no session between calls, so there is nothing to close.
+Draining alone does not guarantee both job kinds' queued-connection signals
+are delivered before the window goes away,
+which is why `RenderPipeline.schedule()` and `dispatch()`
 both bail on its own `closing` flag
 rather than reviving the timer or re-dispatching onto the drained pool,
 and why `_on_asset_ready` bails on the window's `_closing` too.

@@ -3,7 +3,7 @@
 ## Layout
 
 `tests/` mirrors the package layout:
-`tests/akasha/`, `tests/renderer/` and `tests/gui/`,
+`tests/enka/`, `tests/renderer/` and `tests/gui/`,
 alongside the flat `tests/test_models.py` and `tests/test_storage.py`.
 Each of those three directories is a package (`__init__.py`) with its own `helpers.py`
 for the helpers more than one of its test modules needs;
@@ -32,23 +32,26 @@ since it is the test that will fail.
 
 ## Headless runs
 
-Akasha access goes through a real `QWebEnginePage`,
-so headless/CI runs need an offscreen Qt platform and a sandbox-free QtWebEngine:
+Profile data comes over plain HTTP now, with no embedded browser involved,
+so headless/CI runs need only an offscreen Qt platform:
 
 ```bash
-QT_QPA_PLATFORM=offscreen QTWEBENGINE_CHROMIUM_FLAGS=--no-sandbox uv run pytest
+QT_QPA_PLATFORM=offscreen uv run pytest
 ```
 
-`tests/akasha/conftest.py` and `tests/gui/conftest.py` each contain only those two
-`os.environ.setdefault()` calls,
-because they have to run before PySide6 is imported
+`tests/gui/conftest.py` sets just that one `os.environ.setdefault()` call,
+because it has to run before PySide6 is imported
 and pytest imports a package's `conftest.py` before any of its test modules.
 
-`tests/renderer/` has no `conftest.py`:
+`tests/enka/` needs no `conftest.py` at all:
+nothing in that package imports Qt.
+
+`tests/renderer/` has no `conftest.py` either:
 the renderer is Qt-free,
 so `uv run pytest tests/renderer` runs without the offscreen environment.
 So do the `tests/gui/` modules whose subjects construct no widget
-(`test_lineup.py`, `test_placement_controller.py`, `test_presets.py`, `test_asset_loader.py`;
+(`test_lineup.py`, `test_placement_controller.py`, `test_presets.py`,
+`test_asset_loader.py`, `test_build_choices.py`;
 `AssetLoader` is a `QObject`, not a widget,
 and its tests run jobs inline through a `QThreadPool` stand-in).
 Everything else in `tests/gui/` needs the offscreen platform,
