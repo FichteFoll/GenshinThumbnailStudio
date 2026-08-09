@@ -30,6 +30,11 @@ DEFAULT_ZOOM: dict[Mode, float] = {"abyss": 1.0, "stygian": 1.18}
 # one of the builds they saved on Enka.
 LIVE_BUILD_NAME = "Live"
 
+# The name a build carries once the slot's "Edit ..." popup has produced it. It
+# needs no uniquifying: a build resolves its own art, so two slots holding a
+# "Custom" build of one character never collide.
+CUSTOM_BUILD_NAME = "Custom"
+
 _UNSAFE_NAME_RUN = re.compile(r"[^A-Za-z0-9._-]+")
 _CACHED_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp"})
 

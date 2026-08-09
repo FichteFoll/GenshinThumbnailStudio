@@ -1,13 +1,14 @@
 """Tests for `genshin_thumbnail_studio.storage`."""
 
 import json
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import cast
 
 import pytest
 
-from genshin_thumbnail_studio.models import Build, Profile
+from genshin_thumbnail_studio.models import CUSTOM_BUILD_NAME, Build, Profile, Project
 from genshin_thumbnail_studio.renderer import STANDARD_ART_SIZE, panel_target_size, resized_art_size
 from genshin_thumbnail_studio.storage import (
     app_data_dir,
@@ -19,6 +20,7 @@ from genshin_thumbnail_studio.storage import (
     profile_cache_path,
     save_last_profile,
     save_profile_cache,
+    save_project,
     settings_path,
 )
 
@@ -235,3 +237,31 @@ def test_load_presets_migrates_legacy_focal_points(tmp_path: Path, monkeypatch: 
 
     # Already migrated entries are passed through untouched.
     assert presets["abyss|costume-3"] == legacy["abyss|costume-3"]
+
+
+def test_a_custom_build_survives_the_project_file(tmp_path: Path) -> None:
+    """R9: a slot's own edited build reopens with the file, art and badges intact.
+
+    It needs no field of its own to do so: it is the placement's snapshot like
+    any other build, so the format that already carries a snapshot carries this.
+    """
+    project = Project.blank(uid="700000042")
+    custom = replace(
+        make_build("Furina"),
+        build_name=CUSTOM_BUILD_NAME,
+        build_id="",
+        constellation=6,
+        refinement=5,
+        costume_id="200301",
+        art_url="https://enka.network/ui/UI_Costume_FurinaCostumeSummer.png",
+    )
+    member = project.teams[0][0]
+    member.name = "Furina"
+    member.build = custom
+    path = tmp_path / "project.json"
+
+    save_project(project, path)
+    reopened = load_project(path).teams[0][0]
+
+    assert reopened.build == custom
+    assert json.loads(path.read_text(encoding="utf-8"))["schemaVersion"] == 4
