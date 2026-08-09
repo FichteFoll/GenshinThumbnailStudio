@@ -24,11 +24,14 @@ resolved relative to the working directory rather than the app data dir.
 on the library's asset manager before the first client starts,
 which is the only way to move it.
 
-**The live build comes from the showcase, not from the builds endpoint's `live: true` entries.**
+**The live build comes from the showcase, not from the builds endpoint's `live: true` entries, but only when a showcase was actually reachable.**
 The saved-builds endpoint marks entries the user snapshotted
 the last time they pressed "refresh" on enka.network, which may be arbitrarily old.
 `fetch_showcase(uid)` is genuinely current, so that is what becomes the build
 named `"Live"`, and `live: true` entries from the builds endpoint are dropped as duplicates.
+A profile whose UID is not public has no showcase to fetch, though,
+and there the builds endpoint's `live: true` entries are the only live data available,
+so they become the `"Live"` build instead of being dropped.
 
 **The downloaded-art dict is keyed by character *and* build.**
 Two stygian bosses can use different builds of one character,

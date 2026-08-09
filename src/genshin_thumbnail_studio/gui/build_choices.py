@@ -36,6 +36,13 @@ def build_choices(profile_builds: list[Build], stored: Build | None) -> list[Bui
     profile no longer offers is appended rather than dropped, and one whose
     details drifted away from the live build of the same name is offered beside
     it, so that neither the project's framing nor the current build is lost.
+    Exactly those choices that carry the snapshot itself are labelled with a
+    trailing `" (project)"`; every choice carrying one of the profile's own
+    `Build`s keeps its bare `build_name`, including the merged entry whose
+    details match the snapshot, which carries the profile's fresher `Build` and
+    is indistinguishable from it. The suffix is display-only: the `Build`
+    behind a labelled choice keeps its unsuffixed `build_name`, so the suffix
+    can never reach a saved project file.
     """
     if stored is None:
         # The profile lists the live build first, so the first entry is the default.
@@ -52,12 +59,16 @@ def build_choices(profile_builds: list[Build], stored: Build | None) -> list[Bui
             continue
         matched = True
         if build.details() == stored.details():
+            # No "(project)" suffix here: the entry carries the profile's own
+            # Build, and `resolve_build()` writes the profile's live build onto
+            # the placement on every load, so an identical snapshot cannot be
+            # told apart from having no snapshot at all.
             choices.append(BuildChoice(build.build_name, build, True))
             continue
         choices.append(BuildChoice(f"{build.build_name} (project)", stored, True))
-        choices.append(BuildChoice(f"{build.build_name} (live)", build, False))
+        choices.append(BuildChoice(build.build_name, build, False))
     if not matched:
-        choices.append(BuildChoice(stored.build_name, stored, True))
+        choices.append(BuildChoice(f"{stored.build_name} (project)", stored, True))
     return choices
 
 

@@ -13,7 +13,7 @@ import copy
 from typing import Protocol
 
 from PySide6.QtCore import QObject
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import QComboBox, QLabel, QLayout, QMenu, QVBoxLayout
 
 from ..models import Build, Placement
@@ -202,7 +202,8 @@ class TeamFieldsController(QObject):
         self.refresh_build_buttons()
 
     def refresh_build_buttons(self) -> None:
-        """Offer the arrow only where there is a build list behind it.
+        """Offer the arrow only where there is a build list behind it, and
+        caption it with the selected build.
 
         Which builds a slot has follows its character, so this has to run
         wherever a slot's name changes, not just when the profile arrives.
@@ -211,6 +212,8 @@ class TeamFieldsController(QObject):
             for slot_index, slot_widget in enumerate(row):
                 choices = self._build_choices(team_index, slot_index)
                 slot_widget.build_button.setEnabled(len(choices) > 0)
+                selected = next((choice for choice in choices if choice.selected), None)
+                slot_widget.set_build_caption(selected.label if selected else "")
 
     def _build_choices(self, team: int, slot: int) -> list[BuildChoice]:
         member = self._editor.project.teams[team][slot]
@@ -227,15 +230,27 @@ class TeamFieldsController(QObject):
         actually displays it.
         """
         menu = QMenu()
+        # Exactly one build can be selected, and an exclusive action group is
+        # what makes Qt draw the entries with radio indicators instead of
+        # check boxes. Parented to the menu so it outlives this call.
+        group = QActionGroup(menu)
+        group.setExclusive(True)
         for choice in self._build_choices(team, slot):
             action = QAction(choice.label, menu)
             action.setCheckable(True)
             action.setChecked(choice.selected)
             action.triggered.connect(
-                lambda _checked=False, build=choice.build: self._editor.build_selected(team, slot, build)
+                lambda _checked=False, build=choice.build: self._select_build(team, slot, build)
             )
+            group.addAction(action)
             menu.addAction(action)
         return menu
+
+    def _select_build(self, team: int, slot: int, build: Build) -> None:
+        # The editor answers a selection with `sync_controls()`, which does not
+        # touch the team fields, so the new caption has to be set from here.
+        self._editor.build_selected(team, slot, build)
+        self.refresh_build_buttons()
 
     def show_build_menu(self, team: int, slot: int) -> None:
         slot_widget = self.slot_widgets[team][slot]

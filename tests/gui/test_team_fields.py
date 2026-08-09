@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 import pytest
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
+from genshin_thumbnail_studio.gui import team_slots
 from genshin_thumbnail_studio.gui.history import HistoryController
 from genshin_thumbnail_studio.gui.team_fields import TeamFieldsController
 from genshin_thumbnail_studio.models import LIVE_BUILD_NAME, Asset, Build, Project
@@ -125,6 +126,46 @@ def test_typing_a_character_enables_its_build_button(host: Host) -> None:
     host.controller.combos[0][2].setCurrentText("Furina")
 
     assert slot_widget.build_button.isEnabled() is True
+
+
+def test_the_menus_actions_share_one_exclusive_action_group(host: Host) -> None:
+    """R6: Qt draws an action's menu entry as a radio button, not a check box,
+    exactly when its action group is exclusive."""
+    menu = host.controller.build_menu(0, 0)
+    actions = menu.actions()
+
+    groups = {action.actionGroup() for action in actions}
+    assert len(groups) == 1
+    group = groups.pop()
+    assert group is not None
+    assert group.isExclusive() is True
+    assert sum(action.isChecked() for action in actions) == 1
+
+
+def test_the_build_button_captions_the_selected_build(host: Host) -> None:
+    """R5: the button beside the combo names the build the slot is framed with."""
+    assert host.controller.slot_widgets[0][0].build_button.text() == LIVE_BUILD_NAME
+    assert host.controller.slot_widgets[0][1].build_button.text() == ""
+
+
+def test_every_build_button_has_the_same_width(host: Host) -> None:
+    """R5: every button is pinned to one width, captioned or not, so that the
+    combos beside them end at one edge instead of raggedly following captions."""
+    widths = {
+        widget.build_button.width() for row in host.controller.slot_widgets for widget in row
+    }
+
+    assert widths == {team_slots.BUILD_BUTTON_WIDTH}
+
+
+def test_selecting_a_build_updates_the_button_caption(host: Host) -> None:
+    """R5: the caption follows a fresh selection, which the editor's own
+    `sync_controls()` does not refresh."""
+    menu = host.controller.build_menu(0, 0)
+
+    menu.actions()[1].trigger()
+
+    assert host.controller.slot_widgets[0][0].build_button.text() == "Bow DPS"
 
 
 def test_reordering_slots_moves_the_build_buttons_with_them(host: Host) -> None:
