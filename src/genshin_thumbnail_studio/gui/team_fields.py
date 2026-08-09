@@ -13,9 +13,11 @@ import copy
 from typing import Protocol
 
 from PySide6.QtCore import QObject
-from PySide6.QtWidgets import QComboBox, QLabel, QLayout, QVBoxLayout
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QComboBox, QLabel, QLayout, QMenu, QVBoxLayout
 
-from ..models import Placement
+from ..models import Build, Placement
+from .build_choices import BuildChoice, build_choices
 from .history import HistoryController
 from .state import EditorState
 from .team_slots import TeamSlotWidget
@@ -50,6 +52,7 @@ class TeamFieldsEditor(EditorState, Protocol):
     def member_changed(self, team: int, slot: int, name: str) -> None: ...
     def sync_controls(self) -> None: ...
     def schedule_render(self) -> None: ...
+    def build_selected(self, team: int, slot: int, build: Build) -> None: ...
 
 
 class TeamFieldsController(QObject):
@@ -71,6 +74,7 @@ class TeamFieldsController(QObject):
         self._layout = layout
         self._history = history
         self.combos: list[list[QComboBox]] = []
+        self.slot_widgets: list[list[TeamSlotWidget]] = []
         self._drag_snapshot: list[list[Placement]] | None = None
         self._drag_position: tuple[int, int] | None = None
 
@@ -84,6 +88,7 @@ class TeamFieldsController(QObject):
         team_layout = self._layout
         clear_layout(team_layout)
         self.combos = []
+        self.slot_widgets = []
         for team_index, team in enumerate(project.teams):
             title = QLabel(f"{'Team' if project.mode == 'abyss' else 'Boss'} {team_index + 1}")
             title.setStyleSheet("font-weight: 600;")
@@ -91,6 +96,7 @@ class TeamFieldsController(QObject):
             rows = QVBoxLayout()
             rows.setSpacing(4)
             row_combos: list[QComboBox] = []
+            row_widgets: list[TeamSlotWidget] = []
             for slot_index, member in enumerate(team):
                 combo = QComboBox()
                 combo.setEditable(True)
@@ -101,16 +107,21 @@ class TeamFieldsController(QObject):
 
                 def on_text_changed(value: str, t: int = team_index, s: int = slot_index) -> None:
                     self._editor.member_changed(t, s, value)
+                    # The new character has builds of its own, or none at all.
+                    self.refresh_build_buttons()
 
                 combo.currentTextChanged.connect(on_text_changed)
                 slot_widget = TeamSlotWidget(team_index, slot_index, combo)
                 slot_widget.drag_started.connect(self.on_drag_started)
                 slot_widget.drag_hover.connect(self.on_drag_hover)
                 slot_widget.drag_ended.connect(self.on_drag_ended)
+                slot_widget.build_menu_requested.connect(self.show_build_menu)
                 rows.addWidget(slot_widget)
                 row_combos.append(combo)
+                row_widgets.append(slot_widget)
             team_layout.addLayout(rows)
             self.combos.append(row_combos)
+            self.slot_widgets.append(row_widgets)
         team_layout.addStretch(1)
         self.populate_items()
 
@@ -122,6 +133,9 @@ class TeamFieldsController(QObject):
                     combo.blockSignals(True)
                     combo.setCurrentText(name)
                     combo.blockSignals(False)
+        # The names moved with their slots, and the signals were blocked, so
+        # the arrows have to follow them by hand.
+        self.refresh_build_buttons()
 
     def on_drag_started(self, team: int, slot: int) -> None:
         # Settle any edit still pending from before the drag, so its debounce
@@ -185,3 +199,45 @@ class TeamFieldsController(QObject):
                 combo.addItems(names)
                 combo.setCurrentText(current)
                 combo.blockSignals(False)
+        self.refresh_build_buttons()
+
+    def refresh_build_buttons(self) -> None:
+        """Offer the arrow only where there is a build list behind it.
+
+        Which builds a slot has follows its character, so this has to run
+        wherever a slot's name changes, not just when the profile arrives.
+        """
+        for team_index, row in enumerate(self.slot_widgets):
+            for slot_index, slot_widget in enumerate(row):
+                choices = self._build_choices(team_index, slot_index)
+                slot_widget.build_button.setEnabled(len(choices) > 0)
+
+    def _build_choices(self, team: int, slot: int) -> list[BuildChoice]:
+        member = self._editor.project.teams[team][slot]
+        if not member.name:
+            return []
+        profile_builds = self._editor.builds.get(member.name.casefold(), [])
+        return build_choices(profile_builds, member.build)
+
+    def build_menu(self, team: int, slot: int) -> QMenu:
+        """The checkable actions for one slot's build dropdown.
+
+        Returns the menu rather than popping it up, so tests can assert its
+        contents without a running event loop; `show_build_menu()` is what
+        actually displays it.
+        """
+        menu = QMenu()
+        for choice in self._build_choices(team, slot):
+            action = QAction(choice.label, menu)
+            action.setCheckable(True)
+            action.setChecked(choice.selected)
+            action.triggered.connect(
+                lambda _checked=False, build=choice.build: self._editor.build_selected(team, slot, build)
+            )
+            menu.addAction(action)
+        return menu
+
+    def show_build_menu(self, team: int, slot: int) -> None:
+        slot_widget = self.slot_widgets[team][slot]
+        menu = self.build_menu(team, slot)
+        menu.exec(slot_widget.build_button.mapToGlobal(slot_widget.build_button.rect().bottomLeft()))
