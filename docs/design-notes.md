@@ -33,19 +33,56 @@ A profile whose UID is not public has no showcase to fetch, though,
 and there the builds endpoint's `live: true` entries are the only live data available,
 so they become the `"Live"` build instead of being dropped.
 
-**The downloaded-art dict is keyed by character *and* build.**
-Two stygian bosses can use different builds of one character,
-which means different weapon icons and possibly a different skin,
-so a key of the bare character name would let one slot's asset
-overwrite or be served to the other's.
+**A build resolves its own art; there is no asset dict.**
+`Build.art_path(root)`/`Build.weapon_path(root)` derive a slot's cached files
+from nothing but the build and an art root,
+because those paths were always a pure function of the build:
+its name, its art URL and its weapon URL, run through one hash each.
+A stored key was never the real identity, only a stand-in for that derivation,
+and the stand-in was wrong: the old `Build.key` was character plus bare
+build name, and two builds of one character can share a `build_name`
+while differing in weapon or constellation, which `build_choices()`
+deliberately offers as two separate menu entries and the old key collided on.
+The key had to become content-derived to be correct at all,
+and a path derived from the art and weapon URLs *is* that content identity,
+for free, identifying the very object the code looks up
+rather than naming it and hoping the name is unique.
 
-**That key travels on the `Placement` as `asset_key`, rather than being resolved where it is needed.**
-The renderer never sees the editor's `builds` map,
-so it cannot turn a bare character name into "whichever build this slot has selected".
-The editor therefore assigns `Placement.build` eagerly, as soon as a build is resolvable,
-and both sides read the one key off it.
-The panel render cache keys on `asset_key` for the same reason:
-without it, two builds of one character would serve each other's cached panel.
+**`Placement.build` is the only join key a slot needs.**
+The old `Asset` dataclass paired a fetched `Build` with its downloaded paths,
+kept separately from the `Build` a `Placement` was framed with.
+The renderer read the C/R text, the rarity colours and the element off
+`Asset.build`, while a slot's framing came from `Placement.build`;
+nothing enforced the two agreeing, which is how a slot could end up
+drawing another slot's badges. With one `Build` per slot and no second
+copy travelling through a dict, that disagreement cannot arise;
+the panel and badge render caches key on the derived path itself
+(`str(art_path)`, `str(weapon_path)`) rather than on a name,
+for the same reason a stand-in name was wrong above.
+
+**Existence now means "downloaded and validated."**
+The old in-memory dict provided that guarantee implicitly:
+a slot only learned of its art after `on_asset` fired for it,
+so the renderer never opened a file that was still being written.
+A derived path has no such gate on its own, so publication has to be atomic:
+`download_assets()` downloads to a temp file beside the destination,
+validates it there (the same dimension and format checks as before),
+then `os.replace()`s it onto the destination. A failed or interrupted
+download leaves nothing at the final path and any previous file untouched,
+so "the file exists" is always "the file is complete and valid".
+
+**The file naming scheme is unchanged.**
+`{safe(build.name)}-{sha256(url)[:16]}{ext}` is kept exactly as it was,
+including the human-readable name segment,
+which is not needed for uniqueness (the URL digest already carries that)
+but whose removal would orphan every user's existing cache
+and cost a full re-download for no gain.
+
+**Deduplicating downloads moved from `Build.key` to the URL pair.**
+What actually determines whether two builds need one download or two
+is `(build.art_url, build.weapon_url)`, not their names or a name-based key.
+`Build` is mutable and therefore unhashable, so the in-flight set holds
+that tuple rather than the build itself.
 
 ## `renderer/`
 
@@ -185,7 +222,7 @@ The window's `HistoryController` is a third constructor argument,
 which `open()` alone uses,
 and passing it keeps `MainWindow._history` private.
 Capturing those three objects is safe;
-capturing `project`, `builds` or `assets` off the editor is not,
+capturing `project`, `builds` or `art_root` off the editor is not,
 for the reason "Collaborators read state freshly" gives below.
 
 `ProfileLoader` mirrors that shape for profile fetching and lineup entry:
@@ -252,7 +289,7 @@ There is no "Generate preview" button and no blocking download on the GUI thread
 `schedule_render()` starts its throttle timer whether or not any art has been downloaded,
 `__init__` schedules the first render itself,
 and `_mode_changed` schedules one instead of blanking the canvas,
-so a slot without a downloaded `Asset` renders as `placeholder_panel()`
+so a slot whose art has not yet been downloaded renders as `placeholder_panel()`
 and the window always shows something.
 
 The window owns an `AssetLoader` sharing its thread pool.
@@ -276,7 +313,12 @@ it starts `asset_loader.ensure()` and asks the user to retry.
 
 `_filled_slots()` returns the `(team, slot)` pairs
 whose member name is non-empty
-and whose resolved build's `key` is in `self.assets`.
+and whose resolved build's art file exists under `self.art_root`.
+It asks about the art alone, the same file `render_image()` decides a panel on,
+so the controls are enabled exactly when a portrait is on screen.
+`ProjectFiles._every_named_slot_has_its_files()` deliberately asks for more,
+the art *and* the weapon icon,
+because an export must not write a thumbnail whose badge is missing.
 `sync_controls()` passes it to `PreviewWidget.set_context()`
 and enables or disables the X/Y/zoom sliders, the flip check and the reset button
 on whether the selection is in it.
@@ -369,13 +411,13 @@ and a cancelled drag would then leave the reorder it just reverted one `Ctrl+Z` 
 Every collaborator
 (`PlacementController`, `PresetStore`, `AssetLoader`, `HistoryController`,
 `TeamFieldsController`, `RenderPipeline`, `ProjectFiles` and `ProfileLoader`)
-reads the window's `project`/`builds`/`assets` through `EditorState` on *every* call
+reads the window's `project`/`builds`/`art_root` through `EditorState` on *every* call
 instead of capturing them at construction,
 because `_mode_changed`, `project_io.ProjectFiles.open`, `load_profile` and `member_changed`
 all replace those attributes wholesale.
 A captured reference would go stale,
-and a stale `assets` would silently fall back to `STANDARD_ART_SIZE`
-and compute the wrong offset bounds.
+and a stale `art_root` would silently resolve a slot's art from the wrong
+cache directory and fall back to `STANDARD_ART_SIZE` when it does not find it there.
 
 `MAX_ZOOM` in `placement.py` *is* the renderer's `MAX_PLACEMENT_ZOOM`,
 not a copy of its value,

@@ -39,7 +39,9 @@ because that is where a `monkeypatch.setattr()` has to land to take effect.
 
 - `Build` — a parsed Enka character build,
   either the live showcase build or one of a profile's saved builds.
-- `Asset` — a `Build` plus downloaded local file paths.
+  It also resolves its own cached files: `art_path(root)` and `weapon_path(root)`
+  derive the character art and weapon icon paths under an art root
+  from nothing but the build's own name and URLs.
 - `Placement` — per-character position/zoom/color/flip in the layout,
   plus the `Build` it was framed with.
 - `Profile` — the result of loading an identifier: its UID and username,
@@ -53,23 +55,23 @@ Facts that the rest of the app depends on:
   zero meaning centered,
   positive meaning the portrait moves right/down.
   `flip` mirrors the character art horizontally.
-- `Placement.asset_key`, which is the selected `Build.key`, is the join key
-  back to the `Asset` dict; `Placement.name` only names the character.
+- `Placement.build` is the single source of truth for a slot's art,
+  and the only join key a slot needs: `Placement.name` only names the character.
   A `Project` file therefore encodes placements, colors and the build's details,
   not the fetched art,
   so re-opening a project requires re-fetching from Enka.
-- `Build.key` (`f"{name.casefold()}|{build_name.casefold()}"`)
-  is what the downloaded-art dict is keyed by,
-  so two slots holding different builds of one character
-  do not share a weapon icon or a skin.
   `Build.details()` is the four user-visible fields
   (costume id, weapon name, constellation, refinement)
   a project's snapshotted build is compared against a live one by.
-- `Placement.build` is the single source of truth for a slot's art.
-  The renderer takes only a `Project` and the `Asset` dict,
+- `Build.art_path(root)`/`Build.weapon_path(root)` are a pure function
+  of the build and the root, so two slots holding different builds of one
+  character never share a weapon icon or a skin, and two builds that are
+  otherwise identical but differ in weapon or constellation still resolve
+  to different files, which a name-based key could not tell apart.
+  The renderer takes only a `Project` and that same art root,
   never the editor's `builds` map,
-  so it resolves art through `Placement.asset_key` alone
-  (`Placement.build.key` when a build is set, `""` otherwise).
+  so it resolves each slot's art through `Placement.build` alone,
+  calling those two methods directly.
   That is why the editor assigns `Placement.build`
   as soon as a build is resolvable, rather than resolving one where it is needed.
 - `Project.profile_name` and `Project.identifier`
@@ -128,9 +130,13 @@ All network interaction with Enka Network, over the `enka` PyPI package.
   and returns a `Profile`.
   `redirect_asset_files()` rewrites the third-party library's private,
   CWD-relative asset paths before the first client starts.
-- `assets.py` — `download_assets()`,
+- `assets.py` — `download_assets(builds, root, progress=None, on_build=None)`,
   downloading and validating (dimension/format checks) character art and weapon icons
-  into a local cache dir, keyed by `Build.key`.
+  to the paths each `Build` derives from `root`,
+  publishing each file atomically (a validated temp file, then `os.replace()`)
+  so a file only ever exists at its final path once it is complete,
+  and calling `on_build(build)` once both of a build's files are published.
+  It returns `None`: there is nothing left to key, since the paths are the identity.
 
 Only `client.py` imports the third-party `enka` package,
 and it imports it as `enka_api`:
@@ -157,23 +163,47 @@ Pure Pillow-based image compositing, no Qt or network dependency.
   `panel_metrics()`, `panel_target_size()`, `panel_origin()`, `panel_polygon()`,
   `cover_scale()`, `scaled_size()`, `resized_art_size()`,
   `offset_limits()`, `zoom_offset_limits()`, `max_offset()`.
-- `colors.py` — the element and rarity palettes and the card color lookup.
+- `colors.py` — the element and rarity palettes and the card color lookup:
+  `card_color(member)` reads `member.build.element` when there is a build
+  with a known element, falling back to the placement's own `color` otherwise.
 - `coverage.py` — the antialiasing primitives Pillow's `ImageDraw` lacks,
   around `GEOMETRY_SUPERSAMPLE`.
 - `cache.py` — `CacheKey`, the seven bounded LRU caches with their `*_CACHE_MAX` bounds,
   the lock guarding them, `cache_get()`, `cache_put()`, `clear_render_cache()`.
 - `art.py` — decoding, resizing and cropping the source art:
   `MAX_PLACEMENT_ZOOM`, `GLOW_ZOOM_FACTOR`, `glow_zoom()`, `art_pixel_size()`,
-  `source_art()`, `cover_resize_offset()`, `panel_art()`.
+  `source_art(art_path, target, zoom, scale)`, `cover_resize_offset()`, `panel_art()`.
+  The cache keys on `str(art_path)`, which is already the derived, content-identified path.
 - `panels.py` — one character panel end to end:
-  `GLOW_DOWNSCALE`, `panel_background()`, `apply_panel_mask()`, `make_panel()`,
-  `placeholder_panel()`, `add_card_borders()`.
-- `badges.py` — the C/R and weapon badges: `find_font()`, `BadgeGeometry`, `add_badges()`.
+  `GLOW_DOWNSCALE`, `panel_background()`, `apply_panel_mask()`,
+  `make_panel(width, member, art_path, index, row, num_rows, row_height, step, slant, scale, compact)`,
+  `placeholder_panel()`,
+  `add_card_borders(canvas, teams, row_height, step, slant, scale)`.
+  `make_panel()` calls `source_art(art_path, ...)` and `card_color(member)` directly;
+  neither takes an `Asset` any more.
+- `badges.py` — the C/R and weapon badges: `find_font()`, `BadgeGeometry`,
+  `badge_tile(geometry, build, weapon_path, color, font, scale, compact)`
+  (reading `build.constellation`, `.refinement`, `.rarity`, `.weapon_rarity`
+  directly off the `Build`),
+  `add_badges(canvas, teams, art_root, row_height, step, scale, compact)`,
+  which resolves each member's `build.weapon_path(art_root)` itself.
 - `compose.py` — the whole canvas:
-  `render_image()` builds the slanted-panel team layout at a given integer `scale`
-  and downsamples to 1280x720;
-  `render_preview()` (scale 1) and `export_project()` (scale 2, writes PNGs)
+  `render_image(teams, art_root, compact, scale=1, output_size=..., require_complete=True)`
+  builds the slanted-panel team layout at a given integer `scale`
+  and downsamples to 1280x720, resolving each member's `build.art_path(art_root)`
+  once and passing it down rather than re-deriving or re-checking it;
+  a member is filled when that path is not `None` and exists on disk,
+  and `require_complete` raises for a slot that is not;
+  `render_preview(project, art_root)` (scale 1) and
+  `export_project(project, art_root, directory)` (scale 2, writes PNGs)
   are the GUI's two entry points and both first call `Project.ensure_shape()`.
+  The panel cache key is `str(art_path)` in place of the old
+  `member.asset_key or member.name.casefold()`:
+  the path is the identity now, character and content included.
+  It is `None` for a slot with no art yet,
+  whose placeholder panel depends on nothing but the placement's own color
+  and the geometry, both of which the key already carries.
+  `renderer/` imports no `Asset`; there is none left to import.
 
 Import direction: `cache`, `geometry`, `colors` and `coverage` import nothing from the package;
 `art` imports `geometry` and `cache`;
@@ -263,7 +293,7 @@ and `storage.py` for persistence.
   `ProfileEditor`. `MainWindow` keeps thin `load_profile()`, `paste_teams()`
   and `validate_team()` methods delegating here, the first and third of which
   `project_io.ProjectEditor` requires.
-- `state.py` — the `EditorState` Protocol (`project`, `builds`, `assets`),
+- `state.py` — the `EditorState` Protocol (`project`, `builds`, `art_root`),
   which `MainWindow` satisfies structurally. Must stay Qt-free.
 - `build_choices.py` — Qt-free: `selected_build()`
   (the `Placement.build` snapshot, or the character's first/live build,
@@ -277,7 +307,9 @@ and `storage.py` for persistence.
   including the merged entry whose details match the snapshot,
   which carries the profile's fresher `Build` and is indistinguishable from it.
 - `placement.py` — `MIN_ZOOM`, `MAX_ZOOM` and `PlacementController`:
-  `offset_bounds()`, `pan()`, `zoom_by()`, `reset()`.
+  `offset_bounds()` (reading the member's art size through its build's
+  derived art path when that file exists, `STANDARD_ART_SIZE` otherwise),
+  `pan()`, `zoom_by()`, `reset()`.
 - `presets.py` — `preset_key()`
   (mode plus the costume id or casefolded name, in that fallback order)
   and `PresetStore` on top of `storage.load_presets`/`save_presets`.
@@ -326,8 +358,10 @@ and `storage.py` for persistence.
 - `asset_loader.py` — `AssetJobSignals`, `AssetJob` and `AssetLoader`,
   the background character-art downloads.
   `AssetLoader.ensure()` starts one `AssetJob` for the named members
-  that resolve in `builds` but are neither downloaded nor in flight,
-  and emits `progress`, `asset_ready` and `failed`.
+  that resolve in `builds` but whose `(art_url, weapon_url)` pair is
+  neither already in flight nor already downloaded under `self._root`,
+  and emits `progress`, `asset_ready(build)` (carrying the `Build` that just
+  finished downloading, so nothing needs its paths) and `failed`.
 - `lineup.py` — `parse_lineup()`, splitting pasted lineup text into character names.
 - `history.py` — `HISTORY_LIMIT`, `HISTORY_DEBOUNCE_MS`,
   `PlacementHistory` (Qt-free bounded undo/redo over the teams of `Placement`s)
@@ -376,12 +410,13 @@ UID or username entered in the GUI ->
 `EnkaClient.load_profile` ->
 a `Profile` holding each character's builds, live first ->
 `AssetLoader.ensure()` ->
-`download_assets` on a worker thread ->
-one `asset_ready` per selected build into the `Asset` dict,
-keyed by `Build.key` (character plus build) rather than by name ->
-`render_preview`/`export_project` consume `Project.teams` plus the `Asset` dict
+`download_assets` on a worker thread,
+publishing each build's character art and weapon icon
+to the paths that build derives from the art root ->
+`render_preview`/`export_project` consume `Project.teams` and that same art root,
+each `Placement.build` resolving its own cached files from it,
 to produce images.
 
 Nothing waits for that download:
 the preview renders continuously,
-with a `placeholder_panel()` wherever the `Asset` has not arrived yet.
+with a `placeholder_panel()` wherever a slot's derived file has not arrived yet.
