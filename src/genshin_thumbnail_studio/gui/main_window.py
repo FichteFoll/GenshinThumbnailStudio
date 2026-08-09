@@ -37,13 +37,14 @@ from PySide6.QtWidgets import (
 from ..akasha import AkashaError, AkashaWebClient, Build, StaleProfileError
 from ..models import Asset, Placement, Project
 from ..storage import cache_dir, save_profile_cache
-from . import dialogs, project_io
+from . import dialogs
 from .asset_loader import AssetLoader
 from .history import HistoryController
 from .lineup import parse_lineup
 from .placement import PlacementController
 from .presets import PresetStore
 from .preview import PreviewWidget
+from .project_io import ProjectFiles
 from .render_pipeline import RenderPipeline
 from .style import MAIN_STYLESHEET
 from .team_slots import TeamSlotWidget
@@ -69,6 +70,7 @@ class MainWindow(QMainWindow):
         self._presets = PresetStore.load()
         self._placement = PlacementController(self)
         self._history = HistoryController(self, self, self._history_restored)
+        self.project_files = ProjectFiles(self, self, self._history)
         self.selected = (0, 0)
         self._drag_snapshot: list[list[Placement]] | None = None
         self._drag_position: tuple[int, int] | None = None
@@ -688,7 +690,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(message, 8000)
 
     def export(self) -> None:
-        project_io.export(self, self)
+        self.project_files.export()
 
     def is_dirty(self) -> bool:
         """Whether the project differs from what was last saved, loaded, or started blank."""
@@ -701,10 +703,10 @@ class MainWindow(QMainWindow):
         self._update_save_button()
 
     def save_project(self) -> None:
-        project_io.save_project(self, self)
+        self.project_files.save()
 
     def save_project_as(self) -> None:
-        project_io.save_project_as(self, self)
+        self.project_files.save_as()
 
     def open_project(self) -> None:
-        project_io.open_project(self, self, self._history)
+        self.project_files.open()

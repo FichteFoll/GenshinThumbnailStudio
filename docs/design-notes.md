@@ -77,6 +77,16 @@ The extracted modules take the window, or the state Protocol it satisfies,
 as a parameter rather than importing `MainWindow`,
 which is what keeps the package acyclic.
 
+Every collaborator has the same shape:
+a class taking its parent widget,
+the Protocol object it works on,
+and any collaborator of its own that it needs,
+constructed once in `MainWindow.__init__` and kept there.
+`dialogs.py` is the deliberate exception and stays free functions:
+their parent genuinely varies,
+they hold no state between calls,
+and they are called from the window and the collaborators alike.
+
 `RenderPipeline` owns the throttle timer, the request token
 and the in-flight/stale flags,
 and reports back over `rendered` and `failed`
@@ -89,15 +99,18 @@ restarting the timer on every mouse-move event
 would mean it never fires during a drag.
 (`HistoryController.schedule()` is the debounce, for the opposite reason.)
 
-`project_io`'s functions take the window twice,
+`ProjectFiles` takes the window twice,
 as `parent: QMainWindow` for the dialogs and status bar
 and as `editor: ProjectEditor` for everything else,
 because a Protocol cannot inherit from `QWidget`.
 `ProjectEditor` extends `EditorState` and lives in `project_io.py`
 rather than `state.py`, which is Qt-free and must stay that way.
-`open_project()` additionally takes the window's `HistoryController`,
-since it is that function's alone
+The window's `HistoryController` is a third constructor argument,
+which `open()` alone uses,
 and passing it keeps `MainWindow._history` private.
+Capturing those three objects is safe;
+capturing `project`, `builds` or `assets` off the editor is not,
+for the reason "Collaborators read state freshly" gives below.
 
 ### Actions and the save button
 
@@ -145,7 +158,7 @@ rather than opening a dialog that would interrupt typing.
 `ensure()` must be called wherever the set of named characters or loaded builds can change:
 the success path of `load_profile`,
 the end of `_member_changed` (which is also what `paste_teams` goes through),
-both of `project_io.open_project`'s profile paths,
+both of `project_io.ProjectFiles.open`'s profile paths,
 and `_history_restored()`,
 because an undo can bring back a name whose art `_member_changed` pruned,
 and it writes the combos before their signals are connected.
@@ -205,7 +218,7 @@ Continuous edits (sliders, drag, zoom, flip, per-keystroke `_member_changed`,
 and `_on_asset_ready`, where an arriving asset's preset reframes its member
 outside any edit handler) schedule;
 the discrete `reset_placement` and `_on_slot_drag_ended` `commit_now()`;
-`_mode_changed` and both of `project_io.open_project`'s exits `reset()`,
+`_mode_changed` and both of `project_io.ProjectFiles.open`'s exits `reset()`,
 since they replace `self.project` wholesale
 and an older snapshot would let `Ctrl+Z` resurrect a lineup from a different document.
 
@@ -250,7 +263,7 @@ and a cancelled drag would then leave the reorder it just reverted one `Ctrl+Z` 
 `PlacementController`, `PresetStore`, `AssetLoader` and `HistoryController`
 read the window's `project`/`builds`/`assets` through `EditorState` on *every* call
 instead of capturing them at construction,
-because `_mode_changed`, `project_io.open_project`, `load_profile` and `_member_changed`
+because `_mode_changed`, `project_io.ProjectFiles.open`, `load_profile` and `_member_changed`
 all replace those attributes wholesale.
 A captured reference would go stale,
 and a stale `assets` would silently fall back to `STANDARD_ART_SIZE`
@@ -270,5 +283,8 @@ The `QFileDialog` calls live in `project_io.py`,
 so the tests name that module instead
 (`monkeypatch.setattr(project_io.QFileDialog, "getSaveFileName", ...)`);
 the patch lands on `QFileDialog`'s class attribute either way.
-This is also why `main_window` imports both as modules
-rather than importing their functions by name.
+This is also why `main_window` imports `dialogs` as a module
+rather than importing its functions by name.
+From `project_io` it may import `ProjectFiles` by name instead,
+because that patch lands on `QFileDialog` itself
+rather than on an attribute of the module.

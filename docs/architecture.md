@@ -157,11 +157,13 @@ and `storage.py` for persistence.
   `confirm_discard_changes()`, `choose_stale_profile_action()`, `confirm_cache_refresh()`,
   `show_error()`, `show_export_finished()`, `ask_lineup_text()`, `ask_export_target()`.
   They return the user's choice rather than acting on it.
-- `project_io.py` — `save_project()`, `save_project_as()`, `open_project()`, `export()`
-  as free functions, plus the `ProjectEditor` Protocol they take.
-  `MainWindow` keeps thin same-named methods delegating here,
-  so every caller and test still goes through the window;
-  these functions are deliberately not in `gui/__init__.py`'s `__all__`.
+- `project_io.py` — `ProjectFiles` (`save()`, `save_as()`, `open()`, `export()`)
+  plus the `ProjectEditor` Protocol it works through.
+  Constructed once in `MainWindow.__init__` with the window, the window as
+  `ProjectEditor`, and the window's `HistoryController`.
+  `MainWindow` keeps thin `save_project()`, `save_project_as()`, `open_project()`
+  and `export()` methods delegating here,
+  so every caller and test still goes through the window.
 - `state.py` — the `EditorState` Protocol (`project`, `builds`, `assets`),
   which `MainWindow` satisfies structurally. Must stay Qt-free.
 - `placement.py` — `MIN_ZOOM`, `MAX_ZOOM` and `PlacementController`:
@@ -210,7 +212,7 @@ and reaches `Project` through `..models`;
 and reaches `..models`, `..storage` and `..renderer` outside the package;
 `main_window` imports every sibling except `state`,
 which it satisfies structurally rather than importing,
-and reaches `dialogs` and `project_io` as modules (`from . import dialogs, project_io`);
+and reaches `dialogs` as a module (`from . import dialogs`);
 `app` imports `main_window`.
 
 ## Data flow
