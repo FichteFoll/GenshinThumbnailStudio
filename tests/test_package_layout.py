@@ -55,6 +55,7 @@ EXPECTED_MODULES = {
     "gui/profile_io.py",
     "gui/state.py",
     "gui/build_choices.py",
+    "gui/build_editor.py",
     "gui/placement.py",
     "gui/presets.py",
     "gui/preview.py",
