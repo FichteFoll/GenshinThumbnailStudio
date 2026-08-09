@@ -5,6 +5,11 @@ keeps the combos in step with the project's teams, and turns a drag gesture over
 them into a reorder plus exactly one undo step. Nothing here imports
 `MainWindow`: what the controller needs from the editor is spelled out by the
 `TeamFieldsEditor` Protocol below, which `MainWindow` satisfies structurally.
+
+The build dropdown ends in an "Edit ..." item, which opens the build editor over
+the build the slot is framed with. Opening the popup is this controller's, the
+way `profile_io` and `project_io` open theirs; the catalog it needs and the
+write its answer causes are the editor's, reached through the Protocol.
 """
 
 from __future__ import annotations
@@ -16,8 +21,10 @@ from PySide6.QtCore import QObject
 from PySide6.QtGui import QAction, QActionGroup
 from PySide6.QtWidgets import QComboBox, QLabel, QLayout, QMenu, QVBoxLayout
 
-from ..models import Build, Placement
+from ..enka import Catalog
+from ..models import CUSTOM_BUILD_NAME, Build, Placement
 from .build_choices import BuildChoice, build_choices
+from .build_editor import ask_custom_build
 from .history import HistoryController
 from .state import EditorState
 from .team_slots import TeamSlotWidget
@@ -53,6 +60,11 @@ class TeamFieldsEditor(EditorState, Protocol):
     def sync_controls(self) -> None: ...
     def schedule_render(self) -> None: ...
     def build_selected(self, team: int, slot: int, build: Build) -> None: ...
+    def catalog(self) -> Catalog: ...
+
+
+# The trailing ellipsis is Qt's convention for a menu item that opens a dialog.
+EDIT_ACTION_TEXT = "Edit ..."
 
 
 class TeamFieldsController(QObject):
@@ -244,7 +256,32 @@ class TeamFieldsController(QObject):
             )
             group.addAction(action)
             menu.addAction(action)
+        # Outside the group and not checkable: a command, not one more build the
+        # slot could be framed with. Only offered where there is a build to seed
+        # the popup from, which is the same condition the arrow is enabled under.
+        if menu.actions():
+            menu.addSeparator()
+            edit_action = QAction(EDIT_ACTION_TEXT, menu)
+            edit_action.triggered.connect(lambda _checked=False: self._edit_build(team, slot))
+            menu.addAction(edit_action)
         return menu
+
+    def _edit_build(self, team: int, slot: int) -> None:
+        """Edit the slot's current build in the popup, and adopt what it answers.
+
+        The popup is seeded with the build the slot is framed with, so an edit
+        starts from what the user is looking at, and what it answers is adopted
+        exactly the way picking an entry of the menu is: the result is the
+        slot's build, and the one it was based on stays in the menu beside it.
+        """
+        choices = self._build_choices(team, slot)
+        if not choices:
+            return
+        source = next((choice.build for choice in choices if choice.selected), choices[0].build)
+        build = ask_custom_build(self.slot_widgets[team][slot], source, self._editor.catalog(), CUSTOM_BUILD_NAME)
+        if build is None:
+            return
+        self._select_build(team, slot, build)
 
     def _select_build(self, team: int, slot: int, build: Build) -> None:
         # The editor answers a selection with `sync_controls()`, which does not
