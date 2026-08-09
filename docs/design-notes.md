@@ -70,16 +70,32 @@ and intercept a render already in flight.
 
 ### Decomposition
 
-`main_window.py` was reduced by moving the blocking dialogs to `dialogs.py`,
-the project file flows to `project_io.py`,
-profile loading and lineup entry to `profile_io.py`,
-the throttled preview loop to `render_pipeline.py`,
-the team slot fields and their drag reordering to `team_fields.py`,
-and the two columns of the layout
-to `controls_panel.py` and `editor_panel.py`.
-The extracted modules take the window, or the state Protocol it satisfies,
+`main_window.py` is the window and little else:
+the splitter holding the two panels,
+the selection and placement handlers,
+the asset-arrival handlers, the close sequence,
+and thin delegates to the collaborators.
+Everything else it used to hold lives in a module of its own:
+the two columns of the layout in `controls_panel.py` and `editor_panel.py`,
+the blocking dialogs in `dialogs.py`,
+the project file flows in `project_io.py`,
+profile loading and lineup entry in `profile_io.py`,
+the project actions and the save button's two faces in `actions.py`,
+the throttled preview loop in `render_pipeline.py`,
+and the team slot fields with their drag reordering in `team_fields.py`.
+All of them take the window, or the Protocol it satisfies,
 as a parameter rather than importing `MainWindow`,
 which is what keeps the package acyclic.
+
+The delegates that remain on the window are not compat shims.
+`schedule_render()`, `rebuild_team_fields()`, `populate_combo_items()`,
+`load_profile()`, `validate_team()`, `save_project()`, `save_project_as()`,
+`open_project()` and `export()` are the contract
+`project_io.ProjectEditor` requires,
+and `dialogs.confirm_discard_changes()` takes `save_project` as a callback.
+Widget access is not delegated:
+`ProjectEditor`, `ProfileEditor` and the tests
+reach every widget through `controls_panel` or `editor_panel`.
 
 Every collaborator has the same shape:
 a class taking its parent widget,
@@ -96,8 +112,6 @@ and the in-flight/stale flags,
 and reports back over `rendered` and `failed`
 rather than writing to the preview or the status bar itself,
 so it needs no widget at all.
-`MainWindow.schedule_render()` is a one-line delegate to it,
-kept because `project_io.ProjectEditor` requires the method.
 Its throttle is deliberately not a debounce:
 restarting the timer on every mouse-move event
 would mean it never fires during a drag.
@@ -134,10 +148,8 @@ and fills the `team_layout` `ControlsPanel` hands it,
 so the panel describes the column's shape and the controller its contents.
 It takes the `HistoryController` as a constructor argument
 for the same reason `ProjectFiles` does,
-because the drag handlers commit through it;
-`MainWindow` keeps `rebuild_team_fields()` and `populate_combo_items()`
-as one-line delegates, both required by `project_io.ProjectEditor`,
-and `_member_changed` became the public `member_changed`
+because the drag handlers commit through it.
+`MainWindow.member_changed()` is public rather than private
 so the window satisfies the `TeamFieldsEditor` Protocol.
 
 `ProjectFiles` takes the window twice,
@@ -157,8 +169,6 @@ for the reason "Collaborators read state freshly" gives below.
 it takes the window twice, as `parent: QMainWindow` and as `editor: ProfileEditor`,
 for the same reason `ProjectFiles` does, and needs no `HistoryController`,
 since none of `load()`, `paste_lineup()` or `validate_team()` touch undo history.
-`MainWindow` keeps `load_profile()`, `paste_teams()` and `validate_team()`
-as one-line delegates, the first and third of which `project_io.ProjectEditor` requires.
 `validate_team()` puts up no dialog itself: it raises `ValueError` on a name
 the loaded profile does not resolve, and its callers
 (`project_io.ProjectFiles._write_project`/`export`) decide what to do with that.
@@ -169,7 +179,7 @@ All of this lives in `actions.py` as `ProjectActions`,
 constructed once in `MainWindow.__init__` with the window
 and the window as `ProjectActionHost`,
 the shape the other collaborators have.
-It is built after `_build_ui()` on purpose:
+It is built after the layout on purpose:
 having the panels already there is what lets `bind_buttons()`
 wire the buttons in one call,
 instead of forcing the actions to exist before the buttons do.
@@ -333,9 +343,10 @@ and a cancelled drag would then leave the reorder it just reverted one `Ctrl+Z` 
 
 ### Collaborators read state freshly
 
-`PlacementController`, `PresetStore`, `AssetLoader`, `HistoryController`
-and `TeamFieldsController`
-read the window's `project`/`builds`/`assets` through `EditorState` on *every* call
+Every collaborator
+(`PlacementController`, `PresetStore`, `AssetLoader`, `HistoryController`,
+`TeamFieldsController`, `RenderPipeline`, `ProjectFiles` and `ProfileLoader`)
+reads the window's `project`/`builds`/`assets` through `EditorState` on *every* call
 instead of capturing them at construction,
 because `_mode_changed`, `project_io.ProjectFiles.open`, `load_profile` and `member_changed`
 all replace those attributes wholesale.

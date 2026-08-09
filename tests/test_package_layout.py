@@ -41,6 +41,7 @@ EXPECTED_MODULES = {
     "renderer/panels.py",
     "renderer/badges.py",
     "renderer/compose.py",
+    # In the order docs/architecture.md's `gui/` list describes them.
     "gui/__init__.py",
     "gui/app.py",
     "gui/style.py",
@@ -48,18 +49,18 @@ EXPECTED_MODULES = {
     "gui/actions.py",
     "gui/controls_panel.py",
     "gui/editor_panel.py",
-    "gui/asset_loader.py",
+    "gui/dialogs.py",
     "gui/project_io.py",
     "gui/profile_io.py",
-    "gui/dialogs.py",
     "gui/state.py",
     "gui/placement.py",
     "gui/presets.py",
     "gui/preview.py",
-    "gui/team_fields.py",
     "gui/team_slots.py",
+    "gui/team_fields.py",
     "gui/render_job.py",
     "gui/render_pipeline.py",
+    "gui/asset_loader.py",
     "gui/lineup.py",
     "gui/history.py",
 }
@@ -72,18 +73,15 @@ TEST_PACKAGES = ("akasha", "renderer", "gui")
 
 RETIRED_TEST_FILES = ("test_akasha.py", "test_renderer.py", "test_gui_smoke.py", "test_lineup.py")
 
-# A regression tripwire, not a design target. `gui/main_window.py` is the largest
-# module because its remaining flows (`load_profile`, the placement editing and
-# the render throttle) are Qt-bound throughout; the blocking dialogs they put up
-# live in `gui/dialogs.py`.
+# A regression tripwire, not a design target, set to the next multiple of 50
+# above the largest module. `gui/main_window.py` still holds that spot, but only
+# just: it was decomposed into the two layout panels (`gui/controls_panel.py`,
+# `gui/editor_panel.py`) and the collaborators they are wired to
+# (`gui/actions.py`, `gui/profile_io.py`, `gui/project_io.py`,
+# `gui/render_pipeline.py`, `gui/team_fields.py`), leaving the window itself the
+# placement editing, the asset-arrival handlers and the close sequence.
 # A module crossing this bound is a signal to split it, not to raise the bound.
-# Raised from 750 to 800 by explicit decision when the always-on preview left
-# `main_window.py` at 756, on the understanding that the next crossing would
-# reopen the split question rather than raise this again. That crossing came,
-# and the answer was the split: `open_project`, `save_project` and `export` moved
-# out into `gui/project_io.py`. Extracting the throttled render pipeline into its
-# own module remains the deferred next candidate.
-MAX_MODULE_LINES = 800
+MAX_MODULE_LINES = 400
 
 
 def source_files() -> list[Path]:

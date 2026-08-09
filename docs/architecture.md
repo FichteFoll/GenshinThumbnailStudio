@@ -149,9 +149,12 @@ and `storage.py` for persistence.
 - `style.py` — `MAIN_STYLESHEET`, the whole application's QSS,
   applied once to the main window.
 - `main_window.py` — `MainWindow`:
-  placement editing, the asset-arrival handlers, the close sequence,
+  the splitter holding the two panels,
+  placement editing and selection, the asset-arrival handlers,
+  the close sequence,
   and thin delegates to the collaborators below.
-  The largest module by far.
+  It constructs every widget through the two panels
+  and owns no child widget of its own.
 - `actions.py` — `ProjectActions`
   and the `ProjectActionHost` Protocol it dispatches through.
   Owns the four project `QAction`s
@@ -171,7 +174,8 @@ and `storage.py` for persistence.
   the output name and resolution fields,
   and the open, save and export buttons.
   All of them stay public attributes,
-  which is what `project_io.ProjectEditor` and the tests reach through;
+  which is what `project_io.ProjectEditor`, `profile_io.ProfileEditor`
+  and the tests reach through;
   user intent leaves the panel as
   `mode_changed`, `profile_requested`, `paste_requested`,
   `output_name_changed` and `resolution_changed`.
@@ -258,15 +262,15 @@ Qt-free and unit-testable on their own:
 and `history.py`'s `PlacementHistory`.
 Qt-bound: everything else, including `history.py`'s `HistoryController`.
 
-Import direction: `lineup`, `style`, `state` and `dialogs` import nothing from the package;
-`placement`, `presets`, `history` and `asset_loader` import `state`
+Import direction:
+`controls_panel`, `dialogs`, `lineup`, `preview`, `render_job`, `state`,
+`style` and `team_slots` import nothing from the package
+(`render_job` reaches the renderer through `..renderer`);
+`asset_loader`, `history`, `placement` and `presets` import `state`
 (`history` also reaches `Placement` through `..models`,
 and `asset_loader` reaches `download_assets` through `..akasha`);
-`preview`, `team_slots`, `render_job` and `controls_panel`
-import nothing from the package
-(`render_job` reaches the renderer through `..renderer`);
+`actions` imports `controls_panel`;
 `editor_panel` imports `preview`;
-`actions` imports `controls_panel` only;
 `render_pipeline` imports `state` and `render_job`,
 and reaches `Project` through `..models`;
 `team_fields` imports `state`, `history` and `team_slots`,
@@ -274,16 +278,19 @@ and reaches `Placement` through `..models`;
 `project_io` imports `state`, `dialogs`, `history`, `asset_loader`,
 `controls_panel` and `editor_panel`,
 and reaches `..models`, `..storage` and `..renderer` outside the package;
-`profile_io` imports `state`, `dialogs`, `asset_loader`, `controls_panel`
-and `team_fields`,
+`profile_io` imports `state`, `dialogs`, `lineup`, `asset_loader`,
+`controls_panel` and `team_fields`,
 and reaches `..akasha` and `..storage` outside the package;
-`main_window` imports every sibling except `state`,
-which it satisfies structurally rather than importing,
-and `preview`, `render_job` and `team_slots`, which it now reaches
-through `editor_panel`, `render_pipeline` and `team_fields`;
-it reaches `dialogs` and `profile_io` as modules
-(`from . import dialogs, profile_io`), while `project_io` is still imported
-by name (`ProjectFiles`), since nothing patches a module-level name on either;
+`main_window` imports `actions`, `asset_loader`, `controls_panel`, `dialogs`,
+`editor_panel`, `history`, `placement`, `presets`, `profile_io`, `project_io`,
+`render_pipeline`, `style` and `team_fields`.
+It imports neither `app` nor `state`, `lineup`, `preview`, `render_job`
+or `team_slots`:
+`state` it satisfies structurally,
+and the other four it reaches through the panel or the collaborator that owns them.
+`dialogs` and `profile_io` it imports as modules
+(`from . import dialogs, profile_io`) and the rest by name,
+for the reason design-notes' "Where the tests patch" gives.
 `app` imports `main_window`.
 
 ## Data flow
