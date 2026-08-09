@@ -75,8 +75,8 @@ def test_each_project_button_runs_the_flow_its_action_names(
     monkeypatch.setattr(window, method, record)
     # The save button's main section has to save rather than drop the menu,
     # which is what MenuButtonPopup buys over InstantPopup.
-    assert window.save_button.popupMode() == QToolButton.ToolButtonPopupMode.MenuButtonPopup
-    cast(QAbstractButton, getattr(window, button)).click()
+    assert window.controls_panel.save_button.popupMode() == QToolButton.ToolButtonPopupMode.MenuButtonPopup
+    cast(QAbstractButton, getattr(window.controls_panel, button)).click()
 
     assert calls == [method]
 
@@ -90,8 +90,8 @@ def test_the_save_button_offers_save_as_only_once_a_file_exists(
     app = qapp()
     window = MainWindow()
 
-    assert window.save_button.text() == "Save project as..."
-    assert window.save_button.menu() is None
+    assert window.controls_panel.save_button.text() == "Save project as..."
+    assert window.controls_panel.save_button.menu() is None
 
     monkeypatch.setattr(
         project_io.QFileDialog,
@@ -100,8 +100,8 @@ def test_the_save_button_offers_save_as_only_once_a_file_exists(
     )
     window.save_project()
 
-    assert window.save_button.text() == "Save project"
-    menu = window.save_button.menu()
+    assert window.controls_panel.save_button.text() == "Save project"
+    menu = window.controls_panel.save_button.menu()
     assert menu is not None
     assert [action.shortcut() for action in menu.actions()] == [QKeySequence("Ctrl+Shift+S")]
 
@@ -120,14 +120,14 @@ def test_switching_the_mode_puts_the_save_button_back_to_save_as(
         staticmethod(lambda *args, **kwargs: (str(tmp_path / "project.json"), "")),
     )
     window.save_project()
-    assert window.save_button.menu() is not None
+    assert window.controls_panel.save_button.menu() is not None
 
     monkeypatch.setattr(dialogs, "QMessageBox", helpers.DiscardMessageBox)
-    window.stygian_radio.setChecked(True)
+    window.controls_panel.stygian_radio.setChecked(True)
 
     assert window.project_path is None
-    assert window.save_button.text() == "Save project as..."
-    assert window.save_button.menu() is None
+    assert window.controls_panel.save_button.text() == "Save project as..."
+    assert window.controls_panel.save_button.menu() is None
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
@@ -139,8 +139,8 @@ def test_the_project_buttons_name_their_shortcut_in_the_tooltip(
     app = qapp()
     window = MainWindow()
 
-    assert "Ctrl+O" in window.open_button.toolTip()
-    assert "Ctrl+S" in window.save_button.toolTip()
-    assert "Ctrl+E" in window.export_button.toolTip()
+    assert "Ctrl+O" in window.controls_panel.open_button.toolTip()
+    assert "Ctrl+S" in window.controls_panel.save_button.toolTip()
+    assert "Ctrl+E" in window.controls_panel.export_button.toolTip()
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)

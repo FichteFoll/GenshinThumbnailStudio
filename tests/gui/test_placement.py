@@ -34,7 +34,7 @@ def test_reorder_slots_shifts_placements(tmp_path: Path, monkeypatch: pytest.Mon
     second.offset_x = -0.08
     second.zoom = 0.95
 
-    window.reorder_slots((0, 0), (1, 3))
+    window.team_fields.reorder((0, 0), (1, 3))
 
     shifted = window.project.teams[1][2]
     moved = window.project.teams[1][3]
@@ -44,8 +44,8 @@ def test_reorder_slots_shifts_placements(tmp_path: Path, monkeypatch: pytest.Mon
     assert moved.name == "Furina"
     assert moved.offset_x == 0.10
     assert moved.zoom == 1.20
-    assert window.team_combos[1][2].currentText() == "Nahida"
-    assert window.team_combos[1][3].currentText() == "Furina"
+    assert window.team_fields.combos[1][2].currentText() == "Nahida"
+    assert window.team_fields.combos[1][3].currentText() == "Furina"
     assert window.selected == (1, 3)
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
@@ -58,13 +58,13 @@ def test_slot_drag_hover_reorders_live(tmp_path: Path, monkeypatch: pytest.Monke
     fill_window_teams(window, TEAM_NAMES)
     window.assets = create_test_assets(tmp_path / "assets", TEAM_NAMES)
 
-    window._on_slot_drag_started(0, 0)
-    window._on_slot_drag_hover(1, 3)
+    window.team_fields.on_drag_started(0, 0)
+    window.team_fields.on_drag_hover(1, 3)
 
     assert window.project.teams[1][3].name == TEAM_NAMES[0]
-    assert window.team_combos[1][3].currentText() == TEAM_NAMES[0]
+    assert window.team_fields.combos[1][3].currentText() == TEAM_NAMES[0]
     assert window.selected == (1, 3)
-    assert window._render_timer.isActive()
+    assert window._render.timer.isActive()
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
@@ -75,14 +75,14 @@ def test_slot_drag_cancelled_reverts_to_the_original_order(tmp_path: Path, monke
     window = MainWindow()
     fill_window_teams(window, TEAM_NAMES)
 
-    window._on_slot_drag_started(0, 0)
-    window._on_slot_drag_hover(1, 3)
-    window._on_slot_drag_hover(0, 2)
-    window._on_slot_drag_ended(False)
+    window.team_fields.on_drag_started(0, 0)
+    window.team_fields.on_drag_hover(1, 3)
+    window.team_fields.on_drag_hover(0, 2)
+    window.team_fields.on_drag_ended(False)
 
     names = [member.name for team in window.project.teams for member in team]
     assert names == TEAM_NAMES
-    combo_names = [combo.currentText() for row in window.team_combos for combo in row]
+    combo_names = [combo.currentText() for row in window.team_fields.combos for combo in row]
     assert combo_names == TEAM_NAMES
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
@@ -94,9 +94,9 @@ def test_slot_drag_accepted_keeps_the_live_arrangement(tmp_path: Path, monkeypat
     window = MainWindow()
     fill_window_teams(window, TEAM_NAMES)
 
-    window._on_slot_drag_started(0, 0)
-    window._on_slot_drag_hover(1, 3)
-    window._on_slot_drag_ended(True)
+    window.team_fields.on_drag_started(0, 0)
+    window.team_fields.on_drag_hover(1, 3)
+    window.team_fields.on_drag_ended(True)
 
     assert window.project.teams[1][3].name == TEAM_NAMES[0]
 
@@ -119,21 +119,21 @@ def test_offset_sliders_are_signed_and_span_the_reachable_range(
     max_x, max_y = max_offset(art_size, True, member.zoom)
 
     # Truncated, so the slider end never exceeds what the renderer can reach.
-    assert window.x_slider.maximum() == int(max_x * 1000)
-    assert window.x_slider.maximum() / 1000 <= max_x
-    assert window.x_slider.minimum() == -window.x_slider.maximum()
-    assert window.x_slider.maximum() > 0
-    assert window.y_slider.maximum() == int(max_y * 1000)
-    assert window.y_slider.maximum() / 1000 <= max_y
-    assert window.y_slider.minimum() == -window.y_slider.maximum()
+    assert window.editor_panel.x_slider.maximum() == int(max_x * 1000)
+    assert window.editor_panel.x_slider.maximum() / 1000 <= max_x
+    assert window.editor_panel.x_slider.minimum() == -window.editor_panel.x_slider.maximum()
+    assert window.editor_panel.x_slider.maximum() > 0
+    assert window.editor_panel.y_slider.maximum() == int(max_y * 1000)
+    assert window.editor_panel.y_slider.maximum() / 1000 <= max_y
+    assert window.editor_panel.y_slider.minimum() == -window.editor_panel.y_slider.maximum()
 
-    window.x_slider.setValue(window.x_slider.minimum())
+    window.editor_panel.x_slider.setValue(window.editor_panel.x_slider.minimum())
     assert window.current_member().offset_x == _approx(-max_x, 1e-3)
-    assert window.x_value.text().startswith("-")
+    assert window.editor_panel.x_value.text().startswith("-")
 
-    window.x_slider.setValue(0)
+    window.editor_panel.x_slider.setValue(0)
     assert window.current_member().offset_x == 0.0
-    assert window.x_value.text() == "+0%"
+    assert window.editor_panel.x_value.text() == "+0%"
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
@@ -223,10 +223,10 @@ def test_flip_check_toggles_the_selected_member(tmp_path: Path, monkeypatch: pyt
 
     assert window.current_member().flip is False
 
-    window.flip_check.setChecked(True)
+    window.editor_panel.flip_check.setChecked(True)
     assert window.current_member().flip is True
 
-    window.flip_check.setChecked(False)
+    window.editor_panel.flip_check.setChecked(False)
     assert window.current_member().flip is False
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
@@ -245,7 +245,7 @@ def test_sync_controls_shows_the_flip_without_writing_it_back(tmp_path: Path, mo
     monkeypatch.setattr(window, "_save_current_preset", lambda: writes.append(1))
     window.sync_controls()
 
-    assert window.flip_check.isChecked() is True
+    assert window.editor_panel.flip_check.isChecked() is True
     assert window.current_member().flip is True
     assert writes == []
 
@@ -257,14 +257,14 @@ def test_selecting_another_slot_shows_that_slots_flip(tmp_path: Path, monkeypatc
     app = qapp()
     window = _window_with_assets(tmp_path, TEAM_NAMES)
 
-    window.flip_check.setChecked(True)
+    window.editor_panel.flip_check.setChecked(True)
 
     window.select_slot(0, 1)
-    assert window.flip_check.isChecked() is False
+    assert window.editor_panel.flip_check.isChecked() is False
     assert window.current_member().flip is False
 
     window.select_slot(0, 0)
-    assert window.flip_check.isChecked() is True
+    assert window.editor_panel.flip_check.isChecked() is True
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
@@ -275,7 +275,7 @@ def test_flip_round_trips_through_the_presets(tmp_path: Path, monkeypatch: pytes
     window = _window_with_assets(tmp_path, TEAM_NAMES)
     window.builds = {name: asset.build for name, asset in window.assets.items()}
 
-    window.flip_check.setChecked(True)
+    window.editor_panel.flip_check.setChecked(True)
 
     fresh = Placement(name=window.current_member().name)
     window._presets.apply_to(window, fresh)
@@ -289,12 +289,12 @@ def test_reset_placement_clears_the_flip(tmp_path: Path, monkeypatch: pytest.Mon
     app = qapp()
     window = _window_with_assets(tmp_path, TEAM_NAMES)
 
-    window.flip_check.setChecked(True)
+    window.editor_panel.flip_check.setChecked(True)
 
     window.reset_placement()
 
     assert window.current_member().flip is False
-    assert window.flip_check.isChecked() is False
+    assert window.editor_panel.flip_check.isChecked() is False
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
@@ -319,18 +319,18 @@ def test_clicking_a_placeholder_slot_does_not_select_it(tmp_path: Path, monkeypa
     window = _window_with_one_filled_slot(tmp_path)
     # `_image_rect()` is empty without a pixmap, which would swallow the click
     # before it ever reached the placeholder check.
-    window.preview.resize(1280, 720)
-    window.preview.set_preview(QPixmap(1280, 720))
+    window.editor_panel.preview.resize(1280, 720)
+    window.editor_panel.preview.set_preview(QPixmap(1280, 720))
     emitted: list[tuple[int, int]] = []
 
     def record(team: int, slot: int) -> None:
         emitted.append((team, slot))
 
-    window.preview.slot_selected.connect(record)
+    window.editor_panel.preview.slot_selected.connect(record)
 
     team, slot = PLACEHOLDER_SLOT
     center = QPointF(slot * 320 + 160, team * 360 + 180)
-    window.preview.mousePressEvent(
+    window.editor_panel.preview.mousePressEvent(
         QMouseEvent(
             QEvent.Type.MouseButtonPress,
             center,
@@ -384,7 +384,8 @@ def test_placement_controls_are_disabled_for_a_placeholder_slot(
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
     window = _window_with_one_filled_slot(tmp_path)
-    controls = [window.x_slider, window.y_slider, window.zoom_slider, window.flip_check, window.reset_button]
+    editor = window.editor_panel
+    controls = [editor.x_slider, editor.y_slider, editor.zoom_slider, editor.flip_check, editor.reset_button]
 
     window.select_slot(*PLACEHOLDER_SLOT)
     assert [control.isEnabled() for control in controls] == [False] * len(controls)

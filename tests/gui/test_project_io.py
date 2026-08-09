@@ -127,7 +127,7 @@ def settle_downloads_and_render(window: MainWindow, app: QApplication) -> None:
     """
     window._thread_pool.waitForDone(5000)
     app.processEvents()
-    window._dispatch_render()
+    window._render.dispatch()
     wait_for_render(window, app)
 
 
@@ -142,7 +142,7 @@ def test_open_project_loads_cached_profile_and_previews(tmp_path: Path, monkeypa
 
     assert window.project.uid == uid
     assert sorted(window.builds) == sorted(name.casefold() for name in TEAM_NAMES)
-    assert window.preview._pixmap is not None
+    assert window.editor_panel.preview._pixmap is not None
 
     window.close()
     app.processEvents()
@@ -172,7 +172,7 @@ def test_open_project_with_stale_cache_offers_refresh(tmp_path: Path, monkeypatc
     assert "2.0 hours" in StubMessageBox.instances[0].text
     assert not refreshed
     assert sorted(window.builds) == sorted(name.casefold() for name in TEAM_NAMES)
-    assert window.preview._pixmap is not None
+    assert window.editor_panel.preview._pixmap is not None
 
     window.close()
     app.processEvents()
@@ -211,7 +211,7 @@ def test_load_profile_persists_profile_cache(tmp_path: Path, monkeypatch: pytest
         return builds, 5.0, last_update
 
     monkeypatch.setattr(window.client, "load_profile", fake_load_profile)
-    window.uid_edit.setText(uid)
+    window.controls_panel.uid_edit.setText(uid)
 
     window.load_profile()
 
@@ -252,7 +252,7 @@ def test_export_refuses_a_team_whose_slot_names_no_loaded_build(
     _prepare_export_window(window, tmp_path, TEAM_NAMES)
     # One slot names a character the loaded profile has no build for, which is
     # exactly the slot the preview would draw as a placeholder panel.
-    window.team_combos[1][3].setCurrentText("Somebody Else")
+    window.team_fields.combos[1][3].setCurrentText("Somebody Else")
 
     recorder = RecordingCritical()
     monkeypatch.setattr(dialogs, "QMessageBox", recorder)
@@ -279,7 +279,7 @@ def test_export_abyss_writes_the_file_chosen_in_the_save_dialog(
     app = qapp()
     window = MainWindow()
     _prepare_export_window(window, tmp_path, TEAM_NAMES)
-    window.output_name.setText("prefilled")
+    window.controls_panel.output_name.setText("prefilled")
 
     monkeypatch.setattr(dialogs, "QMessageBox", StubMessageBox)
     monkeypatch.setattr(
@@ -301,7 +301,7 @@ def test_export_abyss_writes_the_file_chosen_in_the_save_dialog(
     assert [Path(name).name for name in default_names] == ["prefilled.png"]
     assert chosen.exists()
     assert list(chosen.parent.glob("*.png")) == [chosen]
-    assert window.output_name.text() == "chosen"
+    assert window.controls_panel.output_name.text() == "chosen"
     assert window.project.output_name == "chosen"
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
@@ -312,10 +312,10 @@ def test_export_stygian_still_asks_for_a_folder(tmp_path: Path, monkeypatch: pyt
     app = qapp()
     window = MainWindow()
     # Switching the mode replaces window.project, so fill the teams afterwards.
-    window.stygian_radio.setChecked(True)
+    window.controls_panel.stygian_radio.setChecked(True)
     names = [*TEAM_NAMES, "Xingqiu", "Ganyu", "Raiden Shogun", "Yelan"]
     _prepare_export_window(window, tmp_path, names)
-    window.output_name.setText("bosses")
+    window.controls_panel.output_name.setText("bosses")
 
     monkeypatch.setattr(dialogs, "QMessageBox", StubMessageBox)
     monkeypatch.setattr(
@@ -353,7 +353,7 @@ def test_export_defaults_to_the_opened_project_folder(tmp_path: Path, monkeypatc
     window.open_project()
 
     _prepare_export_window(window, tmp_path, TEAM_NAMES)
-    window.output_name.setText("prefilled")
+    window.controls_panel.output_name.setText("prefilled")
     default_paths: list[str] = []
 
     def fake_save_dialog(parent: object, title: str, default_path: str, name_filter: str) -> tuple[str, str]:
@@ -551,7 +551,7 @@ def test_export_defaults_to_the_saved_project_folder(tmp_path: Path, monkeypatch
 
     window = MainWindow()
     _prepare_export_window(window, tmp_path, TEAM_NAMES)
-    window.output_name.setText("prefilled")
+    window.controls_panel.output_name.setText("prefilled")
 
     monkeypatch.setattr(dialogs, "QMessageBox", StubMessageBox)
     monkeypatch.setattr(

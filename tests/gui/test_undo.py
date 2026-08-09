@@ -125,14 +125,14 @@ def test_a_zoom_slider_change_is_undone(tmp_path: Path, monkeypatch: pytest.Monk
     window = _window_with_history_baseline(tmp_path)
     start_zoom = window.current_member().zoom
 
-    window.zoom_slider.setValue(round(start_zoom * 100) + 15)
+    window.editor_panel.zoom_slider.setValue(round(start_zoom * 100) + 15)
     window._history.commit_now()
     assert window.current_member().zoom == _approx(start_zoom + 0.15)
 
     window._history.undo()
 
     assert window.current_member().zoom == _approx(start_zoom)
-    assert window.zoom_slider.value() == round(start_zoom * 100)
+    assert window.editor_panel.zoom_slider.value() == round(start_zoom * 100)
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
@@ -142,13 +142,13 @@ def test_a_flip_is_undone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     app = qapp()
     window = _window_with_history_baseline(tmp_path)
 
-    window.flip_check.setChecked(True)
+    window.editor_panel.flip_check.setChecked(True)
     window._history.commit_now()
 
     window._history.undo()
 
     assert window.current_member().flip is False
-    assert window.flip_check.isChecked() is False
+    assert window.editor_panel.flip_check.isChecked() is False
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
@@ -158,14 +158,14 @@ def test_a_character_name_change_is_undone(tmp_path: Path, monkeypatch: pytest.M
     app = qapp()
     window = _window_with_history_baseline(tmp_path)
 
-    window.team_combos[0][0].setCurrentText("Klee")
+    window.team_fields.combos[0][0].setCurrentText("Klee")
     window._history.commit_now()
     assert window.project.teams[0][0].name == "Klee"
 
     window._history.undo()
 
     assert window.project.teams[0][0].name == TEAM_NAMES[0]
-    assert window.team_combos[0][0].currentText() == TEAM_NAMES[0]
+    assert window.team_fields.combos[0][0].currentText() == TEAM_NAMES[0]
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
@@ -180,7 +180,7 @@ def test_a_slot_reorder_is_undone_without_an_explicit_commit(
     window.project.teams[1][3].zoom = 1.35
     window._history.reset()
 
-    window.reorder_slots((0, 0), (1, 3))
+    window.team_fields.reorder((0, 0), (1, 3))
     assert window.project.teams[1][3].name == TEAM_NAMES[0]
 
     window._history.undo()
@@ -198,10 +198,10 @@ def test_a_whole_drag_gesture_is_a_single_undo_step(tmp_path: Path, monkeypatch:
     app = qapp()
     window = _window_with_history_baseline(tmp_path)
 
-    window._on_slot_drag_started(0, 0)
-    window._on_slot_drag_hover(1, 3)
-    window._on_slot_drag_hover(0, 2)
-    window._on_slot_drag_ended(True)
+    window.team_fields.on_drag_started(0, 0)
+    window.team_fields.on_drag_hover(1, 3)
+    window.team_fields.on_drag_hover(0, 2)
+    window.team_fields.on_drag_ended(True)
 
     window._history.undo()
     names = [member.name for team in window.project.teams for member in team]
@@ -223,9 +223,9 @@ def test_a_cancelled_drag_leaves_nothing_to_undo(tmp_path: Path, monkeypatch: py
     window.drag_placement(30, 0)
     window._history.commit_now()
 
-    window._on_slot_drag_started(0, 0)
-    window._on_slot_drag_hover(1, 3)
-    window._on_slot_drag_ended(False)
+    window.team_fields.on_drag_started(0, 0)
+    window.team_fields.on_drag_hover(1, 3)
+    window.team_fields.on_drag_ended(False)
 
     # The one undo left is the drag before the gesture, not a state the
     # cancelled reorder pushed.
@@ -246,7 +246,7 @@ def test_switching_the_mode_drops_the_previous_modes_history(
     # A clean window, so the mode switch does not put up the unsaved-changes prompt.
     window = MainWindow()
 
-    window.stygian_radio.setChecked(True)
+    window.controls_panel.stygian_radio.setChecked(True)
     window._history.undo()
 
     assert window.project.mode == "stygian"
@@ -314,13 +314,13 @@ def test_no_debounce_is_left_pending_during_a_slot_drag(
     window.drag_placement(30, 0)
     assert window._history._timer.isActive() is True
 
-    window._on_slot_drag_started(0, 0)
+    window.team_fields.on_drag_started(0, 0)
     assert window._history._timer.isActive() is False
 
-    window._on_slot_drag_hover(1, 3)
+    window.team_fields.on_drag_hover(1, 3)
     assert window._history._timer.isActive() is False
 
-    window._on_slot_drag_ended(False)
+    window.team_fields.on_drag_ended(False)
     window._history.undo()
     names = [member.name for team in window.project.teams for member in team]
     assert names == TEAM_NAMES
@@ -335,7 +335,7 @@ def test_undoing_back_to_a_name_re_requests_its_art(
 
     Clearing a name prunes its `Asset`, and a restore writes the name onto the
     combos before their signals are connected, so it reaches neither
-    `_member_changed` nor the `ensure()` at its end. Without a call of its own
+    `member_changed` nor the `ensure()` at its end. Without a call of its own
     the slot would stay inert and refuse to export, with nothing downloading.
     """
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
@@ -346,7 +346,7 @@ def test_undoing_back_to_a_name_re_requests_its_art(
         window.asset_loader, "ensure", lambda: restored.append(sorted(window.selected_name_keys()))
     )
 
-    window._member_changed(0, 0, "")
+    window.member_changed(0, 0, "")
     window._history.commit_now()
     assert window.assets == {}
     restored.clear()
@@ -366,21 +366,21 @@ def test_art_arriving_mid_drag_leaves_the_debounce_disarmed(
 
     Downloads run for seconds after a profile load, so an asset can land in the
     middle of a slot drag; the preset it re-applies must not re-arm the debounce
-    `_on_slot_drag_started` just settled.
+    `on_drag_started` just settled.
     """
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
     window = _window_with_history_baseline(tmp_path)
     arriving = create_test_assets(tmp_path / "late", TEAM_NAMES[1:2])
 
-    window._on_slot_drag_started(0, 0)
-    window._on_slot_drag_hover(1, 3)
+    window.team_fields.on_drag_started(0, 0)
+    window.team_fields.on_drag_hover(1, 3)
 
     window._on_asset_ready(TEAM_NAMES[1].casefold(), arriving[TEAM_NAMES[1].casefold()])
 
     assert window._history._timer.isActive() is False
 
-    window._on_slot_drag_ended(False)
+    window.team_fields.on_drag_ended(False)
     window._history.undo()
     names = [member.name for team in window.project.teams for member in team]
     assert names == TEAM_NAMES

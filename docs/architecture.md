@@ -148,20 +148,72 @@ and `storage.py` for persistence.
   `__main__.py` and `launch.py`.
 - `style.py` — `MAIN_STYLESHEET`, the whole application's QSS,
   applied once to the main window.
-- `main_window.py` — `RENDER_THROTTLE_MS`, `RESOLUTION_OPTIONS` and `MainWindow`:
-  profile loading, placement editing, the render throttle,
-  the four project `QAction`s (`Ctrl+O`, `Ctrl+S`, `Ctrl+Shift+S`, `Ctrl+E`),
-  team-slot reordering, and the close sequence.
-  The largest module by far.
+- `main_window.py` — `MainWindow`:
+  the splitter holding the two panels,
+  placement editing and selection, the asset-arrival handlers,
+  the close sequence,
+  and thin delegates to the collaborators below.
+  It constructs every widget through the two panels
+  and owns no child widget of its own.
+- `actions.py` — `ProjectActions`
+  and the `ProjectActionHost` Protocol it dispatches through.
+  Owns the four project `QAction`s
+  (`open`, `save`, `save_as`, `export`,
+  bound to `Ctrl+O`, `Ctrl+S`, `Ctrl+Shift+S` and `Ctrl+E`)
+  and the "Save as..." menu,
+  registering each action on the window so its shortcut is window-wide.
+  `bind_buttons(panel)` makes the panel's three project buttons trigger them;
+  `set_project_path(path)` decides the save action's caption, tooltip and menu
+  and pushes them onto the panel through `ControlsPanel.apply_save_action()`.
+  Constructed once in `MainWindow.__init__` with the window
+  and the window as `ProjectActionHost`.
+- `controls_panel.py` — `RESOLUTION_OPTIONS` and `ControlsPanel`,
+  the window's left column:
+  the mode radios, the UID entry with its load button and profile status,
+  the paste-lineup button, the scrolling `team_container`/`team_layout`,
+  the output name and resolution fields,
+  and the open, save and export buttons.
+  All of them stay public attributes,
+  which is what `project_io.ProjectEditor`, `profile_io.ProfileEditor`
+  and the tests reach through;
+  user intent leaves the panel as
+  `mode_changed`, `profile_requested`, `paste_requested`,
+  `output_name_changed` and `resolution_changed`.
+  `align_save_button_height()` is called by the window
+  once its stylesheet is applied,
+  and `apply_save_action(text, tooltip, menu)` writes the save button's face
+  as `actions.ProjectActions` decides it.
+- `editor_panel.py` — `EditorPanel`, the window's right column:
+  the preview toolbar with `preview_team_label` and the `boss_combo`
+  (hidden outside stygian mode),
+  the `PreviewWidget` as `preview`,
+  and the placement row
+  (`selected_label`, the X/Y/zoom sliders with their value labels,
+  `flip_check` and `reset_button`).
+  All of them stay public attributes,
+  which is what `project_io.ProjectEditor` and the tests reach through;
+  user intent leaves the panel as
+  `active_team_changed`, `placement_changed`, `flip_toggled`
+  and `reset_requested`.
+  `preview`'s own `slot_selected`, `placement_dragged` and `zoom_requested`
+  are not re-exposed: the window connects to `editor_panel.preview` directly.
 - `dialogs.py` — the blocking dialogs as free functions taking the parent widget:
   `confirm_discard_changes()`, `choose_stale_profile_action()`, `confirm_cache_refresh()`,
   `show_error()`, `show_export_finished()`, `ask_lineup_text()`, `ask_export_target()`.
   They return the user's choice rather than acting on it.
-- `project_io.py` — `save_project()`, `save_project_as()`, `open_project()`, `export()`
-  as free functions, plus the `ProjectEditor` Protocol they take.
-  `MainWindow` keeps thin same-named methods delegating here,
-  so every caller and test still goes through the window;
-  these functions are deliberately not in `gui/__init__.py`'s `__all__`.
+- `project_io.py` — `ProjectFiles` (`save()`, `save_as()`, `open()`, `export()`)
+  plus the `ProjectEditor` Protocol it works through.
+  Constructed once in `MainWindow.__init__` with the window, the window as
+  `ProjectEditor`, and the window's `HistoryController`.
+  `MainWindow` keeps thin `save_project()`, `save_project_as()`, `open_project()`
+  and `export()` methods delegating here,
+  so every caller and test still goes through the window.
+- `profile_io.py` — `ProfileLoader` (`load()`, `paste_lineup()`, `validate_team()`)
+  plus the `ProfileEditor` Protocol it works through.
+  Constructed once in `MainWindow.__init__` with the window and the window as
+  `ProfileEditor`. `MainWindow` keeps thin `load_profile()`, `paste_teams()`
+  and `validate_team()` methods delegating here, the first and third of which
+  `project_io.ProjectEditor` requires.
 - `state.py` — the `EditorState` Protocol (`project`, `builds`, `assets`),
   which `MainWindow` satisfies structurally. Must stay Qt-free.
 - `placement.py` — `MIN_ZOOM`, `MAX_ZOOM` and `PlacementController`:
@@ -174,8 +226,26 @@ and `storage.py` for persistence.
   `set_context(mode, active_team, selected, filled)` tells it which slots have art.
 - `team_slots.py` — `SLOT_MIME_TYPE` and `TeamSlotWidget`,
   which emits `drag_started`, `drag_hover` and `drag_ended` across a drag gesture.
+- `team_fields.py` — `clear_layout()`, `TeamFieldsController`
+  and the `TeamFieldsEditor` Protocol it works through.
+  The controller fills `ControlsPanel.team_layout` with one `TeamSlotWidget`
+  per slot (`rebuild()`), keeps their combos in step with the project
+  (`refresh_display()`, `populate_items()`, the public `combos`),
+  and turns a drag gesture into a live reorder plus one undo step
+  (`on_drag_started()`, `on_drag_hover()`, `on_drag_ended()`, `reorder()`,
+  and `dragging`, which `MainWindow._on_asset_ready` reads).
+  Constructed once in `MainWindow.__init__` with the window as
+  `TeamFieldsEditor`, the panel's layout and the window's `HistoryController`.
+  `MainWindow` keeps thin `rebuild_team_fields()` and `populate_combo_items()`
+  methods delegating here, which `project_io.ProjectEditor` requires.
 - `render_job.py` — `RenderJobSignals` and `RenderJob`,
   rendering a `Project` snapshot on a `QThreadPool` worker.
+- `render_pipeline.py` — `RENDER_THROTTLE_MS` and `RenderPipeline`,
+  the throttled preview loop:
+  `schedule()`, `dispatch()`, `stop()`,
+  the public `timer`, `token`, `running`, `stale` and `closing`,
+  and the `rendered`/`failed` signals the window connects
+  to the preview and the status bar.
 - `asset_loader.py` — `AssetJobSignals`, `AssetJob` and `AssetLoader`,
   the background character-art downloads.
   `AssetLoader.ensure()` starts one `AssetJob` for the named members
@@ -192,17 +262,35 @@ Qt-free and unit-testable on their own:
 and `history.py`'s `PlacementHistory`.
 Qt-bound: everything else, including `history.py`'s `HistoryController`.
 
-Import direction: `lineup`, `style`, `state` and `dialogs` import nothing from the package;
-`placement`, `presets`, `history` and `asset_loader` import `state`
+Import direction:
+`controls_panel`, `dialogs`, `lineup`, `preview`, `render_job`, `state`,
+`style` and `team_slots` import nothing from the package
+(`render_job` reaches the renderer through `..renderer`);
+`asset_loader`, `history`, `placement` and `presets` import `state`
 (`history` also reaches `Placement` through `..models`,
 and `asset_loader` reaches `download_assets` through `..akasha`);
-`preview`, `team_slots` and `render_job` import nothing from the package
-(`render_job` reaches the renderer through `..renderer`);
-`project_io` imports `state`, `dialogs`, `history` and `asset_loader`,
+`actions` imports `controls_panel`;
+`editor_panel` imports `preview`;
+`render_pipeline` imports `state` and `render_job`,
+and reaches `Project` through `..models`;
+`team_fields` imports `state`, `history` and `team_slots`,
+and reaches `Placement` through `..models`;
+`project_io` imports `state`, `dialogs`, `history`, `asset_loader`,
+`controls_panel` and `editor_panel`,
 and reaches `..models`, `..storage` and `..renderer` outside the package;
-`main_window` imports every sibling except `state`,
-which it satisfies structurally rather than importing,
-and reaches `dialogs` and `project_io` as modules (`from . import dialogs, project_io`);
+`profile_io` imports `state`, `dialogs`, `lineup`, `asset_loader`,
+`controls_panel` and `team_fields`,
+and reaches `..akasha` and `..storage` outside the package;
+`main_window` imports `actions`, `asset_loader`, `controls_panel`, `dialogs`,
+`editor_panel`, `history`, `placement`, `presets`, `profile_io`, `project_io`,
+`render_pipeline`, `style` and `team_fields`.
+It imports neither `app` nor `state`, `lineup`, `preview`, `render_job`
+or `team_slots`:
+`state` it satisfies structurally,
+and the other four it reaches through the panel or the collaborator that owns them.
+`dialogs` and `profile_io` it imports as modules
+(`from . import dialogs, profile_io`) and the rest by name,
+for the reason design-notes' "Where the tests patch" gives.
 `app` imports `main_window`.
 
 ## Data flow

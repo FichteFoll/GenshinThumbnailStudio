@@ -105,7 +105,7 @@ def close_ignoring_unsaved_changes(window: MainWindow, app: QApplication, monkey
 def wait_for_render(window: MainWindow, app: QApplication) -> None:
     """Block until the background render job dispatched by the window has finished."""
     for _ in range(200):
-        if not window._render_job_running:
+        if not window._render.running:
             return
         window._thread_pool.waitForDone(50)
         app.processEvents()

@@ -6,12 +6,13 @@ The attribute types deliberately match `MainWindow`'s own annotations, because a
 Protocol's mutable attributes are invariant: declaring `Mapping[str, Asset]`
 here would reject the window's `dict[str, Asset]`.
 
-`PlacementController`, `PresetStore` and `AssetLoader` read these attributes
-through the Protocol on *every* call instead of capturing them at construction
-time, because `_mode_changed`, `open_project`, `load_profile` and
-`_member_changed` all replace `project`, `builds` or `assets` wholesale. A
-captured `assets` would silently fall back to `STANDARD_ART_SIZE` and compute
-the wrong offset bounds.
+Every collaborator (`PlacementController`, `PresetStore`, `AssetLoader`,
+`HistoryController`, `TeamFieldsController`, `RenderPipeline`, `ProjectFiles`
+and `ProfileLoader`) reads these attributes through the Protocol on *every* call
+instead of capturing them at construction time, because `_mode_changed`,
+`ProjectFiles.open`, `load_profile` and `member_changed` all replace `project`,
+`builds` or `assets` wholesale. A captured `assets` would silently fall back to
+`STANDARD_ART_SIZE` and compute the wrong offset bounds.
 """
 
 from __future__ import annotations
