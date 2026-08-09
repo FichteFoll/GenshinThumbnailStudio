@@ -105,7 +105,8 @@ with a `placeholder_panel()` wherever the `Asset` has not arrived yet.
   the facade `__all__`s and a per-module line-count tripwire.
   Read it before moving or adding a module, since it is the test that will fail.
 - `gui/state.py` must stay Qt-free; `EditorState` is what the Qt-free collaborators depend on.
-- `Placement.name` is the join key to the `Asset` dict.
+- `Placement.asset_key` (the selected `Build.key`) is the join key to the `Asset` dict,
+  while `Placement.name` only names the character.
   A project file now also encodes the selected build's details,
   so it reopens with the framing *and* the C/R and weapon badges it was saved with,
   while the art itself is still re-fetched from Enka.

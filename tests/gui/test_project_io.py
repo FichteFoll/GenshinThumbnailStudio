@@ -211,6 +211,54 @@ def test_open_project_without_cache_shows_hint(tmp_path: Path, monkeypatch: pyte
     app.processEvents()
 
 
+@pytest.mark.parametrize(
+    ("entered", "expected_uid", "expected_name"),
+    [("700000042", "700000042", ""), ("Algoinde", "", "Algoinde")],
+)
+def test_the_profile_field_is_split_into_a_uid_or_a_username(
+    entered: str, expected_uid: str, expected_name: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R2: all digits is a UID, anything else a username, and never both."""
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+    monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
+    profile = Profile(
+        identifier=entered,
+        uid=expected_uid,
+        username=expected_name,
+        builds={"furina": [make_build("Furina")]},
+        fetched_at=datetime(2026, 8, 3, 10, 30, 15),
+    )
+    def fake_load_profile(identifier: str) -> Profile:
+        return profile
+
+    def fake_download_assets(*args: Any, **kwargs: Any) -> dict[str, Asset]:
+        return {}
+
+    monkeypatch.setattr(window.client, "load_profile", fake_load_profile)
+    monkeypatch.setattr(asset_loader, "download_assets", fake_download_assets)
+    window.controls_panel.profile_edit.setText(entered)
+
+    window.load_profile()
+
+    assert (window.project.uid, window.project.profile_name) == (expected_uid, expected_name)
+    assert window.project.identifier == entered
+
+    # And again on the save path, which splits the same field of its own accord.
+    window.project.uid = "stale"
+    window.project.profile_name = "stale"
+    def fake_save_dialog(*args: Any, **kwargs: Any) -> tuple[str, str]:
+        return str(tmp_path / "project.json"), ""
+
+    monkeypatch.setattr(project_io.QFileDialog, "getSaveFileName", staticmethod(fake_save_dialog))
+    window.save_project_as()
+
+    assert (window.project.uid, window.project.profile_name) == (expected_uid, expected_name)
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
 def test_load_profile_fills_the_builds_and_downloads_under_build_keys(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

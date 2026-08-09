@@ -144,7 +144,7 @@ and as its own signals
 (`mode_changed`, `profile_requested`, `paste_requested`,
 `output_name_changed`, `resolution_changed`),
 which keep the window from reaching into the panel to connect a handler.
-The open, save and export buttons get no signal:
+The new, open, save and export buttons get no signal:
 they trigger the project `QAction`s,
 which `actions.ProjectActions.bind_buttons()` connects them to.
 `align_save_button_height()` is a method rather than part of the constructor,
@@ -204,7 +204,7 @@ having the panels already there is what lets `bind_buttons()`
 wire the buttons in one call,
 instead of forcing the actions to exist before the buttons do.
 
-The four project actions are `QAction`s, not `QShortcut`s,
+The five project actions are `QAction`s, not `QShortcut`s,
 because the "Save as..." menu entry needs an action anyway
 and a `QMenu` renders an action's shortcut in the item itself.
 A sequence bound to both a `QShortcut` and a `QAction` is ambiguous and fires neither,
@@ -258,6 +258,7 @@ rather than opening a dialog that would interrupt typing.
 `ensure()` must be called wherever the set of named characters or loaded builds can change:
 the success path of `load_profile`,
 the end of `member_changed` (which is also what `paste_teams` goes through),
+the end of `build_selected`, which swaps one build's art for another's,
 both of `project_io.ProjectFiles.open`'s profile paths,
 and `_history_restored()`,
 because an undo can bring back a name whose art `member_changed` pruned,
@@ -271,7 +272,8 @@ it starts `asset_loader.ensure()` and asks the user to retry.
 ### Placeholder slots are inert
 
 `_filled_slots()` returns the `(team, slot)` pairs
-whose member name is non-empty and casefolds into `self.assets`.
+whose member name is non-empty
+and whose resolved build's `key` is in `self.assets`.
 `sync_controls()` passes it to `PreviewWidget.set_context()`
 and enables or disables the X/Y/zoom sliders, the flip check and the reset button
 on whether the selection is in it.

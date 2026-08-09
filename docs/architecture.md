@@ -53,8 +53,10 @@ Facts that the rest of the app depends on:
   zero meaning centered,
   positive meaning the portrait moves right/down.
   `flip` mirrors the character art horizontally.
-- `Placement.name` is the join key back to the `Asset` dict.
-  A `Project` file therefore encodes placements and colors, not the fetched art,
+- `Placement.asset_key`, which is the selected `Build.key`, is the join key
+  back to the `Asset` dict; `Placement.name` only names the character.
+  A `Project` file therefore encodes placements, colors and the build's details,
+  not the fetched art,
   so re-opening a project requires re-fetching from Enka.
 - `Build.key` (`f"{name.casefold()}|{build_name.casefold()}"`)
   is what the downloaded-art dict is keyed by,
@@ -95,7 +97,11 @@ Facts that the rest of the app depends on:
 OS-appropriate app data dir resolution
 (overridable via `GENSHIN_THUMBNAIL_STUDIO_DATA_DIR`),
 load/save of reusable placement presets (`placements.json`),
-and the pre-v3 migration above.
+the profile cache (`profile_cache_path()`, `save_profile_cache()`,
+`load_profile_cache()`), keyed by the sanitized profile identifier,
+the remembered profile identifier (`settings_path()`,
+`load_last_profile()`, `save_last_profile()`, in `settings.json`),
+and `migrate_project_data()`, the single entry point for project migrations.
 That migration needs render geometry,
 which is why `storage.py` imports `renderer` (as `from . import renderer`).
 
