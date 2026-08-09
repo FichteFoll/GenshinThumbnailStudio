@@ -41,7 +41,7 @@ def test_stale_token_result_does_not_update_preview(tmp_path: Path, monkeypatch:
     app = qapp()
     window = MainWindow()
 
-    baseline_pixmap = window.preview._pixmap
+    baseline_pixmap = window.editor_panel.preview._pixmap
 
     # Simulate a render dispatched at an older token, with newer state having
     # since been requested (token bumped past the in-flight job's token).
@@ -50,7 +50,7 @@ def test_stale_token_result_does_not_update_preview(tmp_path: Path, monkeypatch:
     fake_image = Image.new("RGB", (1280, 720), (200, 40, 40))
     window._render._on_job_finished(stale_token, fake_image, None)
 
-    assert window.preview._pixmap is baseline_pixmap
+    assert window.editor_panel.preview._pixmap is baseline_pixmap
 
     window.close()
     app.processEvents()
@@ -77,8 +77,8 @@ def test_dispatch_render_end_to_end_sets_preview_pixmap(tmp_path: Path, monkeypa
     window._render.dispatch()
     wait_for_render(window, app)
 
-    assert window.preview._pixmap is not None
-    assert not window.preview._pixmap.isNull()
+    assert window.editor_panel.preview._pixmap is not None
+    assert not window.editor_panel.preview._pixmap.isNull()
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
@@ -177,7 +177,7 @@ def test_switching_modes_schedules_a_render_instead_of_blanking_the_canvas(
     window = MainWindow()
     window._render.dispatch()
     wait_for_render(window, app)
-    rendered = window.preview._pixmap
+    rendered = window.editor_panel.preview._pixmap
     assert rendered is not None and not rendered.isNull()
     window._render.timer.stop()
 
@@ -188,7 +188,7 @@ def test_switching_modes_schedules_a_render_instead_of_blanking_the_canvas(
     # being emptied.
     assert window.project.mode == "stygian"
     assert window._render.timer.isActive()
-    assert window.preview._pixmap is rendered
+    assert window.editor_panel.preview._pixmap is rendered
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
@@ -237,15 +237,15 @@ def test_arriving_art_makes_its_slot_editable(tmp_path: Path, monkeypatch: pytes
     fill_window_teams(window, ["Furina"])
     window.select_slot(0, 0)
 
-    assert window.x_slider.isEnabled() is False
-    assert window.preview._filled == set()
+    assert window.editor_panel.x_slider.isEnabled() is False
+    assert window.editor_panel.preview._filled == set()
 
     window._on_asset_ready("furina", assets["furina"])
 
-    assert window.x_slider.isEnabled() is True
-    assert window.zoom_slider.isEnabled() is True
-    assert window.reset_button.isEnabled() is True
-    assert (0, 0) in window.preview._filled
+    assert window.editor_panel.x_slider.isEnabled() is True
+    assert window.editor_panel.zoom_slider.isEnabled() is True
+    assert window.editor_panel.reset_button.isEnabled() is True
+    assert (0, 0) in window.editor_panel.preview._filled
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
@@ -261,8 +261,8 @@ def test_fresh_window_renders_a_placeholder_preview(tmp_path: Path, monkeypatch:
     window._render.dispatch()
     wait_for_render(window, app)
 
-    assert window.preview._pixmap is not None
-    assert not window.preview._pixmap.isNull()
+    assert window.editor_panel.preview._pixmap is not None
+    assert not window.editor_panel.preview._pixmap.isNull()
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
@@ -327,7 +327,7 @@ def test_render_mixes_portraits_and_placeholders(tmp_path: Path, monkeypatch: py
     # The per-panel pixels are asserted in tests/renderer/test_panels.py; what
     # matters here is that a partially filled team renders at all, which is
     # what the manual preview step used to refuse.
-    assert window.preview._pixmap is not None
-    assert not window.preview._pixmap.isNull()
+    assert window.editor_panel.preview._pixmap is not None
+    assert not window.editor_panel.preview._pixmap.isNull()
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)

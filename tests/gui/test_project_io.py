@@ -142,7 +142,7 @@ def test_open_project_loads_cached_profile_and_previews(tmp_path: Path, monkeypa
 
     assert window.project.uid == uid
     assert sorted(window.builds) == sorted(name.casefold() for name in TEAM_NAMES)
-    assert window.preview._pixmap is not None
+    assert window.editor_panel.preview._pixmap is not None
 
     window.close()
     app.processEvents()
@@ -172,7 +172,7 @@ def test_open_project_with_stale_cache_offers_refresh(tmp_path: Path, monkeypatc
     assert "2.0 hours" in StubMessageBox.instances[0].text
     assert not refreshed
     assert sorted(window.builds) == sorted(name.casefold() for name in TEAM_NAMES)
-    assert window.preview._pixmap is not None
+    assert window.editor_panel.preview._pixmap is not None
 
     window.close()
     app.processEvents()

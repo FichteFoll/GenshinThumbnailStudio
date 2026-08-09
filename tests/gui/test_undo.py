@@ -125,14 +125,14 @@ def test_a_zoom_slider_change_is_undone(tmp_path: Path, monkeypatch: pytest.Monk
     window = _window_with_history_baseline(tmp_path)
     start_zoom = window.current_member().zoom
 
-    window.zoom_slider.setValue(round(start_zoom * 100) + 15)
+    window.editor_panel.zoom_slider.setValue(round(start_zoom * 100) + 15)
     window._history.commit_now()
     assert window.current_member().zoom == _approx(start_zoom + 0.15)
 
     window._history.undo()
 
     assert window.current_member().zoom == _approx(start_zoom)
-    assert window.zoom_slider.value() == round(start_zoom * 100)
+    assert window.editor_panel.zoom_slider.value() == round(start_zoom * 100)
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
@@ -142,13 +142,13 @@ def test_a_flip_is_undone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     app = qapp()
     window = _window_with_history_baseline(tmp_path)
 
-    window.flip_check.setChecked(True)
+    window.editor_panel.flip_check.setChecked(True)
     window._history.commit_now()
 
     window._history.undo()
 
     assert window.current_member().flip is False
-    assert window.flip_check.isChecked() is False
+    assert window.editor_panel.flip_check.isChecked() is False
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 

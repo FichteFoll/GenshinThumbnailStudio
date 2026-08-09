@@ -73,7 +73,8 @@ and intercept a render already in flight.
 `main_window.py` was reduced by moving the blocking dialogs to `dialogs.py`,
 the project file flows to `project_io.py`,
 the throttled preview loop to `render_pipeline.py`,
-and the left column of the layout to `controls_panel.py`.
+and the two columns of the layout
+to `controls_panel.py` and `editor_panel.py`.
 The extracted modules take the window, or the state Protocol it satisfies,
 as a parameter rather than importing `MainWindow`,
 which is what keeps the package acyclic.
@@ -113,6 +114,18 @@ so the window connects `clicked` to `action.trigger` itself.
 `align_save_button_height()` is a method rather than part of the constructor,
 because it can only run once the window has applied the stylesheet
 both buttons size against.
+
+`EditorPanel` is the same shape for the right column,
+owning the preview toolbar, the canvas and the placement row,
+and reporting
+`active_team_changed`, `placement_changed`, `flip_toggled` and `reset_requested`.
+`PreviewWidget`'s own `slot_selected`, `placement_dragged` and `zoom_requested`
+are deliberately not re-exposed:
+they are the canvas's signals rather than the column's,
+and forwarding them would only add a hop,
+so the window connects to `editor_panel.preview` directly.
+The three sliders share one `placement_changed`,
+because the window's handler already reads all three values back.
 
 `ProjectFiles` takes the window twice,
 as `parent: QMainWindow` for the dialogs and status bar

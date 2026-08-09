@@ -166,6 +166,20 @@ and `storage.py` for persistence.
   `output_name_changed` and `resolution_changed`.
   `align_save_button_height()` is called by the window
   once its stylesheet is applied.
+- `editor_panel.py` — `EditorPanel`, the window's right column:
+  the preview toolbar with `preview_team_label` and the `boss_combo`
+  (hidden outside stygian mode),
+  the `PreviewWidget` as `preview`,
+  and the placement row
+  (`selected_label`, the X/Y/zoom sliders with their value labels,
+  `flip_check` and `reset_button`).
+  All of them stay public attributes,
+  which is what `project_io.ProjectEditor` and the tests reach through;
+  user intent leaves the panel as
+  `active_team_changed`, `placement_changed`, `flip_toggled`
+  and `reset_requested`.
+  `preview`'s own `slot_selected`, `placement_dragged` and `zoom_requested`
+  are not re-exposed: the window connects to `editor_panel.preview` directly.
 - `dialogs.py` — the blocking dialogs as free functions taking the parent widget:
   `confirm_discard_changes()`, `choose_stale_profile_action()`, `confirm_cache_refresh()`,
   `show_error()`, `show_export_finished()`, `ask_lineup_text()`, `ask_export_target()`.
@@ -220,14 +234,17 @@ and `asset_loader` reaches `download_assets` through `..akasha`);
 `preview`, `team_slots`, `render_job` and `controls_panel`
 import nothing from the package
 (`render_job` reaches the renderer through `..renderer`);
+`editor_panel` imports `preview`;
 `render_pipeline` imports `state` and `render_job`,
 and reaches `Project` through `..models`;
-`project_io` imports `state`, `dialogs`, `history`, `asset_loader`
-and `controls_panel`,
+`project_io` imports `state`, `dialogs`, `history`, `asset_loader`,
+`controls_panel` and `editor_panel`,
 and reaches `..models`, `..storage` and `..renderer` outside the package;
 `main_window` imports every sibling except `state`,
 which it satisfies structurally rather than importing,
-and reaches `dialogs` as a module (`from . import dialogs`);
+and `preview` and `render_job`, which it now reaches
+through `editor_panel` and `render_pipeline`;
+it reaches `dialogs` as a module (`from . import dialogs`);
 `app` imports `main_window`.
 
 ## Data flow

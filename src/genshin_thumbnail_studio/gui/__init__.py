@@ -14,6 +14,7 @@ from .dialogs import (
     show_error,
     show_export_finished,
 )
+from .editor_panel import EditorPanel
 from .history import HISTORY_DEBOUNCE_MS, HISTORY_LIMIT, HistoryController, PlacementHistory
 from .lineup import parse_lineup
 from .main_window import MainWindow
@@ -38,6 +39,7 @@ __all__ = [
     "AssetJobSignals",
     "AssetLoader",
     "ControlsPanel",
+    "EditorPanel",
     "EditorState",
     "HistoryController",
     "MainWindow",

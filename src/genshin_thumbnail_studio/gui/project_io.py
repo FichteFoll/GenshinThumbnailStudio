@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Protocol
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QApplication, QComboBox, QFileDialog, QMainWindow
+from PySide6.QtWidgets import QApplication, QFileDialog, QMainWindow
 
 from .. import storage
 from ..models import Build, Project
@@ -25,6 +25,7 @@ from ..renderer import export_project, safe_name
 from . import dialogs
 from .asset_loader import AssetLoader
 from .controls_panel import ControlsPanel
+from .editor_panel import EditorPanel
 from .history import HistoryController
 from .state import EditorState
 
@@ -44,7 +45,7 @@ class ProjectEditor(EditorState, Protocol):
     selected: tuple[int, int]
     asset_loader: AssetLoader
     controls_panel: ControlsPanel
-    boss_combo: QComboBox
+    editor_panel: EditorPanel
 
     def validate_team(self) -> list[Build]: ...
     def selected_name_keys(self) -> set[str]: ...
@@ -118,8 +119,9 @@ class ProjectFiles:
             controls.stygian_radio.blockSignals(False)
             controls.uid_edit.setText(project.uid)
             controls.output_name.setText(project.output_name)
-            editor.boss_combo.setVisible(project.mode == "stygian")
-            editor.boss_combo.setCurrentIndex(project.active_team)
+            boss_combo = editor.editor_panel.boss_combo
+            boss_combo.setVisible(project.mode == "stygian")
+            boss_combo.setCurrentIndex(project.active_team)
             editor.rebuild_team_fields()
             editor.sync_controls()
             cached = storage.load_profile_cache(project.uid)

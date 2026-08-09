@@ -12,18 +12,13 @@ from PySide6.QtCore import Qt, QThreadPool
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
-    QCheckBox,
     QComboBox,
-    QHBoxLayout,
     QLabel,
     QLayout,
     QMainWindow,
     QMenu,
-    QPushButton,
-    QSlider,
     QSplitter,
     QVBoxLayout,
-    QWidget,
 )
 
 from ..akasha import AkashaError, AkashaWebClient, Build, StaleProfileError
@@ -32,11 +27,11 @@ from ..storage import cache_dir, save_profile_cache
 from . import dialogs
 from .asset_loader import AssetLoader
 from .controls_panel import ControlsPanel
+from .editor_panel import EditorPanel
 from .history import HistoryController
 from .lineup import parse_lineup
 from .placement import PlacementController
 from .presets import PresetStore
-from .preview import PreviewWidget
 from .project_io import ProjectFiles
 from .render_pipeline import RenderPipeline
 from .style import MAIN_STYLESHEET
@@ -72,7 +67,7 @@ class MainWindow(QMainWindow):
         self.team_combos: list[list[QComboBox]] = []
         self._build_ui()
         # Connected only now: the preview does not exist before `_build_ui()`.
-        self._render.rendered.connect(self.preview.set_preview)
+        self._render.rendered.connect(self.editor_panel.preview.set_preview)
         self._render.failed.connect(self._on_render_failed)
         self.rebuild_team_fields()
         self.sync_controls()
@@ -167,61 +162,19 @@ class MainWindow(QMainWindow):
         self.controls_panel.save_button.clicked.connect(self.save_action.trigger)
         self.controls_panel.export_button.clicked.connect(self.export_action.trigger)
 
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(12, 16, 16, 16)
-        right_layout.setSpacing(10)
-
-        preview_toolbar = QHBoxLayout()
-        self.preview_team_label = QLabel("Preview")
-        self.boss_combo = QComboBox()
-        self.boss_combo.addItems(["Boss 1", "Boss 2", "Boss 3"])
-        self.boss_combo.setVisible(False)
-        self.boss_combo.currentIndexChanged.connect(self._active_team_changed)
-        preview_toolbar.addWidget(self.preview_team_label)
-        preview_toolbar.addStretch(1)
-        preview_toolbar.addWidget(self.boss_combo)
-        right_layout.addLayout(preview_toolbar)
-
-        self.preview = PreviewWidget()
-        self.preview.slot_selected.connect(self.select_slot)
-        self.preview.placement_dragged.connect(self.drag_placement)
-        self.preview.zoom_requested.connect(self.change_zoom)
-        right_layout.addWidget(self.preview, 1)
-
-        placement_row = QHBoxLayout()
-        self.selected_label = QLabel("Team 1, character 1")
-        # Placeholder offset ranges; sync_controls() sets the reachable ones.
-        self.x_slider = self._slider(-500, 500, 0)
-        self.y_slider = self._slider(-500, 500, -20)
-        self.zoom_slider = self._slider(70, 180, 100)
-        self.x_value = QLabel("+0%")
-        self.y_value = QLabel("-2%")
-        self.zoom_value = QLabel("100%")
-        for slider in [self.x_slider, self.y_slider, self.zoom_slider]:
-            slider.valueChanged.connect(self._placement_slider_changed)
-        self.flip_check = QCheckBox("Flip")
-        self.flip_check.setToolTip("Mirror this character horizontally")
-        self.flip_check.toggled.connect(self._flip_toggled)
-        self.reset_button = QPushButton("Reset")
-        self.reset_button.clicked.connect(self.reset_placement)
-        placement_row.addWidget(self.selected_label)
-        placement_row.addSpacing(12)
-        placement_row.addWidget(QLabel("X"))
-        placement_row.addWidget(self.x_slider, 1)
-        placement_row.addWidget(self.x_value)
-        placement_row.addWidget(QLabel("Y"))
-        placement_row.addWidget(self.y_slider, 1)
-        placement_row.addWidget(self.y_value)
-        placement_row.addWidget(QLabel("Zoom"))
-        placement_row.addWidget(self.zoom_slider, 1)
-        placement_row.addWidget(self.zoom_value)
-        placement_row.addWidget(self.flip_check)
-        placement_row.addWidget(self.reset_button)
-        right_layout.addLayout(placement_row)
+        self.editor_panel = EditorPanel()
+        self.editor_panel.active_team_changed.connect(self._active_team_changed)
+        self.editor_panel.placement_changed.connect(self._placement_slider_changed)
+        self.editor_panel.flip_toggled.connect(self._flip_toggled)
+        self.editor_panel.reset_requested.connect(self.reset_placement)
+        # The preview's own signals are not re-exposed by the panel: they are
+        # the canvas's, not the column's.
+        self.editor_panel.preview.slot_selected.connect(self.select_slot)
+        self.editor_panel.preview.placement_dragged.connect(self.drag_placement)
+        self.editor_panel.preview.zoom_requested.connect(self.change_zoom)
 
         splitter.addWidget(self.controls_panel)
-        splitter.addWidget(right)
+        splitter.addWidget(self.editor_panel)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         self.statusBar().showMessage("Ready")
@@ -229,14 +182,6 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(MAIN_STYLESHEET)
         self.controls_panel.align_save_button_height()
         self._update_save_button()
-
-    @staticmethod
-    def _slider(minimum: int, maximum: int, value: int) -> QSlider:
-        slider = QSlider(Qt.Orientation.Horizontal)
-        slider.setRange(minimum, maximum)
-        slider.setValue(value)
-        slider.setMinimumWidth(80)
-        return slider
 
     def _clear_layout(self, layout: QLayout) -> None:
         while layout.count():
@@ -364,7 +309,7 @@ class MainWindow(QMainWindow):
         self.set_project_path(None)
         self.assets = {}
         self.selected = (0, 0)
-        self.boss_combo.setVisible(mode == "stygian")
+        self.editor_panel.boss_combo.setVisible(mode == "stygian")
         self.rebuild_team_fields()
         self.sync_controls()
         self.schedule_render()
@@ -428,43 +373,44 @@ class MainWindow(QMainWindow):
         slot = min(slot, 3)
         self.selected = (team, slot)
         member = self.current_member()
+        editor = self.editor_panel
         self._updating_controls = True
         max_x, max_y = self._placement.offset_bounds(member)
         # Truncate rather than round, so the slider end stays inside the range
         # the renderer can reach and no travel is left dead at the ends.
         limit_x, limit_y = int(max_x * 1000), int(max_y * 1000)
-        self.x_slider.setRange(-limit_x, limit_x)
-        self.y_slider.setRange(-limit_y, limit_y)
-        self.x_slider.setValue(round(member.offset_x * 1000))
-        self.y_slider.setValue(round(member.offset_y * 1000))
+        editor.x_slider.setRange(-limit_x, limit_x)
+        editor.y_slider.setRange(-limit_y, limit_y)
+        editor.x_slider.setValue(round(member.offset_x * 1000))
+        editor.y_slider.setValue(round(member.offset_y * 1000))
         # The sliders clamp to their range, so read the values back to keep the
         # model from holding an offset the renderer could not reach anyway.
-        member.offset_x = self.x_slider.value() / 1000
-        member.offset_y = self.y_slider.value() / 1000
-        self.zoom_slider.setValue(round(member.zoom * 100))
-        self.flip_check.setChecked(member.flip)
+        member.offset_x = editor.x_slider.value() / 1000
+        member.offset_y = editor.y_slider.value() / 1000
+        editor.zoom_slider.setValue(round(member.zoom * 100))
+        editor.flip_check.setChecked(member.flip)
         resolution_combo = self.controls_panel.resolution_combo
         resolution_index = resolution_combo.findData(self.project.output_height)
         resolution_combo.setCurrentIndex(resolution_index if resolution_index >= 0 else 1)
         self._updating_controls = False
         label = "Team" if self.project.mode == "abyss" else "Boss"
-        self.selected_label.setText(f"{label} {team + 1}, character {slot + 1}")
-        self.x_value.setText(f"{member.offset_x * 100:+.0f}%")
-        self.y_value.setText(f"{member.offset_y * 100:+.0f}%")
-        self.zoom_value.setText(f"{member.zoom * 100:.0f}%")
+        editor.selected_label.setText(f"{label} {team + 1}, character {slot + 1}")
+        editor.x_value.setText(f"{member.offset_x * 100:+.0f}%")
+        editor.y_value.setText(f"{member.offset_y * 100:+.0f}%")
+        editor.zoom_value.setText(f"{member.zoom * 100:.0f}%")
         filled = self._filled_slots()
         editable = self.selected in filled
-        for control in (self.x_slider, self.y_slider, self.zoom_slider, self.flip_check, self.reset_button):
+        for control in (editor.x_slider, editor.y_slider, editor.zoom_slider, editor.flip_check, editor.reset_button):
             control.setEnabled(editable)
-        self.preview.set_context(self.project.mode, self.project.active_team, self.selected, filled)
+        editor.preview.set_context(self.project.mode, self.project.active_team, self.selected, filled)
 
     def _placement_slider_changed(self) -> None:
         if self._updating_controls:
             return
         member = self.current_member()
-        member.offset_x = self.x_slider.value() / 1000
-        member.offset_y = self.y_slider.value() / 1000
-        member.zoom = self.zoom_slider.value() / 100
+        member.offset_x = self.editor_panel.x_slider.value() / 1000
+        member.offset_y = self.editor_panel.y_slider.value() / 1000
+        member.zoom = self.editor_panel.zoom_slider.value() / 100
         self._save_current_preset()
         self.sync_controls()
         self.schedule_render()
