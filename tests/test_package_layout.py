@@ -32,6 +32,13 @@ EXPECTED_MODULES = {
     "akasha/rarities.py",
     "akasha/client.py",
     "akasha/assets.py",
+    "enka/__init__.py",
+    "enka/errors.py",
+    "enka/http.py",
+    "enka/parsing.py",
+    "enka/profile.py",
+    "enka/client.py",
+    "enka/assets.py",
     "renderer/__init__.py",
     "renderer/geometry.py",
     "renderer/colors.py",
@@ -67,9 +74,9 @@ EXPECTED_MODULES = {
 
 PACKAGE_NAME = "genshin_thumbnail_studio"
 
-FACADES = ("akasha/__init__.py", "renderer/__init__.py", "gui/__init__.py")
+FACADES = ("akasha/__init__.py", "enka/__init__.py", "renderer/__init__.py", "gui/__init__.py")
 
-TEST_PACKAGES = ("akasha", "renderer", "gui")
+TEST_PACKAGES = ("akasha", "enka", "renderer", "gui")
 
 RETIRED_TEST_FILES = ("test_akasha.py", "test_renderer.py", "test_gui_smoke.py", "test_lineup.py")
 

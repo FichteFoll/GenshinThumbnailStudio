@@ -7,6 +7,7 @@ import these without pulling in the network or GUI stack.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, fields
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -66,6 +67,21 @@ class Build:
         by an older version loads with defaults instead of raising."""
         known = {field_.name for field_ in fields(cls)}
         return cls(**{key: item for key, item in value.items() if key in known})
+
+
+@dataclass
+class Profile:
+    """Everything one fetch from Enka yielded, keyed by casefolded character name.
+
+    It lives here rather than in the `enka` package because `storage` caches it
+    on disk and must not import the network layer to do so.
+    """
+
+    identifier: str
+    uid: str
+    username: str
+    builds: dict[str, list[Build]]
+    fetched_at: datetime
 
 
 @dataclass
