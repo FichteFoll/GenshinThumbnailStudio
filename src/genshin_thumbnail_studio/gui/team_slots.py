@@ -8,9 +8,14 @@ from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QToolButton, QWidg
 
 SLOT_MIME_TYPE = "application/x-genshin-slot"
 
-# A saved build's name is free text, so the caption is elided rather than
-# allowed to stretch the whole controls column.
-MAX_BUILD_CAPTION_WIDTH = 120
+# Every slot's build button is the same width, so that the combos beside them
+# end at one edge instead of each row breaking where its caption happens to.
+BUILD_BUTTON_WIDTH = 150
+# What the arrow, the QToolButton#buildButton padding in style.py and the gap
+# between them take off that width, leaving the budget the caption is elided to;
+# a saved build's name is free text and would otherwise stretch the row.
+_BUILD_BUTTON_CHROME_WIDTH = 34
+MAX_BUILD_CAPTION_WIDTH = BUILD_BUTTON_WIDTH - _BUILD_BUTTON_CHROME_WIDTH
 
 
 class _SlotDragHandle(QLabel):
@@ -73,6 +78,7 @@ class TeamSlotWidget(QWidget):
         # so the caption sits beside it.
         self.build_button.setArrowType(Qt.ArrowType.DownArrow)
         self.build_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.build_button.setFixedWidth(BUILD_BUTTON_WIDTH)
         self.build_button.setToolTip("Choose build")
         self.build_button.clicked.connect(lambda: self.build_menu_requested.emit(self.team, self.slot))
         layout.addWidget(self.build_button)

@@ -290,7 +290,10 @@ and `storage.py` for persistence.
   (the arrow button next to the combo) is clicked.
   `build_button` now carries the selected build's label beside its arrow,
   set through `set_build_caption()`, which elides the label to
-  `MAX_BUILD_CAPTION_WIDTH` and puts the full label in the tooltip;
+  `MAX_BUILD_CAPTION_WIDTH` and puts the full label in the tooltip.
+  Its width is pinned to `BUILD_BUTTON_WIDTH` for every slot,
+  so the combos beside the buttons end at one edge
+  rather than each row breaking where its caption happens to;
   it is styled by the `QToolButton#buildButton` rule in `gui/style.py`.
 - `team_fields.py` — `clear_layout()`, `TeamFieldsController`
   and the `TeamFieldsEditor` Protocol it works through.

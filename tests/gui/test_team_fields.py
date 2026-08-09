@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 import pytest
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
+from genshin_thumbnail_studio.gui import team_slots
 from genshin_thumbnail_studio.gui.history import HistoryController
 from genshin_thumbnail_studio.gui.team_fields import TeamFieldsController
 from genshin_thumbnail_studio.models import LIVE_BUILD_NAME, Asset, Build, Project
@@ -145,6 +146,16 @@ def test_the_build_button_captions_the_selected_build(host: Host) -> None:
     """R5: the button beside the combo names the build the slot is framed with."""
     assert host.controller.slot_widgets[0][0].build_button.text() == LIVE_BUILD_NAME
     assert host.controller.slot_widgets[0][1].build_button.text() == ""
+
+
+def test_every_build_button_has_the_same_width(host: Host) -> None:
+    """R5: every button is pinned to one width, captioned or not, so that the
+    combos beside them end at one edge instead of raggedly following captions."""
+    widths = {
+        widget.build_button.width() for row in host.controller.slot_widgets for widget in row
+    }
+
+    assert widths == {team_slots.BUILD_BUTTON_WIDTH}
 
 
 def test_selecting_a_build_updates_the_button_caption(host: Host) -> None:
