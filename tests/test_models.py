@@ -1,6 +1,25 @@
 """Tests for `genshin_thumbnail_studio.models`."""
 
+import hashlib
+from pathlib import Path
+
 from genshin_thumbnail_studio.models import LIVE_BUILD_NAME, Build, Placement, Project
+
+
+def make_build(
+    name: str = "Furina",
+    art_url: str = "https://enka.network/ui/furina.png",
+    weapon_url: str = "https://enka.network/ui/weapon.png",
+) -> Build:
+    return Build(
+        name=name,
+        constellation=0,
+        refinement=1,
+        weapon_name="Weapon",
+        costume_id=None,
+        art_url=art_url,
+        weapon_url=weapon_url,
+    )
 
 
 def test_build_round_trip() -> None:
@@ -36,6 +55,58 @@ def test_build_round_trip() -> None:
     assert restored_with_nones == build_with_nones
     # The live build is the default, and its key is the character alone.
     assert build_with_nones.key == "navia|live"
+
+
+def test_build_paths_reproduce_the_cache_naming_scheme() -> None:
+    """R3: the derived paths are byte-for-byte the ones the downloader computed
+    for itself before, so an existing cache keeps working. The literals below
+    are what `enka.assets._asset_path()` produced."""
+    build = make_build(
+        name="Furina",
+        art_url="https://enka.network/ui/UI_Gacha_AvatarImg_Furina.png",
+        weapon_url="https://enka.network/ui/UI_EquipIcon_Sword_Test.jpg",
+    )
+    root = Path("/cache/assets")
+
+    assert build.art_path(root) == root / "characters" / "Furina-7d50180696917f6b.png"
+    assert build.weapon_path(root) == root / "weapons" / "Furina-7cf6974cc25429e1.jpg"
+
+
+def test_build_paths_fall_back_to_png_for_an_unusable_url_extension() -> None:
+    build = make_build(
+        art_url="https://enka.network/ui/no-extension",
+        weapon_url="https://enka.network/ui/other.webp",
+    )
+    root = Path("/cache/assets")
+
+    assert build.art_path(root).name == "Furina-ff5c6a2adadd28e9.png"
+    assert build.weapon_path(root).name == "Furina-00dd3b8d95eef6e5.webp"
+
+
+def test_the_url_digest_is_what_keeps_two_builds_of_one_character_apart() -> None:
+    root = Path("/cache/assets")
+    live = make_build(art_url="https://enka.network/ui/furina.png", weapon_url="https://enka.network/ui/a.png")
+    skinned = make_build(art_url="https://enka.network/ui/furina-skin.png", weapon_url="https://enka.network/ui/b.png")
+
+    assert live.art_path(root) != skinned.art_path(root)
+    assert live.weapon_path(root) != skinned.weapon_path(root)
+
+    # Two builds that download the same files share them, whatever else differs.
+    same = make_build(art_url=live.art_url, weapon_url=live.weapon_url)
+    same.build_name = "Vape"
+    same.constellation = 6
+    assert same.art_path(root) == live.art_path(root)
+    assert same.weapon_path(root) == live.weapon_path(root)
+
+
+def test_a_name_full_of_separators_still_yields_one_path_segment() -> None:
+    url = "https://enka.network/ui/traveler.png"
+    build = make_build(name="../../Traveler (Anemo)/", art_url=url, weapon_url=url)
+    root = Path("/cache/assets")
+
+    art = build.art_path(root)
+    assert art.parent == root / "characters"
+    assert art.name == f"Traveler_Anemo-{hashlib.sha256(url.encode('utf-8')).hexdigest()[:16]}.png"
 
 
 def test_build_from_dict_tolerates_a_payload_without_the_newer_keys() -> None:
