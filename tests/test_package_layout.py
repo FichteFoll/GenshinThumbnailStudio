@@ -72,7 +72,7 @@ FACADES = ("enka/__init__.py", "renderer/__init__.py", "gui/__init__.py")
 
 TEST_PACKAGES = ("enka", "renderer", "gui")
 
-RETIRED_TEST_FILES = ("test_akasha.py", "test_renderer.py", "test_gui_smoke.py", "test_lineup.py")
+RETIRED_TEST_FILES = ("test_renderer.py", "test_gui_smoke.py", "test_lineup.py")
 
 # A regression tripwire, not a design target, set to the next multiple of 50
 # above the largest module. `gui/main_window.py` still holds that spot, but only
