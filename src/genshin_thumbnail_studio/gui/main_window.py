@@ -12,13 +12,9 @@ from PySide6.QtCore import Qt, QThreadPool
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
-    QComboBox,
-    QLabel,
-    QLayout,
     QMainWindow,
     QMenu,
     QSplitter,
-    QVBoxLayout,
 )
 
 from ..akasha import AkashaError, AkashaWebClient, Build, StaleProfileError
@@ -35,7 +31,7 @@ from .presets import PresetStore
 from .project_io import ProjectFiles
 from .render_pipeline import RenderPipeline
 from .style import MAIN_STYLESHEET
-from .team_slots import TeamSlotWidget
+from .team_fields import TeamFieldsController
 
 
 class MainWindow(QMainWindow):
@@ -53,8 +49,6 @@ class MainWindow(QMainWindow):
         self._history = HistoryController(self, self, self._history_restored)
         self.project_files = ProjectFiles(self, self, self._history)
         self.selected = (0, 0)
-        self._drag_snapshot: list[list[Placement]] | None = None
-        self._drag_position: tuple[int, int] | None = None
         self._updating_controls = False
         self._thread_pool = QThreadPool(self)
         self.asset_loader = AssetLoader(self, cache_dir() / "assets", self._thread_pool, self)
@@ -64,11 +58,11 @@ class MainWindow(QMainWindow):
         self._render = RenderPipeline(self, self._thread_pool, self)
         self._closing = False
         self.client = AkashaWebClient(cache_dir())
-        self.team_combos: list[list[QComboBox]] = []
         self._build_ui()
         # Connected only now: the preview does not exist before `_build_ui()`.
         self._render.rendered.connect(self.editor_panel.preview.set_preview)
         self._render.failed.connect(self._on_render_failed)
+        self.team_fields = TeamFieldsController(self, self.controls_panel.team_layout, self._history, self)
         self.rebuild_team_fields()
         self.sync_controls()
         self.saved_snapshot = copy.deepcopy(self.project)
@@ -79,7 +73,7 @@ class MainWindow(QMainWindow):
         self.rebuild_team_fields()
         self.sync_controls()
         self._save_current_preset()
-        # A restore can bring back a name whose art `_member_changed` pruned,
+        # A restore can bring back a name whose art `member_changed` pruned,
         # and it reaches the combos before their signals are connected, so it
         # goes through neither that handler nor its `ensure()`. Without this the
         # slot would stay a placeholder for good: inert, and refusing to export.
@@ -183,118 +177,11 @@ class MainWindow(QMainWindow):
         self.controls_panel.align_save_button_height()
         self._update_save_button()
 
-    def _clear_layout(self, layout: QLayout) -> None:
-        while layout.count():
-            item = layout.takeAt(0)
-            if item is None:
-                continue
-            widget = item.widget()
-            if widget:
-                widget.deleteLater()
-            else:
-                sub_layout = item.layout()
-                if sub_layout:
-                    self._clear_layout(sub_layout)
-
     def rebuild_team_fields(self) -> None:
-        team_layout = self.controls_panel.team_layout
-        self._clear_layout(team_layout)
-        self.team_combos = []
-        for team_index, team in enumerate(self.project.teams):
-            title = QLabel(f"{'Team' if self.project.mode == 'abyss' else 'Boss'} {team_index + 1}")
-            title.setStyleSheet("font-weight: 600;")
-            team_layout.addWidget(title)
-            rows = QVBoxLayout()
-            rows.setSpacing(4)
-            row_combos: list[QComboBox] = []
-            for slot_index, member in enumerate(team):
-                combo = QComboBox()
-                combo.setEditable(True)
-                combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-                combo.setPlaceholderText(f"Character {slot_index + 1}")
-                if member.name:
-                    combo.setCurrentText(member.name)
-
-                def on_text_changed(value: str, t: int = team_index, s: int = slot_index) -> None:
-                    self._member_changed(t, s, value)
-
-                combo.currentTextChanged.connect(on_text_changed)
-                slot_widget = TeamSlotWidget(team_index, slot_index, combo)
-                slot_widget.drag_started.connect(self._on_slot_drag_started)
-                slot_widget.drag_hover.connect(self._on_slot_drag_hover)
-                slot_widget.drag_ended.connect(self._on_slot_drag_ended)
-                rows.addWidget(slot_widget)
-                row_combos.append(combo)
-            team_layout.addLayout(rows)
-            self.team_combos.append(row_combos)
-        team_layout.addStretch(1)
-        self.populate_combo_items()
-
-    def _refresh_slot_display(self) -> None:
-        for team_index, row in enumerate(self.team_combos):
-            for slot_index, combo in enumerate(row):
-                name = self.project.teams[team_index][slot_index].name
-                if combo.currentText() != name:
-                    combo.blockSignals(True)
-                    combo.setCurrentText(name)
-                    combo.blockSignals(False)
-
-    def _on_slot_drag_started(self, team: int, slot: int) -> None:
-        # Settle any edit still pending from before the drag, so its debounce
-        # cannot fire mid-gesture and snapshot a half-finished reorder.
-        self._history.commit_now()
-        self._drag_snapshot = copy.deepcopy(self.project.teams)
-        self._drag_position = (team, slot)
-
-    def _on_slot_drag_hover(self, team: int, slot: int) -> None:
-        if self._drag_position is None or (team, slot) == self._drag_position:
-            return
-        self.reorder_slots(self._drag_position, (team, slot))
-        self._drag_position = (team, slot)
-
-    def _on_slot_drag_ended(self, accepted: bool) -> None:
-        if not accepted and self._drag_snapshot is not None:
-            self.project.teams = self._drag_snapshot
-            self._refresh_slot_display()
-            self.sync_controls()
-            self.schedule_render()
-        self._drag_snapshot = None
-        self._drag_position = None
-        # A no-op after a cancelled drag, whose revert restored the last state.
-        self._history.commit_now()
-
-    def reorder_slots(self, source: tuple[int, int], target: tuple[int, int]) -> None:
-        if source == target:
-            return
-        per_team = len(self.project.teams[0])
-        members = [member for team in self.project.teams for member in team]
-        source_index = source[0] * per_team + source[1]
-        target_index = target[0] * per_team + target[1]
-        moved = members.pop(source_index)
-        members.insert(target_index, moved)
-        for team_index, team in enumerate(self.project.teams):
-            for slot_index in range(len(team)):
-                team[slot_index] = members[team_index * per_team + slot_index]
-        self._refresh_slot_display()
-        self.selected = target
-        self.sync_controls()
-        self.schedule_render()
-        if self._drag_position is None:
-            self._history.commit_now()
-        # During a drag nothing is scheduled: the drop commits the whole gesture
-        # in one go, and a debounce that fired while the user lingered over a
-        # slot would record an arrangement that a cancelled drag then reverts.
+        self.team_fields.rebuild()
 
     def populate_combo_items(self) -> None:
-        names = [build.name for build in sorted(self.builds.values(), key=lambda item: item.name.casefold())]
-        for row in self.team_combos:
-            for combo in row:
-                current = combo.currentText()
-                combo.blockSignals(True)
-                combo.clear()
-                combo.addItems(names)
-                combo.setCurrentText(current)
-                combo.blockSignals(False)
+        self.team_fields.populate_items()
 
     def _mode_changed(self, abyss_checked: bool) -> None:
         mode = "abyss" if abyss_checked else "stygian"
@@ -332,7 +219,7 @@ class MainWindow(QMainWindow):
         self.sync_controls()
         self.schedule_render()
 
-    def _member_changed(self, team: int, slot: int, name: str) -> None:
+    def member_changed(self, team: int, slot: int, name: str) -> None:
         member = self.project.teams[team][slot]
         old_name = member.name
         member.name = name.strip()
@@ -504,12 +391,12 @@ class MainWindow(QMainWindow):
             return
         for index, name in enumerate(names):
             team, slot = divmod(index, 4)
-            self.team_combos[team][slot].setCurrentText(name)
+            self.team_fields.combos[team][slot].setCurrentText(name)
 
     def validate_team(self) -> list[Build]:
         missing: list[str] = []
         selected: list[Build] = []
-        for team_index, row in enumerate(self.team_combos):
+        for team_index, row in enumerate(self.team_fields.combos):
             for slot_index, combo in enumerate(row):
                 name = combo.currentText().strip()
                 self.project.teams[team_index][slot_index].name = name
@@ -538,7 +425,7 @@ class MainWindow(QMainWindow):
         # preview and the placement widgets, and so makes the slot editable.
         self.sync_controls()
         self.schedule_render()
-        if self._drag_position is None:
+        if not self.team_fields.dragging:
             # Debounced, so a batch of arrivals coalesces into one undo step;
             # skipped mid-drag, where nothing may be scheduled at all.
             self._history.schedule()

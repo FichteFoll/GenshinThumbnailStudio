@@ -291,7 +291,7 @@ def test_typing_a_member_name_downloads_its_art_in_the_background(
 
     monkeypatch.setattr(asset_loader, "download_assets", fake_download_assets)
 
-    window._member_changed(0, 0, "Furina")
+    window.member_changed(0, 0, "Furina")
     # The download runs on the window's own pool, and its `asset_ready` crosses
     # back to the GUI thread as a queued signal.
     window._thread_pool.waitForDone(5000)

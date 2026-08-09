@@ -25,6 +25,7 @@ from .project_io import ProjectFiles
 from .render_job import RenderJob, RenderJobSignals
 from .render_pipeline import RENDER_THROTTLE_MS, RenderPipeline
 from .state import EditorState
+from .team_fields import TeamFieldsController
 from .team_slots import SLOT_MIME_TYPE, TeamSlotWidget
 
 __all__ = [
@@ -51,6 +52,7 @@ __all__ = [
     "RenderJob",
     "RenderJobSignals",
     "RenderPipeline",
+    "TeamFieldsController",
     "TeamSlotWidget",
     "ask_export_target",
     "ask_lineup_text",

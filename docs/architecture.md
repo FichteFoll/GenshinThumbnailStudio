@@ -151,7 +151,7 @@ and `storage.py` for persistence.
 - `main_window.py` — `MainWindow`:
   profile loading, placement editing,
   the four project `QAction`s (`Ctrl+O`, `Ctrl+S`, `Ctrl+Shift+S`, `Ctrl+E`),
-  team-slot reordering, and the close sequence.
+  and the close sequence.
   The largest module by far.
 - `controls_panel.py` — `RESOLUTION_OPTIONS` and `ControlsPanel`,
   the window's left column:
@@ -203,6 +203,18 @@ and `storage.py` for persistence.
   `set_context(mode, active_team, selected, filled)` tells it which slots have art.
 - `team_slots.py` — `SLOT_MIME_TYPE` and `TeamSlotWidget`,
   which emits `drag_started`, `drag_hover` and `drag_ended` across a drag gesture.
+- `team_fields.py` — `clear_layout()`, `TeamFieldsController`
+  and the `TeamFieldsEditor` Protocol it works through.
+  The controller fills `ControlsPanel.team_layout` with one `TeamSlotWidget`
+  per slot (`rebuild()`), keeps their combos in step with the project
+  (`refresh_display()`, `populate_items()`, the public `combos`),
+  and turns a drag gesture into a live reorder plus one undo step
+  (`on_drag_started()`, `on_drag_hover()`, `on_drag_ended()`, `reorder()`,
+  and `dragging`, which `MainWindow._on_asset_ready` reads).
+  Constructed once in `MainWindow.__init__` with the window as
+  `TeamFieldsEditor`, the panel's layout and the window's `HistoryController`.
+  `MainWindow` keeps thin `rebuild_team_fields()` and `populate_combo_items()`
+  methods delegating here, which `project_io.ProjectEditor` requires.
 - `render_job.py` — `RenderJobSignals` and `RenderJob`,
   rendering a `Project` snapshot on a `QThreadPool` worker.
 - `render_pipeline.py` — `RENDER_THROTTLE_MS` and `RenderPipeline`,
@@ -237,13 +249,15 @@ import nothing from the package
 `editor_panel` imports `preview`;
 `render_pipeline` imports `state` and `render_job`,
 and reaches `Project` through `..models`;
+`team_fields` imports `state`, `history` and `team_slots`,
+and reaches `Placement` through `..models`;
 `project_io` imports `state`, `dialogs`, `history`, `asset_loader`,
 `controls_panel` and `editor_panel`,
 and reaches `..models`, `..storage` and `..renderer` outside the package;
 `main_window` imports every sibling except `state`,
 which it satisfies structurally rather than importing,
-and `preview` and `render_job`, which it now reaches
-through `editor_panel` and `render_pipeline`;
+and `preview`, `render_job` and `team_slots`, which it now reaches
+through `editor_panel`, `render_pipeline` and `team_fields`;
 it reaches `dialogs` as a module (`from . import dialogs`);
 `app` imports `main_window`.
 

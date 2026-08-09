@@ -73,6 +73,7 @@ and intercept a render already in flight.
 `main_window.py` was reduced by moving the blocking dialogs to `dialogs.py`,
 the project file flows to `project_io.py`,
 the throttled preview loop to `render_pipeline.py`,
+the team slot fields and their drag reordering to `team_fields.py`,
 and the two columns of the layout
 to `controls_panel.py` and `editor_panel.py`.
 The extracted modules take the window, or the state Protocol it satisfies,
@@ -126,6 +127,17 @@ and forwarding them would only add a hop,
 so the window connects to `editor_panel.preview` directly.
 The three sliders share one `placement_changed`,
 because the window's handler already reads all three values back.
+
+`TeamFieldsController` owns the combos rather than the window,
+and fills the `team_layout` `ControlsPanel` hands it,
+so the panel describes the column's shape and the controller its contents.
+It takes the `HistoryController` as a constructor argument
+for the same reason `ProjectFiles` does,
+because the drag handlers commit through it;
+`MainWindow` keeps `rebuild_team_fields()` and `populate_combo_items()`
+as one-line delegates, both required by `project_io.ProjectEditor`,
+and `_member_changed` became the public `member_changed`
+so the window satisfies the `TeamFieldsEditor` Protocol.
 
 `ProjectFiles` takes the window twice,
 as `parent: QMainWindow` for the dialogs and status bar
@@ -186,10 +198,10 @@ Its `failed` writes to the status bar with an 8000 ms timeout
 rather than opening a dialog that would interrupt typing.
 `ensure()` must be called wherever the set of named characters or loaded builds can change:
 the success path of `load_profile`,
-the end of `_member_changed` (which is also what `paste_teams` goes through),
+the end of `member_changed` (which is also what `paste_teams` goes through),
 both of `project_io.ProjectFiles.open`'s profile paths,
 and `_history_restored()`,
-because an undo can bring back a name whose art `_member_changed` pruned,
+because an undo can bring back a name whose art `member_changed` pruned,
 and it writes the combos before their signals are connected.
 
 `export()` therefore cannot wait for a download:
@@ -243,10 +255,11 @@ and `commit()` is a no-op returning `False` when the teams equal the current sta
 `HistoryController.schedule()` is a debounce (600 ms),
 not the throttle `MainWindow.schedule_render()` is,
 so a whole drag or slider sweep becomes one undo step.
-Continuous edits (sliders, drag, zoom, flip, per-keystroke `_member_changed`,
+Continuous edits (sliders, drag, zoom, flip, per-keystroke `member_changed`,
 and `_on_asset_ready`, where an arriving asset's preset reframes its member
 outside any edit handler) schedule;
-the discrete `reset_placement` and `_on_slot_drag_ended` `commit_now()`;
+the discrete `reset_placement`
+and `team_fields.TeamFieldsController.on_drag_ended()` `commit_now()`;
 `_mode_changed` and both of `project_io.ProjectFiles.open`'s exits `reset()`,
 since they replace `self.project` wholesale
 and an older snapshot would let `Ctrl+Z` resurrect a lineup from a different document.
@@ -271,28 +284,31 @@ letting text fields and the editable team combos keep their own undo.
 
 ### Slot drag-and-drop
 
-`reorder_slots()` moves a `Placement` by insert/shift
+`TeamFieldsController.reorder()` moves a `Placement` by insert/shift
 over the flattened, team-major sequence of all slots.
-`_on_slot_drag_hover` calls it once per slot the drag passes over,
+`on_drag_hover()` calls it once per slot the drag passes over,
 so the reorder happens live rather than only on drop.
-`_on_slot_drag_started` deep-copies the teams into `self._drag_snapshot`;
-if the drag ends without a drop, `_on_slot_drag_ended` restores it.
+`on_drag_started()` deep-copies the teams into `self._drag_snapshot`;
+if the drag ends without a drop, `on_drag_ended()` restores it.
 
 Nothing may be snapshotted mid-gesture:
-`reorder_slots()` checks `self._drag_position` and records nothing there,
-so a whole drag-and-drop is a single undo step that `_on_slot_drag_ended` commits
+`reorder()` checks `self._drag_position` and records nothing there,
+so a whole drag-and-drop is a single undo step that `on_drag_ended()` commits
 (a no-op after a cancelled drag, whose restore already put the teams back).
+`MainWindow._on_asset_ready` reads the same state through the public `dragging`,
+for the same reason.
 Nothing may be *scheduled* mid-gesture either,
-which is why `_on_slot_drag_started` calls `commit_now()` first:
+which is why `on_drag_started()` calls `commit_now()` first:
 a debounce firing while the user rests over a slot would snapshot a half-finished arrangement,
 and a cancelled drag would then leave the reorder it just reverted one `Ctrl+Z` away.
 
 ### Collaborators read state freshly
 
-`PlacementController`, `PresetStore`, `AssetLoader` and `HistoryController`
+`PlacementController`, `PresetStore`, `AssetLoader`, `HistoryController`
+and `TeamFieldsController`
 read the window's `project`/`builds`/`assets` through `EditorState` on *every* call
 instead of capturing them at construction,
-because `_mode_changed`, `project_io.ProjectFiles.open`, `load_profile` and `_member_changed`
+because `_mode_changed`, `project_io.ProjectFiles.open`, `load_profile` and `member_changed`
 all replace those attributes wholesale.
 A captured reference would go stale,
 and a stale `assets` would silently fall back to `STANDARD_ART_SIZE`

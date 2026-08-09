@@ -252,7 +252,7 @@ def test_export_refuses_a_team_whose_slot_names_no_loaded_build(
     _prepare_export_window(window, tmp_path, TEAM_NAMES)
     # One slot names a character the loaded profile has no build for, which is
     # exactly the slot the preview would draw as a placeholder panel.
-    window.team_combos[1][3].setCurrentText("Somebody Else")
+    window.team_fields.combos[1][3].setCurrentText("Somebody Else")
 
     recorder = RecordingCritical()
     monkeypatch.setattr(dialogs, "QMessageBox", recorder)

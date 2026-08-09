@@ -54,6 +54,7 @@ EXPECTED_MODULES = {
     "gui/placement.py",
     "gui/presets.py",
     "gui/preview.py",
+    "gui/team_fields.py",
     "gui/team_slots.py",
     "gui/render_job.py",
     "gui/render_pipeline.py",

@@ -44,7 +44,7 @@ def test_main_window_starts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     app = qapp()
     window = MainWindow()
     assert window.windowTitle() == "Genshin Thumbnail Studio"
-    assert len(window.team_combos) == 2
+    assert len(window.team_fields.combos) == 2
     window.close()
     app.processEvents()
 

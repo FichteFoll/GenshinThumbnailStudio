@@ -8,8 +8,8 @@ here would reject the window's `dict[str, Asset]`.
 
 `PlacementController`, `PresetStore` and `AssetLoader` read these attributes
 through the Protocol on *every* call instead of capturing them at construction
-time, because `_mode_changed`, `open_project`, `load_profile` and
-`_member_changed` all replace `project`, `builds` or `assets` wholesale. A
+time, because `_mode_changed`, `ProjectFiles.open`, `load_profile` and
+`member_changed` all replace `project`, `builds` or `assets` wholesale. A
 captured `assets` would silently fall back to `STANDARD_ART_SIZE` and compute
 the wrong offset bounds.
 """
