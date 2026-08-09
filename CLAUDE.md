@@ -33,6 +33,23 @@ since Akasha access goes through a real `QWebEnginePage`:
 QT_QPA_PLATFORM=offscreen QTWEBENGINE_CHROMIUM_FLAGS=--no-sandbox uv run pytest
 ```
 
+A fresh git worktree gets its own `.venv`,
+so each one pays a full `uv sync --extra dev` before the first check.
+When several worktrees run the same dependency set,
+as they do while executing a plan whose commits do not touch `pyproject.toml`,
+point them at one environment instead:
+
+```bash
+export UV_PROJECT_ENVIRONMENT=/path/to/shared/.venv
+```
+
+Only under that condition, and only for one worktree at a time.
+The project itself is installed into the environment as an editable pointer
+to whichever worktree synced last,
+so two worktrees alternating against a shared `.venv`
+would silently run the tests against the other one's sources.
+A commit that changes a dependency needs its own environment as well.
+
 Packaging (runs the test suite first, then builds into `release/`):
 
 ```bash
