@@ -111,8 +111,8 @@ and as its own signals
 `output_name_changed`, `resolution_changed`),
 which keep the window from reaching into the panel to connect a handler.
 The open, save and export buttons get no signal:
-they trigger `QAction`s the window owns,
-so the window connects `clicked` to `action.trigger` itself.
+they trigger the project `QAction`s,
+which `actions.ProjectActions.bind_buttons()` connects them to.
 `align_save_button_height()` is a method rather than part of the constructor,
 because it can only run once the window has applied the stylesheet
 both buttons size against.
@@ -165,6 +165,15 @@ the loaded profile does not resolve, and its callers
 
 ### Actions and the save button
 
+All of this lives in `actions.py` as `ProjectActions`,
+constructed once in `MainWindow.__init__` with the window
+and the window as `ProjectActionHost`,
+the shape the other collaborators have.
+It is built after `_build_ui()` on purpose:
+having the panels already there is what lets `bind_buttons()`
+wire the buttons in one call,
+instead of forcing the actions to exist before the buttons do.
+
 The four project actions are `QAction`s, not `QShortcut`s,
 because the "Save as..." menu entry needs an action anyway
 and a `QMenu` renders an action's shortcut in the item itself.
@@ -172,18 +181,27 @@ A sequence bound to both a `QShortcut` and a `QAction` is ambiguous and fires ne
 so these four must not also get `QShortcut`s.
 (`history.py` uses `QShortcut`s for undo/redo, which have no menu entry.)
 Each action dispatches through a lambda rather than a bound method,
-so a test that replaces the method on the instance replaces what fires.
+so a test that replaces the method on the instance replaces what fires;
+capturing a bound method at construction would make
+`tests/gui/test_shortcuts.py` fail.
+Each is registered on the window with `addAction()` rather than on
+`ProjectActions` itself, which is what makes the shortcut window-wide
+and what keeps `window.actions()` populated for that test to look bindings up in.
 
-`_update_save_button()` keeps the save button in step with `project_path`:
+`ProjectActions.set_project_path()` keeps the save button in step with `project_path`:
 with a file it reads "Save project" and carries the menu holding "Save as...",
 without one it reads "Save project as..." and carries no menu,
 since the primary button already *is* "save as" then
 (`Ctrl+Shift+S` still works, the action being registered on the window).
-`set_project_path()` is the single write path for `project_path` after construction
-precisely so no transition can miss that update;
+That policy is deliberately split from the widget writes,
+which are `ControlsPanel.apply_save_action(text, tooltip, menu)`:
+letting the panel decide from a `Path`
+would put project-file knowledge into a layout widget.
+`MainWindow.set_project_path()` is the single write path for `project_path`
+after construction precisely so no transition can miss that update;
 `__init__`'s own `self.project_path = None` cannot go through it,
 the buttons not existing yet,
-which is what the call at `_build_ui`'s end covers.
+which is what the explicit call after `bind_buttons()` covers.
 
 The save button is a `QToolButton` for its dropdown,
 so `style.py`'s `QToolButton` rule repeats the `QPushButton` colors, border and padding;

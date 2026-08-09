@@ -149,10 +149,21 @@ and `storage.py` for persistence.
 - `style.py` — `MAIN_STYLESHEET`, the whole application's QSS,
   applied once to the main window.
 - `main_window.py` — `MainWindow`:
-  profile loading, placement editing,
-  the four project `QAction`s (`Ctrl+O`, `Ctrl+S`, `Ctrl+Shift+S`, `Ctrl+E`),
-  and the close sequence.
+  placement editing, the asset-arrival handlers, the close sequence,
+  and thin delegates to the collaborators below.
   The largest module by far.
+- `actions.py` — `ProjectActions`
+  and the `ProjectActionHost` Protocol it dispatches through.
+  Owns the four project `QAction`s
+  (`open`, `save`, `save_as`, `export`,
+  bound to `Ctrl+O`, `Ctrl+S`, `Ctrl+Shift+S` and `Ctrl+E`)
+  and the "Save as..." menu,
+  registering each action on the window so its shortcut is window-wide.
+  `bind_buttons(panel)` makes the panel's three project buttons trigger them;
+  `set_project_path(path)` decides the save action's caption, tooltip and menu
+  and pushes them onto the panel through `ControlsPanel.apply_save_action()`.
+  Constructed once in `MainWindow.__init__` with the window
+  and the window as `ProjectActionHost`.
 - `controls_panel.py` — `RESOLUTION_OPTIONS` and `ControlsPanel`,
   the window's left column:
   the mode radios, the UID entry with its load button and profile status,
@@ -165,7 +176,9 @@ and `storage.py` for persistence.
   `mode_changed`, `profile_requested`, `paste_requested`,
   `output_name_changed` and `resolution_changed`.
   `align_save_button_height()` is called by the window
-  once its stylesheet is applied.
+  once its stylesheet is applied,
+  and `apply_save_action(text, tooltip, menu)` writes the save button's face
+  as `actions.ProjectActions` decides it.
 - `editor_panel.py` — `EditorPanel`, the window's right column:
   the preview toolbar with `preview_team_label` and the `boss_combo`
   (hidden outside stygian mode),
@@ -253,6 +266,7 @@ and `asset_loader` reaches `download_assets` through `..akasha`);
 import nothing from the package
 (`render_job` reaches the renderer through `..renderer`);
 `editor_panel` imports `preview`;
+`actions` imports `controls_panel` only;
 `render_pipeline` imports `state` and `render_job`,
 and reaches `Project` through `..models`;
 `team_fields` imports `state`, `history` and `team_slots`,

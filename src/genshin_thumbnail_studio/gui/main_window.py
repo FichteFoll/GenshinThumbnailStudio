@@ -5,14 +5,12 @@ drag/wheel/slider placement editing to fetching, preview/export, and persistence
 from __future__ import annotations
 
 import copy
-from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThreadPool
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QMainWindow,
-    QMenu,
     QSplitter,
 )
 
@@ -20,6 +18,7 @@ from ..akasha import AkashaWebClient, Build
 from ..models import Asset, Placement, Project
 from ..storage import cache_dir
 from . import dialogs, profile_io
+from .actions import ProjectActions
 from .asset_loader import AssetLoader
 from .controls_panel import ControlsPanel
 from .editor_panel import EditorPanel
@@ -60,6 +59,12 @@ class MainWindow(QMainWindow):
         # Connected only now: the preview does not exist before `_build_ui()`.
         self._render.rendered.connect(self.editor_panel.preview.set_preview)
         self._render.failed.connect(self._on_render_failed)
+        self._actions = ProjectActions(self, self)
+        self._actions.bind_buttons(self.controls_panel)
+        # `__init__`'s own `self.project_path = None` cannot go through
+        # `set_project_path()`, the buttons not existing yet, so the save
+        # button's initial face is applied here instead.
+        self._actions.set_project_path(self.project_path)
         self.team_fields = TeamFieldsController(self, self.controls_panel.team_layout, self._history, self)
         self.profile_loader = profile_io.ProfileLoader(self, self)
         self.rebuild_team_fields()
@@ -94,52 +99,7 @@ class MainWindow(QMainWindow):
         self.client.close()
         super().closeEvent(event)
 
-    def _action(self, text: str, sequence: str, handler: Callable[[], None]) -> QAction:
-        """A window-wide action for one of the project file flows.
-
-        Registered on the window with `addAction()`, so its shortcut fires
-        wherever the focus is. Deliberately a `QAction` and not a `QShortcut`
-        like `history.py` uses: the "Save as..." menu entry needs an action
-        anyway, and a sequence bound to both would be ambiguous and fire
-        neither. Callers pass a lambda rather than a bound method, so the
-        dispatch stays late-bound and replacing the method on the instance
-        replaces what fires.
-        """
-        action = QAction(text, self)
-        action.setShortcut(QKeySequence(sequence))
-        action.triggered.connect(handler)
-        self.addAction(action)
-        return action
-
-    def _build_actions(self) -> None:
-        self.open_action = self._action("Open project", "Ctrl+O", lambda: self.open_project())
-        self.save_action = self._action("Save project", "Ctrl+S", lambda: self.save_project())
-        self.save_as_action = self._action("Save as...", "Ctrl+Shift+S", lambda: self.save_project_as())
-        self.export_action = self._action("Export PNG", "Ctrl+E", lambda: self.export())
-        self._save_menu = QMenu(self)
-        self._save_menu.addAction(self.save_as_action)
-
-    def _update_save_button(self) -> None:
-        """Show whether saving overwrites a file or asks for one.
-
-        Driven from `set_project_path()`, the single write path for
-        `project_path`, so no transition can miss it.
-        """
-        path = self.project_path
-        self.save_action.setText("Save project" if path else "Save project as...")
-        self.save_action.setToolTip(f"Save {path.name} (Ctrl+S)" if path else "Save project as... (Ctrl+S)")
-        save_button = self.controls_panel.save_button
-        save_button.setText(self.save_action.text())
-        save_button.setToolTip(self.save_action.toolTip())
-        # Without a file to overwrite the button already *is* "save as", so a
-        # menu repeating it would be noise; Ctrl+Shift+S still works, because
-        # the action is registered on the window rather than only on the menu.
-        # Detaching takes a null menu, which Qt documents but the PySide6 stub
-        # does not admit, so the argument type has to be waived here.
-        save_button.setMenu(self._save_menu if path else None)  # pyright: ignore[reportArgumentType]
-
     def _build_ui(self) -> None:
-        self._build_actions()
         splitter = QSplitter(Qt.Orientation.Horizontal)
         self.setCentralWidget(splitter)
 
@@ -149,11 +109,8 @@ class MainWindow(QMainWindow):
         self.controls_panel.paste_requested.connect(self.paste_teams)
         self.controls_panel.output_name_changed.connect(self._output_name_changed)
         self.controls_panel.resolution_changed.connect(self._resolution_changed)
-        # The three project buttons trigger the window's own actions, so the
-        # panel declares no signal for them.
-        self.controls_panel.open_button.clicked.connect(self.open_action.trigger)
-        self.controls_panel.save_button.clicked.connect(self.save_action.trigger)
-        self.controls_panel.export_button.clicked.connect(self.export_action.trigger)
+        # The three project buttons declare no panel signal: they trigger the
+        # `QAction`s, which `ProjectActions.bind_buttons()` connects them to.
 
         self.editor_panel = EditorPanel()
         self.editor_panel.active_team_changed.connect(self._active_team_changed)
@@ -174,7 +131,6 @@ class MainWindow(QMainWindow):
 
         self.setStyleSheet(MAIN_STYLESHEET)
         self.controls_panel.align_save_button_height()
-        self._update_save_button()
 
     def rebuild_team_fields(self) -> None:
         self.team_fields.rebuild()
@@ -389,7 +345,7 @@ class MainWindow(QMainWindow):
         """The single write path for `project_path`, so nothing that has to
         follow a change of it can be missed at an assignment site."""
         self.project_path = path
-        self._update_save_button()
+        self._actions.set_project_path(path)
 
     def save_project(self) -> None:
         self.project_files.save()

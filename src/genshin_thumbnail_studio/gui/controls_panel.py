@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QPushButton,
     QRadioButton,
     QScrollArea,
@@ -107,10 +108,9 @@ class ControlsPanel(QWidget):
 
         project_row = QHBoxLayout()
         self.open_button = QPushButton(self._icon(QStyle.StandardPixmap.SP_DialogOpenButton), "Open project")
-        self.open_button.setToolTip("Open project (Ctrl+O)")
         # A QToolButton, so its arrow section can open the "Save as..." menu
-        # while the main section still saves; the window's save-button update
-        # fills in the caption, the tooltip and whether the menu is attached.
+        # while the main section still saves; `apply_save_action()` fills in the
+        # caption, the tooltip and whether the menu is attached.
         self.save_button = QToolButton()
         self.save_button.setIcon(self._icon(QStyle.StandardPixmap.SP_DialogSaveButton))
         self.save_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
@@ -121,11 +121,22 @@ class ControlsPanel(QWidget):
         controls_layout.addLayout(project_row)
 
         self.export_button = QPushButton(self._icon(QStyle.StandardPixmap.SP_DialogSaveButton), "Export PNG")
-        self.export_button.setToolTip("Export PNG (Ctrl+E)")
         controls_layout.addWidget(self.export_button)
 
     def _icon(self, standard: QStyle.StandardPixmap):
         return self.style().standardIcon(standard)
+
+    def apply_save_action(self, text: str, tooltip: str, menu: QMenu | None) -> None:
+        """Put the save action's current face on the save button.
+
+        Which face that is stays with `actions.ProjectActions`; the panel only
+        writes what it is handed, and learns nothing about project files.
+        """
+        self.save_button.setText(text)
+        self.save_button.setToolTip(tooltip)
+        # Detaching takes a null menu, which Qt documents but the PySide6 stub
+        # does not admit, so the argument type has to be waived here.
+        self.save_button.setMenu(menu)  # pyright: ignore[reportArgumentType]
 
     def align_save_button_height(self) -> None:
         # A QToolButton derives a taller box than a QPushButton from the same

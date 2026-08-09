@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .actions import ProjectActions
 from .app import run
 from .asset_loader import AssetJob, AssetJobSignals, AssetLoader
 from .controls_panel import RESOLUTION_OPTIONS, ControlsPanel
@@ -50,6 +51,7 @@ __all__ = [
     "PresetStore",
     "PreviewWidget",
     "ProfileLoader",
+    "ProjectActions",
     "ProjectFiles",
     "RenderJob",
     "RenderJobSignals",
