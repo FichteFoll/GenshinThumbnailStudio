@@ -15,7 +15,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QMainWindow
 
 from ..enka import Build, EnkaClient, is_uid
-from ..storage import save_profile_cache
+from ..storage import save_last_profile, save_profile_cache
 from . import dialogs
 from .asset_loader import AssetLoader
 from .build_choices import resolve_build
@@ -69,6 +69,7 @@ class ProfileLoader:
             profile = editor.client.load_profile(identifier)
             editor.builds = profile.builds
             save_profile_cache(profile)
+            save_last_profile(identifier)
             editor.assets = {}
             for team in editor.project.teams:
                 for member in team:

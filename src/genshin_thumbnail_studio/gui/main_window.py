@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 from ..enka import EnkaClient, is_uid
 from ..models import Asset, Build, Placement, Project
-from ..storage import cache_dir
+from ..storage import cache_dir, load_last_profile
 from . import dialogs, profile_io
 from .actions import ProjectActions
 from .asset_loader import AssetLoader
@@ -57,6 +57,8 @@ class MainWindow(QMainWindow):
         self._closing = False
         self.client = EnkaClient(cache_dir() / "enka")
         self._build_ui()
+        # Ready to use, not a fetch on startup (R13): filled in but not loaded.
+        self.controls_panel.profile_edit.setText(load_last_profile())
         # Connected only now: the preview does not exist before `_build_ui()`.
         self._render.rendered.connect(self.editor_panel.preview.set_preview)
         self._render.failed.connect(self._on_render_failed)

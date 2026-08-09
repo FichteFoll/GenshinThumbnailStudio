@@ -8,9 +8,17 @@ from typing import Any, ClassVar
 import pytest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from genshin_thumbnail_studio.enka import EnkaClient
 from genshin_thumbnail_studio.gui import MainWindow, asset_loader, dialogs, project_io
 from genshin_thumbnail_studio.models import LIVE_BUILD_NAME, Asset, Build, Profile, Project
-from genshin_thumbnail_studio.storage import load_profile_cache, load_project, save_profile_cache, save_project
+from genshin_thumbnail_studio.storage import (
+    load_last_profile,
+    load_profile_cache,
+    load_project,
+    save_last_profile,
+    save_profile_cache,
+    save_project,
+)
 
 from .helpers import (
     TEAM_NAMES,
@@ -303,6 +311,55 @@ def test_load_profile_persists_profile_cache(tmp_path: Path, monkeypatch: pytest
     assert cached.builds == profile.builds
     assert cached.fetched_at == profile.fetched_at
     assert cached.identifier == uid
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+def test_load_profile_remembers_the_typed_identifier_not_the_resolved_uid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R13: the field comes back holding what the user typed, a username included."""
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
+    window = MainWindow()
+
+    username = "Algoinde"
+    profile = make_profile("700000042", ["Furina"], username=username)
+
+    def fake_load_profile(identifier: str) -> Profile:
+        return profile
+
+    monkeypatch.setattr(window.client, "load_profile", fake_load_profile)
+    window.controls_panel.profile_edit.setText(username)
+
+    window.load_profile()
+
+    assert load_last_profile() == username
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+def test_a_fresh_window_shows_the_last_remembered_profile_without_loading_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R13: the field is ready to use on startup, but nothing is fetched for it."""
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
+
+    def forbidden_load_profile(*args: Any, **kwargs: Any) -> None:
+        pytest.fail("a remembered profile must not be fetched on startup")
+
+    save_last_profile("700000042")
+    # On the class, so the guard covers the construction itself; patching the
+    # instance afterwards would let a fetch from `__init__` through unseen.
+    monkeypatch.setattr(EnkaClient, "load_profile", forbidden_load_profile)
+
+    window = MainWindow()
+    app.processEvents()
+
+    assert window.controls_panel.profile_edit.text() == "700000042"
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
