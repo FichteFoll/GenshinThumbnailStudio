@@ -1,5 +1,6 @@
 """Tests for `MainWindow`'s profile loading and project save/open flows."""
 
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, ClassVar
@@ -302,6 +303,73 @@ def test_load_profile_persists_profile_cache(tmp_path: Path, monkeypatch: pytest
     assert cached.builds == profile.builds
     assert cached.fetched_at == profile.fetched_at
     assert cached.identifier == uid
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+def test_choosing_a_build_snapshots_it_into_the_saved_and_reopened_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R7/R9/R10: the chosen build frames the slot, is saved, and survives reopening."""
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
+
+    def no_downloads(*args: object, **kwargs: object) -> dict[str, Asset]:
+        return {}
+
+    monkeypatch.setattr(asset_loader, "download_assets", no_downloads)
+    uid = "700000042"
+    live = make_build("Furina")
+    saved_build = make_build("Furina", "Bow DPS")
+    saved_build.costume_id = "203201"
+    saved_build.weapon_name = "Aqua Simulacra"
+    saved_build.constellation = 6
+    saved_build.refinement = 5
+    save_profile_cache(
+        Profile(identifier=uid, uid=uid, username="", builds={"furina": [live, saved_build]}, fetched_at=datetime.now())
+    )
+
+    window = MainWindow()
+    window.builds = {"furina": [live, saved_build]}
+    window.populate_combo_items()
+    window.controls_panel.profile_edit.setText(uid)
+    window.team_fields.combos[0][0].setCurrentText("Furina")
+
+    window.build_selected(0, 0, saved_build)
+
+    member = window.project.teams[0][0]
+    assert member.build is not None
+    assert member.build.details() == ("203201", "Aqua Simulacra", 6, 5)
+
+    project_path = tmp_path / "chosen-build.json"
+    monkeypatch.setattr(
+        project_io.QFileDialog, "getSaveFileName", staticmethod(lambda *args, **kwargs: (str(project_path), ""))
+    )
+    window.save_project()
+
+    written = json.loads(project_path.read_text(encoding="utf-8"))["teams"][0][0]["build"]
+    assert (written["costume_id"], written["weapon_name"], written["constellation"], written["refinement"]) == (
+        "203201",
+        "Aqua Simulacra",
+        6,
+        5,
+    )
+
+    # The profile has moved on: the same build name now carries other details.
+    drifted = make_build("Furina", "Bow DPS")
+    save_profile_cache(
+        Profile(identifier=uid, uid=uid, username="", builds={"furina": [live, drifted]}, fetched_at=datetime.now())
+    )
+    monkeypatch.setattr(
+        project_io.QFileDialog, "getOpenFileName", staticmethod(lambda *args, **kwargs: (str(project_path), ""))
+    )
+
+    window.open_project()
+
+    reopened = window.project.teams[0][0].build
+    assert reopened is not None
+    assert reopened.details() == ("203201", "Aqua Simulacra", 6, 5)
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 

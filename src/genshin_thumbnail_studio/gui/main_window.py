@@ -200,6 +200,18 @@ class MainWindow(QMainWindow):
         self.asset_loader.ensure()
         self.schedule_render()
 
+    def build_selected(self, team: int, slot: int, build: Build) -> None:
+        """Frame a slot with one of its character's other builds, snapshotting it."""
+        member = self.project.teams[team][slot]
+        member.build = build
+        member.name = build.name
+        self._presets.apply_to(self, member)  # The costume may differ, and `preset_key()` keys on it.
+        self.assets = {key: value for key, value in self.assets.items() if key in self.selected_build_keys()}
+        self.sync_controls()
+        self._history.schedule()
+        self.asset_loader.ensure()
+        self.schedule_render()
+
     def selected_build_keys(self) -> set[str]:
         """The `Build.key`s the named slots are framed with, which is what the
         downloaded-art dict is keyed by."""

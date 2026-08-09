@@ -5,6 +5,7 @@ from __future__ import annotations
 from .actions import ProjectActions
 from .app import run
 from .asset_loader import AssetJob, AssetJobSignals, AssetLoader
+from .build_choices import BuildChoice, build_choices, selected_build
 from .controls_panel import RESOLUTION_OPTIONS, ControlsPanel
 from .dialogs import (
     ask_export_target,
@@ -40,6 +41,7 @@ __all__ = [
     "AssetJob",
     "AssetJobSignals",
     "AssetLoader",
+    "BuildChoice",
     "ControlsPanel",
     "EditorPanel",
     "EditorState",
@@ -59,11 +61,13 @@ __all__ = [
     "TeamSlotWidget",
     "ask_export_target",
     "ask_lineup_text",
+    "build_choices",
     "confirm_cache_refresh",
     "confirm_discard_changes",
     "parse_lineup",
     "preset_key",
     "run",
+    "selected_build",
     "show_error",
     "show_export_finished",
 ]
