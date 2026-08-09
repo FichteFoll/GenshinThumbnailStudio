@@ -21,6 +21,7 @@ from .main_window import MainWindow
 from .placement import MAX_ZOOM, MIN_ZOOM, PlacementController
 from .presets import PresetStore, preset_key
 from .preview import PreviewWidget
+from .profile_io import ProfileLoader
 from .project_io import ProjectFiles
 from .render_job import RenderJob, RenderJobSignals
 from .render_pipeline import RENDER_THROTTLE_MS, RenderPipeline
@@ -48,6 +49,7 @@ __all__ = [
     "PlacementHistory",
     "PresetStore",
     "PreviewWidget",
+    "ProfileLoader",
     "ProjectFiles",
     "RenderJob",
     "RenderJobSignals",

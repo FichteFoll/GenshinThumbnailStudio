@@ -72,6 +72,7 @@ and intercept a render already in flight.
 
 `main_window.py` was reduced by moving the blocking dialogs to `dialogs.py`,
 the project file flows to `project_io.py`,
+profile loading and lineup entry to `profile_io.py`,
 the throttled preview loop to `render_pipeline.py`,
 the team slot fields and their drag reordering to `team_fields.py`,
 and the two columns of the layout
@@ -151,6 +152,16 @@ and passing it keeps `MainWindow._history` private.
 Capturing those three objects is safe;
 capturing `project`, `builds` or `assets` off the editor is not,
 for the reason "Collaborators read state freshly" gives below.
+
+`ProfileLoader` mirrors that shape for profile fetching and lineup entry:
+it takes the window twice, as `parent: QMainWindow` and as `editor: ProfileEditor`,
+for the same reason `ProjectFiles` does, and needs no `HistoryController`,
+since none of `load()`, `paste_lineup()` or `validate_team()` touch undo history.
+`MainWindow` keeps `load_profile()`, `paste_teams()` and `validate_team()`
+as one-line delegates, the first and third of which `project_io.ProjectEditor` requires.
+`validate_team()` puts up no dialog itself: it raises `ValueError` on a name
+the loaded profile does not resolve, and its callers
+(`project_io.ProjectFiles._write_project`/`export`) decide what to do with that.
 
 ### Actions and the save button
 
@@ -333,3 +344,7 @@ rather than importing its functions by name.
 From `project_io` it may import `ProjectFiles` by name instead,
 because that patch lands on `QFileDialog` itself
 rather than on an attribute of the module.
+`profile_io` is imported as a module too
+(`from . import dialogs, profile_io`), matching `dialogs`,
+even though nothing today patches a module-level name on it;
+should a test ever need to, the import already supports it.

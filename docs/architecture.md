@@ -191,6 +191,12 @@ and `storage.py` for persistence.
   `MainWindow` keeps thin `save_project()`, `save_project_as()`, `open_project()`
   and `export()` methods delegating here,
   so every caller and test still goes through the window.
+- `profile_io.py` — `ProfileLoader` (`load()`, `paste_lineup()`, `validate_team()`)
+  plus the `ProfileEditor` Protocol it works through.
+  Constructed once in `MainWindow.__init__` with the window and the window as
+  `ProfileEditor`. `MainWindow` keeps thin `load_profile()`, `paste_teams()`
+  and `validate_team()` methods delegating here, the first and third of which
+  `project_io.ProjectEditor` requires.
 - `state.py` — the `EditorState` Protocol (`project`, `builds`, `assets`),
   which `MainWindow` satisfies structurally. Must stay Qt-free.
 - `placement.py` — `MIN_ZOOM`, `MAX_ZOOM` and `PlacementController`:
@@ -254,11 +260,16 @@ and reaches `Placement` through `..models`;
 `project_io` imports `state`, `dialogs`, `history`, `asset_loader`,
 `controls_panel` and `editor_panel`,
 and reaches `..models`, `..storage` and `..renderer` outside the package;
+`profile_io` imports `state`, `dialogs`, `asset_loader`, `controls_panel`
+and `team_fields`,
+and reaches `..akasha` and `..storage` outside the package;
 `main_window` imports every sibling except `state`,
 which it satisfies structurally rather than importing,
 and `preview`, `render_job` and `team_slots`, which it now reaches
 through `editor_panel`, `render_pipeline` and `team_fields`;
-it reaches `dialogs` as a module (`from . import dialogs`);
+it reaches `dialogs` and `profile_io` as modules
+(`from . import dialogs, profile_io`), while `project_io` is still imported
+by name (`ProjectFiles`), since nothing patches a module-level name on either;
 `app` imports `main_window`.
 
 ## Data flow

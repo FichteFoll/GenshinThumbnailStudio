@@ -11,21 +11,19 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QThreadPool
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
-    QApplication,
     QMainWindow,
     QMenu,
     QSplitter,
 )
 
-from ..akasha import AkashaError, AkashaWebClient, Build, StaleProfileError
+from ..akasha import AkashaWebClient, Build
 from ..models import Asset, Placement, Project
-from ..storage import cache_dir, save_profile_cache
-from . import dialogs
+from ..storage import cache_dir
+from . import dialogs, profile_io
 from .asset_loader import AssetLoader
 from .controls_panel import ControlsPanel
 from .editor_panel import EditorPanel
 from .history import HistoryController
-from .lineup import parse_lineup
 from .placement import PlacementController
 from .presets import PresetStore
 from .project_io import ProjectFiles
@@ -63,6 +61,7 @@ class MainWindow(QMainWindow):
         self._render.rendered.connect(self.editor_panel.preview.set_preview)
         self._render.failed.connect(self._on_render_failed)
         self.team_fields = TeamFieldsController(self, self.controls_panel.team_layout, self._history, self)
+        self.profile_loader = profile_io.ProfileLoader(self, self)
         self.rebuild_team_fields()
         self.sync_controls()
         self.saved_snapshot = copy.deepcopy(self.project)
@@ -343,72 +342,13 @@ class MainWindow(QMainWindow):
         self._render.schedule()
 
     def load_profile(self) -> None:
-        uid = self.controls_panel.uid_edit.text().strip()
-        self.project.uid = uid
-        self.controls_panel.load_button.setEnabled(False)
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        try:
-            try:
-                builds, age, last = self.client.load_profile(uid)
-            except StaleProfileError as stale:
-                choice = dialogs.choose_stale_profile_action(self, stale.age_minutes)
-                if choice == "refresh":
-                    self.statusBar().showMessage("Refreshing Akasha ...")
-                    QApplication.restoreOverrideCursor()
-                    if not self.client.refresh_profile(uid, progress=lambda text: self.statusBar().showMessage(text)):
-                        raise AkashaError("Akasha refresh did not finish within 90 seconds.") from None
-                    QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-                    builds, age, last = self.client.load_profile(uid)
-                elif choice == "stale":
-                    builds, age, last = self.client.load_profile(uid, allow_stale=True)
-                else:
-                    return
-            self.builds = {build.name.casefold(): build for build in builds}
-            save_profile_cache(uid, builds, last)
-            self.assets = {}
-            self.populate_combo_items()
-            local = last.astimezone().strftime("%Y-%m-%d %H:%M")
-            self.controls_panel.profile_status.setText(
-                f"{len(builds)} builds \u00b7 last updated {local} \u00b7 {age:.0f} min ago"
-            )
-            self.statusBar().showMessage("Akasha profile loaded", 5000)
-            self.asset_loader.ensure()
-            self.schedule_render()
-        except Exception as error:
-            dialogs.show_error(self, "Could not load profile", error)
-        finally:
-            QApplication.restoreOverrideCursor()
-            self.controls_panel.load_button.setEnabled(True)
+        self.profile_loader.load()
 
     def paste_teams(self) -> None:
-        expected = 8 if self.project.mode == "abyss" else 12
-        text = dialogs.ask_lineup_text(self, expected)
-        if text is None:
-            return
-        names = parse_lineup(text)
-        if len(names) != expected:
-            dialogs.show_error(self, "Invalid lineup", f"Expected {expected} names, found {len(names)}.")
-            return
-        for index, name in enumerate(names):
-            team, slot = divmod(index, 4)
-            self.team_fields.combos[team][slot].setCurrentText(name)
+        self.profile_loader.paste_lineup()
 
     def validate_team(self) -> list[Build]:
-        missing: list[str] = []
-        selected: list[Build] = []
-        for team_index, row in enumerate(self.team_fields.combos):
-            for slot_index, combo in enumerate(row):
-                name = combo.currentText().strip()
-                self.project.teams[team_index][slot_index].name = name
-                build = self.builds.get(name.casefold())
-                if build is None:
-                    missing.append(f"{team_index + 1}-{slot_index + 1}: {name or 'empty'}")
-                else:
-                    selected.append(build)
-        if missing:
-            raise ValueError("Build not in the loaded profile: " + ", ".join(missing))
-        unique: dict[str, Build] = {build.name.casefold(): build for build in selected}
-        return list(unique.values())
+        return self.profile_loader.validate_team()
 
     def _on_asset_ready(self, key: str, asset: Asset) -> None:
         # A download outliving `waitForDone(2000)` lands here during teardown,
