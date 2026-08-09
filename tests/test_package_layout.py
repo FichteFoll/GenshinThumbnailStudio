@@ -32,6 +32,7 @@ EXPECTED_MODULES = {
     "enka/profile.py",
     "enka/client.py",
     "enka/assets.py",
+    "enka/catalog.py",
     "renderer/__init__.py",
     "renderer/geometry.py",
     "renderer/colors.py",
