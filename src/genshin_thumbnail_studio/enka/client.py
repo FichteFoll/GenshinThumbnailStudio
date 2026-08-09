@@ -68,8 +68,30 @@ def _saved_builds(response: Mapping[str, Sequence[SavedBuildLike]]) -> list[Buil
     ]
 
 
-async def _fetch_saved_builds(client: enka_api.GenshinClient, username: str, owner_hash: str) -> list[Build]:
-    return _saved_builds(await client.fetch_builds({"username": username, "hash": owner_hash}))
+def _live_builds(response: Mapping[str, Sequence[SavedBuildLike]]) -> list[Build]:
+    """The `live` entries `_saved_builds()` drops, as a fallback for whichever
+    profile a showcase does not cover.
+
+    They are stale relative to a showcase fetch, which is why they are dropped
+    whenever a showcase was reachable. A profile whose UID is not public has no
+    showcase to fetch, and one whose UID is public may still have an empty
+    showcase; either way, these are the only live data available.
+
+    Their own `name` is the empty string, so the build name comes from here
+    instead. No build id is carried over: `Build.key` and `Build.details()`
+    both ignore `build_id`, so it is already keyed identically to a showcase
+    build without it, and omitting it keeps a saved-build id out of a project
+    file recorded for a live build.
+    """
+    live = [entry for entries in response.values() for entry in entries if entry.live]
+    live.sort(key=lambda entry: float(entry.order))
+    return [build_from_character(entry.character, build_name=LIVE_BUILD_NAME) for entry in live]
+
+
+async def _fetch_build_response(
+    client: enka_api.GenshinClient, username: str, owner_hash: str
+) -> Mapping[str, Sequence[SavedBuildLike]]:
+    return await client.fetch_builds({"username": username, "hash": owner_hash})
 
 
 def _merge_builds(live: list[Build], saved: list[Build]) -> dict[str, list[Build]]:
@@ -81,14 +103,15 @@ def _merge_builds(live: list[Build], saved: list[Build]) -> dict[str, list[Build
 
 
 async def _load(identifier: str, uid: str, username: str, owner_hash: str) -> Profile:
-    live: list[Build] = []
-    saved: list[Build] = []
+    showcase: list[Build] = []
+    response: Mapping[str, Sequence[SavedBuildLike]] = {}
     async with _create_client() as client:
         if uid:
-            live = await _fetch_live_builds(client, uid)
+            showcase = await _fetch_live_builds(client, uid)
         if owner_hash:
-            saved = await _fetch_saved_builds(client, username, owner_hash)
-    builds = _merge_builds(live, saved)
+            response = await _fetch_build_response(client, username, owner_hash)
+    live = showcase or _live_builds(response)
+    builds = _merge_builds(live, _saved_builds(response))
     if not builds:
         raise EnkaError(f"Enka holds no characters for {identifier}.")
     return Profile(
