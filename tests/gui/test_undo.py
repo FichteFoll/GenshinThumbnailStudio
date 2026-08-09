@@ -21,7 +21,6 @@ from .helpers import (
     create_test_assets,
     fill_window_teams,
     live_build,
-    publish_art,
     qapp,
 )
 
@@ -35,7 +34,7 @@ def _approx(expected: float) -> Any:
     return pytest.approx(expected, abs=OFFSET_TOLERANCE)  # pyright: ignore[reportUnknownMemberType]
 
 
-def _window_with_history_baseline(tmp_path: Path) -> MainWindow:
+def _window_with_history_baseline() -> MainWindow:
     """A window with a filled lineup as the history's baseline.
 
     The names are written straight onto the placements, which bypasses the edit
@@ -47,8 +46,7 @@ def _window_with_history_baseline(tmp_path: Path) -> MainWindow:
     """
     window = MainWindow()
     fill_window_teams(window, TEAM_NAMES)
-    window.assets = create_test_assets(tmp_path / "assets", TEAM_NAMES[:1])
-    publish_art(window.art_root, TEAM_NAMES[:1])
+    create_test_assets(window.art_root, TEAM_NAMES[:1])
     window.rebuild_team_fields()
     window.select_slot(0, 0)
     window._history.reset()
@@ -58,7 +56,7 @@ def _window_with_history_baseline(tmp_path: Path) -> MainWindow:
 def test_each_settled_drag_is_its_own_undo_step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_history_baseline(tmp_path)
+    window = _window_with_history_baseline()
     start_x = window.current_member().offset_x
 
     window.drag_placement(30, 0)
@@ -87,7 +85,7 @@ def test_each_settled_drag_is_its_own_undo_step(tmp_path: Path, monkeypatch: pyt
 def test_a_continuous_drag_collapses_into_one_undo_step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_history_baseline(tmp_path)
+    window = _window_with_history_baseline()
     start_x = window.current_member().offset_x
 
     # Two drags without going idle in between: the debounce has not fired, so
@@ -105,7 +103,7 @@ def test_a_continuous_drag_collapses_into_one_undo_step(tmp_path: Path, monkeypa
 def test_a_wheel_zoom_is_undone_and_redone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_history_baseline(tmp_path)
+    window = _window_with_history_baseline()
     start_zoom = window.current_member().zoom
 
     window.change_zoom(3)
@@ -125,7 +123,7 @@ def test_a_wheel_zoom_is_undone_and_redone(tmp_path: Path, monkeypatch: pytest.M
 def test_a_zoom_slider_change_is_undone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_history_baseline(tmp_path)
+    window = _window_with_history_baseline()
     start_zoom = window.current_member().zoom
 
     window.editor_panel.zoom_slider.setValue(round(start_zoom * 100) + 15)
@@ -143,7 +141,7 @@ def test_a_zoom_slider_change_is_undone(tmp_path: Path, monkeypatch: pytest.Monk
 def test_a_flip_is_undone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_history_baseline(tmp_path)
+    window = _window_with_history_baseline()
 
     window.editor_panel.flip_check.setChecked(True)
     window._history.commit_now()
@@ -159,7 +157,7 @@ def test_a_flip_is_undone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
 def test_a_character_name_change_is_undone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_history_baseline(tmp_path)
+    window = _window_with_history_baseline()
 
     window.team_fields.combos[0][0].setCurrentText("Klee")
     window._history.commit_now()
@@ -178,7 +176,7 @@ def test_a_slot_reorder_is_undone_without_an_explicit_commit(
 ) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_history_baseline(tmp_path)
+    window = _window_with_history_baseline()
     window.project.teams[0][0].offset_x = 0.1
     window.project.teams[1][3].zoom = 1.35
     window._history.reset()
@@ -199,7 +197,7 @@ def test_a_slot_reorder_is_undone_without_an_explicit_commit(
 def test_a_whole_drag_gesture_is_a_single_undo_step(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_history_baseline(tmp_path)
+    window = _window_with_history_baseline()
 
     window.team_fields.on_drag_started(0, 0)
     window.team_fields.on_drag_hover(1, 3)
@@ -221,7 +219,7 @@ def test_a_whole_drag_gesture_is_a_single_undo_step(tmp_path: Path, monkeypatch:
 def test_a_cancelled_drag_leaves_nothing_to_undo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_history_baseline(tmp_path)
+    window = _window_with_history_baseline()
     start_x = window.current_member().offset_x
     window.drag_placement(30, 0)
     window._history.commit_now()
@@ -284,7 +282,7 @@ def test_redo_survives_a_baseline_the_sliders_would_requantize(
     """
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_history_baseline(tmp_path)
+    window = _window_with_history_baseline()
     window.current_member().offset_x = 0.0724
     window._history.reset()
 
@@ -311,7 +309,7 @@ def test_no_debounce_is_left_pending_during_a_slot_drag(
     """
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_history_baseline(tmp_path)
+    window = _window_with_history_baseline()
 
     # An edit still pending when the drag starts must be settled, not left armed.
     window.drag_placement(30, 0)
@@ -336,28 +334,29 @@ def test_undoing_back_to_a_name_re_requests_its_art(
 ) -> None:
     """A restored name must not leave its slot a placeholder for good.
 
-    Clearing a name prunes its `Asset`, and a restore writes the name onto the
+    A cleared name downloads nothing, and a restore writes the name onto the
     combos before their signals are connected, so it reaches neither
     `member_changed` nor the `ensure()` at its end. Without a call of its own
     the slot would stay inert and refuse to export, with nothing downloading.
     """
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_history_baseline(tmp_path)
+    window = _window_with_history_baseline()
     restored: list[list[str]] = []
     monkeypatch.setattr(
-        window.asset_loader, "ensure", lambda: restored.append(sorted(window.selected_build_keys()))
+        window.asset_loader,
+        "ensure",
+        lambda: restored.append([member.name for team in window.project.teams for member in team]),
     )
 
     window.member_changed(0, 0, "")
     window._history.commit_now()
-    assert window.assets == {}
     restored.clear()
 
     window._history.undo()
 
     assert window.current_member().name == TEAM_NAMES[0]
-    assert restored == [sorted(f"{name.casefold()}|live" for name in TEAM_NAMES)]
+    assert restored == [TEAM_NAMES]
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
@@ -370,7 +369,7 @@ def test_undo_resolves_a_build_onto_a_state_snapshotted_before_the_profile(
     `Placement.build` is what the renderer resolves art through, and a restore
     reaches the combos before their signals are connected, so `member_changed`
     never runs to fill one in. Without a resolve of its own the slot would keep
-    an empty `asset_key` and render as a placeholder for good, while still
+    a `build` of `None` and render as a placeholder for good, while still
     counting as filled everywhere the editor resolves through the builds map.
     """
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
@@ -379,7 +378,7 @@ def test_undo_resolves_a_build_onto_a_state_snapshotted_before_the_profile(
 
     window.member_changed(0, 0, TEAM_NAMES[0])  # No profile loaded, so no build.
     window._history.commit_now()
-    assert window.current_member().asset_key == ""
+    assert window.current_member().build is None
 
     window.builds = {TEAM_NAMES[0].casefold(): [live_build(TEAM_NAMES[0])]}
     window.current_member().zoom = 1.4
@@ -387,7 +386,7 @@ def test_undo_resolves_a_build_onto_a_state_snapshotted_before_the_profile(
 
     window._history.undo()
 
-    assert window.current_member().asset_key == f"{TEAM_NAMES[0].casefold()}|live"
+    assert window.current_member().build == live_build(TEAM_NAMES[0])
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
@@ -403,13 +402,13 @@ def test_art_arriving_mid_drag_leaves_the_debounce_disarmed(
     """
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_history_baseline(tmp_path)
-    arriving = create_test_assets(tmp_path / "late", TEAM_NAMES[1:2])
+    window = _window_with_history_baseline()
+    arriving = create_test_assets(window.art_root, TEAM_NAMES[1:2])[0]
 
     window.team_fields.on_drag_started(0, 0)
     window.team_fields.on_drag_hover(1, 3)
 
-    window._on_asset_ready(f"{TEAM_NAMES[1].casefold()}|live", arriving[f"{TEAM_NAMES[1].casefold()}|live"])
+    window._on_asset_ready(arriving)
 
     assert window._history._timer.isActive() is False
 
@@ -439,7 +438,7 @@ def test_each_shortcut_is_connected_to_the_direction_it_names(
 ) -> None:
     monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
     app = qapp()
-    window = _window_with_history_baseline(tmp_path)
+    window = _window_with_history_baseline()
     start_x = window.current_member().offset_x
 
     window.drag_placement(30, 0)

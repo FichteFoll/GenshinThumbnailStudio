@@ -8,7 +8,7 @@ from PIL import Image
 
 import genshin_thumbnail_studio.enka.assets as assets
 from genshin_thumbnail_studio.enka.errors import EnkaError
-from genshin_thumbnail_studio.models import Asset
+from genshin_thumbnail_studio.models import Build
 
 from .helpers import make_build
 
@@ -31,20 +31,23 @@ def files_under(root: Path) -> list[Path]:
     return sorted(path for path in root.rglob("*") if path.is_file())
 
 
-def test_download_assets_keys_by_build_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_download_assets_announces_each_build_once_both_its_files_are_published(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """There is nothing left to key: the callback hands back the build itself,
+    and the build is what a caller asks for the paths."""
     monkeypatch.setattr(assets, "download", image_writer())
 
     builds = [make_build("Alpha"), make_build("Alpha", "Bow DPS"), make_build("Beta")]
-    received: list[tuple[str, str]] = []
+    received: list[Build] = []
 
-    def on_asset(key: str, asset: Asset) -> None:
-        received.append((key, asset.build.name))
+    returned = assets.download_assets(builds, tmp_path, on_build=received.append)
 
-    downloaded = assets.download_assets(builds, tmp_path, on_asset=on_asset)
-
-    assert received == [("alpha|live", "Alpha"), ("alpha|bow dps", "Alpha"), ("beta|live", "Beta")]
-    assert set(downloaded) == {"alpha|live", "alpha|bow dps", "beta|live"}
-    assert downloaded["alpha|bow dps"].build.build_name == "Bow DPS"
+    assert returned is None
+    assert received == builds
+    assert all(
+        build.art_path(tmp_path).exists() and build.weapon_path(tmp_path).exists() for build in received
+    )
 
 
 def test_download_assets_publishes_both_files_where_the_build_says_they_belong(
@@ -53,11 +56,8 @@ def test_download_assets_publishes_both_files_where_the_build_says_they_belong(
     monkeypatch.setattr(assets, "download", image_writer())
     build = make_build("Alpha")
 
-    downloaded = assets.download_assets([build], tmp_path)
+    assets.download_assets([build], tmp_path)
 
-    asset = downloaded[build.key]
-    assert asset.art_path == build.art_path(tmp_path)
-    assert asset.weapon_path == build.weapon_path(tmp_path)
     assert files_under(tmp_path) == sorted([build.art_path(tmp_path), build.weapon_path(tmp_path)])
 
 

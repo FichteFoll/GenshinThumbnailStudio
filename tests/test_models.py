@@ -39,7 +39,6 @@ def test_build_round_trip() -> None:
     )
     restored = Build.from_dict(build.to_dict())
     assert restored == build
-    assert build.key == "furina|vape"
     assert build.details() == ("costume-42", "Splendor of Tranquil Waters", 2, 3)
 
     build_with_nones = Build(
@@ -53,8 +52,7 @@ def test_build_round_trip() -> None:
     )
     restored_with_nones = Build.from_dict(build_with_nones.to_dict())
     assert restored_with_nones == build_with_nones
-    # The live build is the default, and its key is the character alone.
-    assert build_with_nones.key == "navia|live"
+    assert build_with_nones.build_name == LIVE_BUILD_NAME
 
 
 def test_build_paths_reproduce_the_cache_naming_scheme() -> None:

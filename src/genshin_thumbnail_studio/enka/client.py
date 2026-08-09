@@ -78,10 +78,10 @@ def _live_builds(response: Mapping[str, Sequence[SavedBuildLike]]) -> list[Build
     showcase; either way, these are the only live data available.
 
     Their own `name` is the empty string, so the build name comes from here
-    instead. No build id is carried over: `Build.key` and `Build.details()`
-    both ignore `build_id`, so it is already keyed identically to a showcase
-    build without it, and omitting it keeps a saved-build id out of a project
-    file recorded for a live build.
+    instead. No build id is carried over: `Build.details()` ignores `build_id`,
+    as do the paths a build derives, so it already compares identically to a
+    showcase build without it, and omitting it keeps a saved-build id out of a
+    project file recorded for a live build.
     """
     live = [entry for entries in response.values() for entry in entries if entry.live]
     live.sort(key=lambda entry: float(entry.order))

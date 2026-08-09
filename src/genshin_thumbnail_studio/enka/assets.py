@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from ..models import Asset, Build
+from ..models import Build
 from .errors import EnkaError
 from .http import download
 
@@ -57,22 +57,21 @@ def download_assets(
     builds: list[Build],
     root: Path,
     progress: Callable[[int, int, str], None] | None = None,
-    on_asset: Callable[[str, Asset], None] | None = None,
-) -> dict[str, Asset]:
-    """Fetch every build's art into the cache under `root`, keyed by `Build.key`.
+    on_build: Callable[[Build], None] | None = None,
+) -> None:
+    """Fetch every build's art and weapon icon into the cache under `root`.
 
-    Where each file belongs is the build's own answer (`Build.art_path()` and
-    `Build.weapon_path()`), so a download's only job is to put it there.
+    Nothing is returned and nothing is keyed: where each file belongs is the
+    build's own answer (`Build.art_path()` and `Build.weapon_path()`), so a
+    download's only job is to put it there and a caller that wants a file only
+    has to ask the build for its path. `on_build` fires once both of a build's
+    files have been published, which is when a slot framed with it stops being
+    a placeholder.
     """
-    assets: dict[str, Asset] = {}
     for index, build in enumerate(builds, start=1):
         if progress:
             progress(index, len(builds), build.name)
-        art = build.art_path(root)
-        weapon = build.weapon_path(root)
-        _publish(build.art_url, art, partial(_validate_art, build=build))
-        _publish(build.weapon_url, weapon, partial(_validate_weapon, build=build))
-        assets[build.key] = Asset(build=build, art_path=art, weapon_path=weapon)
-        if on_asset:
-            on_asset(build.key, assets[build.key])
-    return assets
+        _publish(build.art_url, build.art_path(root), partial(_validate_art, build=build))
+        _publish(build.weapon_url, build.weapon_path(root), partial(_validate_weapon, build=build))
+        if on_build:
+            on_build(build)

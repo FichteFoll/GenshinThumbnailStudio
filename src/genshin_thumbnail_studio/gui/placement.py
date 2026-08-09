@@ -33,8 +33,10 @@ class PlacementController:
     def offset_bounds(self, member: Placement) -> tuple[float, float]:
         """Reachable +/- offset per axis for the member's art and zoom."""
         state = self._state
-        asset = state.assets.get(member.asset_key) if member.asset_key else None
-        art_size = art_pixel_size(str(asset.art_path)) if asset else STANDARD_ART_SIZE
+        art = member.build.art_path(state.art_root) if member.build else None
+        # Not downloaded yet: the standard art size is what the placeholder is
+        # framed against, and the bounds are recomputed once the file lands.
+        art_size = art_pixel_size(str(art)) if art is not None and art.exists() else STANDARD_ART_SIZE
         return max_offset(art_size, state.project.mode == "abyss", member.zoom)
 
     def pan(self, member: Placement, dx: float, dy: float) -> None:

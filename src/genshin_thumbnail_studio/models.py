@@ -1,4 +1,4 @@
-"""Plain dataclasses for a build, a downloaded asset, a placement and a project.
+"""Plain dataclasses for a build, a placement and a project.
 
 No dependency on the rest of the package or on Qt, so every other module can
 import these without pulling in the network or GUI stack.
@@ -70,16 +70,6 @@ class Build:
     rarity: int | None = None
     weapon_rarity: int | None = None
 
-    @property
-    def key(self) -> str:
-        """Identify character *and* build, the key of the downloaded-art dict.
-
-        Two slots holding different builds of one character must not share a
-        weapon icon or a skin, which a key of the character name alone would
-        force them to.
-        """
-        return f"{self.name.casefold()}|{self.build_name.casefold()}"
-
     def art_path(self, root: Path) -> Path:
         """This build's character art inside the cache rooted at `root`."""
         return _cached_path(root, "characters", self.name, self.art_url)
@@ -120,13 +110,6 @@ class Profile:
 
 
 @dataclass
-class Asset:
-    build: Build
-    art_path: Path
-    weapon_path: Path
-
-
-@dataclass
 class Placement:
     """One character's framing inside its panel.
 
@@ -144,17 +127,6 @@ class Placement:
     color: str = "#78d7ff"
     flip: bool = False
     build: Build | None = None
-
-    @property
-    def asset_key(self) -> str:
-        """The key this slot's art is stored under, or `""` while unresolved.
-
-        The renderer receives only a `Project` and the `Asset` dict, never the
-        editor's build map, so the key has to travel on the placement itself.
-        An empty key matches no asset, which is the right outcome for a slot
-        whose build is not resolved yet.
-        """
-        return self.build.key if self.build else ""
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> Placement:

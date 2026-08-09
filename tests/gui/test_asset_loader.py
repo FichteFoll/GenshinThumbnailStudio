@@ -16,7 +16,7 @@ from PySide6.QtCore import QRunnable, QThreadPool
 
 from genshin_thumbnail_studio.gui import asset_loader
 from genshin_thumbnail_studio.gui.asset_loader import AssetLoader
-from genshin_thumbnail_studio.models import Asset, Build, Project
+from genshin_thumbnail_studio.models import Build, Project
 
 
 @dataclass
@@ -25,7 +25,6 @@ class StubState:
 
     project: Project
     builds: dict[str, list[Build]] = field(default_factory=dict)
-    assets: dict[str, Asset] = field(default_factory=dict)
     art_root: Path = Path("assets")
 
 
@@ -53,29 +52,34 @@ def make_build(name: str) -> Build:
     )
 
 
-def make_asset(root: Path, build: Build) -> Asset:
-    return Asset(build, root / f"{build.name}.png", root / f"{build.name}-weapon.png")
+def publish(root: Path, build: Build) -> None:
+    """Put empty files where the build says its two files belong.
+
+    The loader asks nothing of them but that they exist, which is exactly what
+    "this build has been downloaded" means now.
+    """
+    for path in (build.art_path(root), build.weapon_path(root)):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
 
 
-DownloadAssets = Callable[..., dict[str, Asset]]
+DownloadAssets = Callable[..., None]
 
 
 def fake_downloader(requested: list[list[str]]) -> DownloadAssets:
-    """A `download_assets` stand-in that fabricates assets without any network."""
+    """A `download_assets` stand-in that publishes the files without any network."""
 
     def fake_download_assets(
         builds: list[Build],
         root: Path,
         progress: object = None,
-        on_asset: Callable[[str, Asset], None] | None = None,
-    ) -> dict[str, Asset]:
+        on_build: Callable[[Build], None] | None = None,
+    ) -> None:
         requested.append([build.name for build in builds])
-        downloaded: dict[str, Asset] = {}
         for build in builds:
-            downloaded[build.key] = make_asset(root, build)
-            if on_asset:
-                on_asset(build.key, downloaded[build.key])
-        return downloaded
+            publish(root, build)
+            if on_build:
+                on_build(build)
 
     return fake_download_assets
 
@@ -98,7 +102,7 @@ def test_ensure_requests_only_the_builds_that_are_missing(
     # A third slot names a character the profile does not know, and a fourth is
     # already downloaded; neither may reach the downloader.
     state.project.teams[0][2].name = "Unknown Traveler"
-    state.assets["nahida|live"] = make_asset(tmp_path, state.builds["nahida"][0])
+    publish(tmp_path, state.builds["nahida"][0])
     requested: list[list[str]] = []
     monkeypatch.setattr(asset_loader, "download_assets", fake_downloader(requested))
 
@@ -112,16 +116,12 @@ def test_ensure_emits_asset_ready_per_downloaded_character(
 ) -> None:
     loader, _, _ = make_loader(["Furina", "Nahida"], tmp_path)
     monkeypatch.setattr(asset_loader, "download_assets", fake_downloader([]))
-    arrived: list[str] = []
-
-    def record(key: str, asset: Asset) -> None:
-        arrived.append(key)
-
-    loader.asset_ready.connect(record)
+    arrived: list[Build] = []
+    loader.asset_ready.connect(arrived.append)
 
     loader.ensure()
 
-    assert arrived == ["furina|live", "nahida|live"]
+    assert [build.name for build in arrived] == ["Furina", "Nahida"]
 
 
 def test_progress_reports_the_batch_finishing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -139,10 +139,9 @@ def test_progress_reports_the_batch_finishing(tmp_path: Path, monkeypatch: pytes
 def test_ensure_starts_no_job_for_art_that_is_already_downloaded(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    loader, state, pool = make_loader(["Furina"], tmp_path)
+    loader, _, pool = make_loader(["Furina"], tmp_path)
     requested: list[list[str]] = []
     monkeypatch.setattr(asset_loader, "download_assets", fake_downloader(requested))
-    loader.asset_ready.connect(state.assets.__setitem__)
 
     loader.ensure()
     loader.ensure()
@@ -154,7 +153,7 @@ def test_ensure_starts_no_job_for_art_that_is_already_downloaded(
 def test_a_failed_download_is_reported_and_retried(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     loader, _, _ = make_loader(["Furina"], tmp_path)
 
-    def failing_download_assets(*args: object, **kwargs: object) -> dict[str, Asset]:
+    def failing_download_assets(*args: object, **kwargs: object) -> None:
         raise RuntimeError("Enka is unreachable")
 
     monkeypatch.setattr(asset_loader, "download_assets", failing_download_assets)
@@ -172,3 +171,45 @@ def test_a_failed_download_is_reported_and_retried(tmp_path: Path, monkeypatch: 
     loader.ensure()
 
     assert requested == [["Furina"]]
+
+
+def test_two_builds_fetching_the_same_two_urls_share_one_download(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deduplication is by the URL pair, which is what a download is determined by.
+
+    Keying it by character and build name instead let two builds with identical
+    URLs but different names into one batch, or into two overlapping ones, where
+    they raced each other for the same temp file.
+    """
+    loader, state, _ = make_loader(["Furina", "Furina"], tmp_path)
+    twin = make_build("Furina")
+    twin.build_name = "Vape"
+    state.project.teams[0][1].build = twin
+    requested: list[list[str]] = []
+    monkeypatch.setattr(asset_loader, "download_assets", fake_downloader(requested))
+
+    loader.ensure()
+
+    assert requested == [["Furina"]]
+
+
+def test_two_builds_sharing_a_build_name_each_get_their_own_download(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R6: a shared build name is not a shared download.
+
+    `build_choices()` deliberately offers two entries of one name, and their art
+    differs; the old name-based key collapsed them onto one fetch.
+    """
+    loader, state, _ = make_loader(["Furina", "Furina"], tmp_path)
+    other = make_build("Furina")
+    other.art_url = "https://example.invalid/Furina-vape.png"
+    state.project.teams[0][0].build = make_build("Furina")
+    state.project.teams[0][1].build = other
+    requested: list[list[str]] = []
+    monkeypatch.setattr(asset_loader, "download_assets", fake_downloader(requested))
+
+    loader.ensure()
+
+    assert requested == [["Furina", "Furina"]]

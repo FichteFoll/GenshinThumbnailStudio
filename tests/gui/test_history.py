@@ -21,7 +21,7 @@ from genshin_thumbnail_studio.gui.history import (
     PlacementHistory,
     Teams,
 )
-from genshin_thumbnail_studio.models import DEFAULT_ZOOM, Asset, Build, Placement, Project
+from genshin_thumbnail_studio.models import DEFAULT_ZOOM, Build, Placement, Project
 
 from .helpers import qapp
 
@@ -159,7 +159,6 @@ class StubState:
 
     project: Project
     builds: dict[str, list[Build]] = field(default_factory=dict)
-    assets: dict[str, Asset] = field(default_factory=dict)
     art_root: Path = Path("assets")
 
 
