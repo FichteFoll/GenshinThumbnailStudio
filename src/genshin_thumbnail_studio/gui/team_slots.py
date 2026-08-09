@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QMimeData, QPoint, Qt, Signal
-from PySide6.QtGui import QDrag, QDragEnterEvent, QDropEvent, QMouseEvent
+from PySide6.QtGui import QDrag, QDragEnterEvent, QDropEvent, QFontMetrics, QMouseEvent
 from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QToolButton, QWidget
 
 SLOT_MIME_TYPE = "application/x-genshin-slot"
+
+# A saved build's name is free text, so the caption is elided rather than
+# allowed to stretch the whole controls column.
+MAX_BUILD_CAPTION_WIDTH = 120
 
 
 class _SlotDragHandle(QLabel):
@@ -64,11 +68,26 @@ class TeamSlotWidget(QWidget):
         layout.addWidget(self.handle)
         layout.addWidget(combo, 1)
         self.build_button = QToolButton()
+        self.build_button.setObjectName("buildButton")
+        # An arrow-type tool button draws the arrow where the icon would go,
+        # so the caption sits beside it.
         self.build_button.setArrowType(Qt.ArrowType.DownArrow)
-        self.build_button.setFixedWidth(18)
+        self.build_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.build_button.setToolTip("Choose build")
         self.build_button.clicked.connect(lambda: self.build_menu_requested.emit(self.team, self.slot))
         layout.addWidget(self.build_button)
+
+    def set_build_caption(self, label: str) -> None:
+        """Show `label` beside the arrow, elided, with the full text as tooltip."""
+        if not label:
+            self.build_button.setText("")
+            self.build_button.setToolTip("Choose build")
+            return
+        metrics = QFontMetrics(self.build_button.font())
+        self.build_button.setText(
+            metrics.elidedText(label, Qt.TextElideMode.ElideRight, MAX_BUILD_CAPTION_WIDTH)
+        )
+        self.build_button.setToolTip(label)
 
     def _set_drop_target(self, active: bool) -> None:
         self.setProperty("dropTarget", active)

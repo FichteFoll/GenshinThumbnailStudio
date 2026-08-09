@@ -141,6 +141,22 @@ def test_the_menus_actions_share_one_exclusive_action_group(host: Host) -> None:
     assert sum(action.isChecked() for action in actions) == 1
 
 
+def test_the_build_button_captions_the_selected_build(host: Host) -> None:
+    """R5: the button beside the combo names the build the slot is framed with."""
+    assert host.controller.slot_widgets[0][0].build_button.text() == LIVE_BUILD_NAME
+    assert host.controller.slot_widgets[0][1].build_button.text() == ""
+
+
+def test_selecting_a_build_updates_the_button_caption(host: Host) -> None:
+    """R5: the caption follows a fresh selection, which the editor's own
+    `sync_controls()` does not refresh."""
+    menu = host.controller.build_menu(0, 0)
+
+    menu.actions()[1].trigger()
+
+    assert host.controller.slot_widgets[0][0].build_button.text() == "Bow DPS"
+
+
 def test_reordering_slots_moves_the_build_buttons_with_them(host: Host) -> None:
     """The names move between slots with their signals blocked, so the arrows
     have to be refreshed by hand or they stay with the old positions."""

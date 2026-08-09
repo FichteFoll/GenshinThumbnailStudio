@@ -2,6 +2,8 @@
 
 `TeamSlotWidget[dropTarget="true"]` selects on the property that
 `TeamSlotWidget._set_drop_target()` sets, so the two must be changed together.
+`QToolButton#buildButton` selects on the object name
+`TeamSlotWidget.__init__()` gives the build button, likewise a pair.
 """
 
 from __future__ import annotations
@@ -17,6 +19,9 @@ QPushButton:pressed { background: #25272d; }
 QToolButton { background: #30333b; border: 1px solid #515561; padding: 7px 10px; }
 QToolButton:hover { background: #3a3e48; border-color: #777d8b; }
 QToolButton:pressed { background: #25272d; }
+/* The build button carries a caption beside its arrow, so it needs a tighter
+   padding than the panel-wide QToolButton rule to keep the slot rows short. */
+QToolButton#buildButton { padding: 4px 6px; }
 /* Once the tool button is stylesheet-rendered it stops drawing the divider
    between its main and its arrow section for itself, so ::menu-button has to. */
 QToolButton::menu-button { width: 16px; border-left: 1px solid #515561; }
