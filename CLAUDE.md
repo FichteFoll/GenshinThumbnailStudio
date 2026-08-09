@@ -137,3 +137,9 @@ Detail that matters while touching a specific module lives in `docs/`:
   test layout, the layout guard, and which tests need the offscreen platform.
 
 When a change invalidates something in `docs/`, update that file rather than this one.
+
+User-visible changes go into [CHANGELOG.md](CHANGELOG.md),
+under an `## Unreleased` heading
+that a release renames to the version and date.
+The version itself lives in `pyproject.toml` and `src/genshin_thumbnail_studio/__init__.py`,
+which have to be bumped together.
