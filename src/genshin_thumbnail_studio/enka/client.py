@@ -11,11 +11,8 @@ from pathlib import Path
 # from its defining module rather than the `enka` facade, which re-exports by
 # star import without an `__all__` and so reads as a private import.
 from enka import errors as enka_errors
-
-# `enka/assets/` ships no `__init__.py`, so the package's `py.typed` marker does
-# not reach it and these two stay unchecked.
-from enka.assets.data import PATH_TO_SOURCE  # pyright: ignore[reportMissingTypeStubs]
-from enka.assets.gi.manager import GI_ASSETS  # pyright: ignore[reportMissingTypeStubs]
+from enka.assets.data import PATH_TO_SOURCE
+from enka.assets.gi.manager import GI_ASSETS
 from enka.clients.gi import GenshinClient
 
 from ..models import LIVE_BUILD_NAME, Build, Profile

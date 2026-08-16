@@ -24,9 +24,11 @@ dev = [
 [project.gui-scripts]
 genshin-thumbnail-studio = "genshin_thumbnail_studio.gui:run"
 
-# Pinned past the 2.5.20 release for the `py.typed` marker it added.
+# Pinned past the 2.5.20 release for the `py.typed` marker it added, and further
+# past it for PR #212, which adds the missing `__init__.py` files so that marker
+# actually reaches `enka.assets.*`.
 [tool.uv.sources]
-enka = { git = "https://github.com/seriaati/enka-py", rev = "e326b27a8175fba2615d25ed5c2ccd17ee83115e" }
+enka = { git = "https://github.com/seriaati/enka-py", rev = "1d6f102f126a20ed5818fc45f2467cd432694f39" }
 
 [tool.setuptools]
 package-dir = {"" = "src"}
