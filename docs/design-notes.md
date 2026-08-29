@@ -291,6 +291,20 @@ for the reason "Collaborators read state freshly" gives below.
 it takes the window twice, as `parent: QMainWindow` and as `editor: ProfileEditor`,
 for the same reason `ProjectFiles` does, and needs no `HistoryController`,
 since none of `load()`, `paste_lineup()` or `validate_team()` touch undo history.
+A load whose showcase holds exactly as many characters as the mode has slots
+(eight for abyss, twelve for stygian) ends in an offer to fill the teams with it,
+in the order Enka returned the showcase.
+That is `Profile.live_builds()`, which recovers the showcase from the merged
+`builds` dict by filtering on the build name,
+the merge having put the live builds first.
+The fill goes through the combos rather than onto the placements,
+so every slot passes through `member_changed()`
+and resolves its build, preset and art the way a typed name does,
+and it is deliberately not asked which slot a character belongs in:
+dragging the filled slots into place answers that faster than a dialog could.
+The offer is made after the `finally` block restores the cursor,
+since a modal prompt must not be shown under a wait cursor.
+
 `validate_team()` puts up no dialog itself: it raises `ValueError` on a name
 the loaded profile does not resolve, and its callers
 (`project_io.ProjectFiles._write_project`/`export`) decide what to do with that.

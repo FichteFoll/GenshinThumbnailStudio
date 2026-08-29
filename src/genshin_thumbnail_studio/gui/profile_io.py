@@ -65,6 +65,7 @@ class ProfileLoader:
         editor.project.profile_name = "" if is_uid(identifier) else identifier
         controls.load_button.setEnabled(False)
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        showcase: list[Build] = []
         try:
             profile = editor.client.load_profile(identifier)
             editor.builds = profile.builds
@@ -83,15 +84,44 @@ class ProfileLoader:
             self._parent.statusBar().showMessage("Enka profile loaded", 5000)
             editor.asset_loader.ensure()
             editor.schedule_render()
+            showcase = profile.live_builds()
         except Exception as error:
             dialogs.show_error(self._parent, "Could not load profile", error)
         finally:
             QApplication.restoreOverrideCursor()
             controls.load_button.setEnabled(True)
+        # Outside the wait cursor, which a modal prompt must not be shown under.
+        self._offer_showcase_lineup(showcase)
+
+    def _offer_showcase_lineup(self, showcase: list[Build]) -> None:
+        """Offer to fill the teams when the showcase is exactly one lineup long.
+
+        A showcase of that size is the lineup itself, so the only thing left to
+        decide is which slot each character belongs in, and dragging the filled
+        slots into place answers that faster than a dialog could ask it.
+        """
+        if len(showcase) != self._expected_lineup_size():
+            return
+        names = [build.name for build in showcase]
+        if not dialogs.confirm_showcase_lineup(self._parent, names):
+            return
+        self._fill_lineup(names)
+
+    def _expected_lineup_size(self) -> int:
+        return 8 if self._editor.project.mode == "abyss" else 12
+
+    def _fill_lineup(self, names: list[str]) -> None:
+        """Write the names into the slots in order, one team after the other.
+
+        Through the combos rather than onto the placements, so each slot goes
+        through `member_changed()` and resolves its build, presets and art.
+        """
+        for index, name in enumerate(names):
+            team, slot = divmod(index, 4)
+            self._editor.team_fields.combos[team][slot].setCurrentText(name)
 
     def paste_lineup(self) -> None:
-        editor = self._editor
-        expected = 8 if editor.project.mode == "abyss" else 12
+        expected = self._expected_lineup_size()
         text = dialogs.ask_lineup_text(self._parent, expected)
         if text is None:
             return
@@ -99,9 +129,7 @@ class ProfileLoader:
         if len(names) != expected:
             dialogs.show_error(self._parent, "Invalid lineup", f"Expected {expected} names, found {len(names)}.")
             return
-        for index, name in enumerate(names):
-            team, slot = divmod(index, 4)
-            editor.team_fields.combos[team][slot].setCurrentText(name)
+        self._fill_lineup(names)
 
     def validate_team(self) -> list[Build]:
         """The builds the named slots are framed with, one per distinct download.

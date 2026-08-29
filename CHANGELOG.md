@@ -2,6 +2,17 @@
 
 All notable changes since the initial import.
 
+## Unreleased
+
+### Added
+
+- **Showcase as a lineup.**
+  Loading a profile whose live showcase holds exactly as many characters
+  as the mode has slots (eight for abyss, twelve for stygian)
+  offers to fill the teams with it,
+  in the order Enka returned the showcase.
+  The slots are then dragged into their intended teams and positions.
+
 ## 0.2.0 - 2026-08-09
 
 ### Added

@@ -321,7 +321,8 @@ and `storage.py` for persistence.
   a row for it, element, plus `build_name=custom_name` and `build_id=""`.
 - `dialogs.py` — the blocking dialogs as free functions taking the parent widget:
   `confirm_discard_changes()`, `confirm_cache_refresh()`,
-  `show_error()`, `show_export_finished()`, `ask_lineup_text()`, `ask_export_target()`.
+  `show_error()`, `show_export_finished()`, `confirm_showcase_lineup()`,
+  `ask_lineup_text()`, `ask_export_target()`.
   They return the user's choice rather than acting on it.
 - `project_io.py` — `ProjectFiles` (`new()`, `save()`, `save_as()`, `open()`, `export()`)
   plus the `ProjectEditor` Protocol it works through.
@@ -331,6 +332,8 @@ and `storage.py` for persistence.
   and `export()` methods delegating here,
   so every caller and test still goes through the window.
 - `profile_io.py` — `ProfileLoader` (`load()`, `paste_lineup()`, `validate_team()`)
+  and, behind `load()`, the offer to fill the teams from a showcase
+  that holds exactly one lineup,
   plus the `ProfileEditor` Protocol it works through.
   Constructed once in `MainWindow.__init__` with the window and the window as
   `ProfileEditor`. `MainWindow` keeps thin `load_profile()`, `paste_teams()`

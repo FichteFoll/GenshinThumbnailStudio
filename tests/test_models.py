@@ -1,9 +1,10 @@
 """Tests for `genshin_thumbnail_studio.models`."""
 
 import hashlib
+from datetime import datetime
 from pathlib import Path
 
-from genshin_thumbnail_studio.models import LIVE_BUILD_NAME, Build, Placement, Project
+from genshin_thumbnail_studio.models import LIVE_BUILD_NAME, Build, Placement, Profile, Project
 
 
 def make_build(
@@ -235,3 +236,26 @@ def test_abyss_shape() -> None:
     project.ensure_shape()
     assert len(project.teams) == 2
     assert all(len(team) == 4 for team in project.teams)
+
+
+def test_profile_live_builds_are_the_showcase_in_order() -> None:
+    """The merged dict keeps the showcase recoverable: live first, saved after."""
+    furina_live = make_build("Furina")
+    furina_saved = make_build("Furina", art_url="https://enka.network/ui/furina-alt.png")
+    furina_saved.build_name = "Bow DPS"
+    nahida_live = make_build("Nahida")
+    xilonen_saved = make_build("Xilonen")
+    xilonen_saved.build_name = "Support"
+    profile = Profile(
+        identifier="700000042",
+        uid="700000042",
+        username="",
+        builds={
+            "furina": [furina_live, furina_saved],
+            "nahida": [nahida_live],
+            "xilonen": [xilonen_saved],
+        },
+        fetched_at=datetime(2026, 8, 3, 10, 30, 15),
+    )
+
+    assert profile.live_builds() == [furina_live, nahida_live]

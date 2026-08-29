@@ -113,6 +113,20 @@ class Profile:
     builds: dict[str, list[Build]]
     fetched_at: datetime
 
+    def live_builds(self) -> list[Build]:
+        """The player's current showcase, in the order Enka returned it.
+
+        The merge that produced `builds` inserted the live builds first, one per
+        character and the showcase characters ahead of the saved-only ones, so
+        the showcase is recovered by filtering on the build name alone.
+        """
+        return [
+            build
+            for builds in self.builds.values()
+            for build in builds
+            if build.build_name == LIVE_BUILD_NAME
+        ]
+
 
 @dataclass
 class Placement:

@@ -915,3 +915,102 @@ def test_export_defaults_to_the_saved_project_folder(tmp_path: Path, monkeypatch
     assert default_paths == [str(project_dir / "prefilled.png")]
 
     close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+def _load_with_showcase(
+    window: MainWindow,
+    names: list[str],
+    confirm: bool,
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[list[str]]:
+    """Load a profile whose showcase holds `names`, answering the offer with `confirm`.
+
+    Returns the lineups the offer was made for, so a test can assert that it was
+    not made at all.
+    """
+    monkeypatch.setattr(dialogs, "QMessageBox", ForbiddenMessageBox)
+
+    def no_downloads(*args: object, **kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(asset_loader, "download_assets", no_downloads)
+    profile = make_profile("700000042", names)
+
+    def fake_load_profile(identifier: str) -> Profile:
+        return profile
+
+    monkeypatch.setattr(window.client, "load_profile", fake_load_profile)
+    offered: list[list[str]] = []
+
+    def fake_confirm(parent: object, lineup: list[str]) -> bool:
+        offered.append(lineup)
+        return confirm
+
+    monkeypatch.setattr(dialogs, "confirm_showcase_lineup", fake_confirm)
+    window.controls_panel.profile_edit.setText("700000042")
+    window.load_profile()
+    return offered
+
+
+def test_load_profile_fills_the_teams_from_a_showcase_that_is_one_lineup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A showcase of exactly eight characters is offered as the abyss lineup."""
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+
+    offered = _load_with_showcase(window, TEAM_NAMES, True, monkeypatch)
+
+    assert offered == [TEAM_NAMES]
+    assert [member.name for team in window.project.teams for member in team] == TEAM_NAMES
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+def test_load_profile_leaves_the_teams_alone_when_the_showcase_offer_is_declined(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+
+    offered = _load_with_showcase(window, TEAM_NAMES, False, monkeypatch)
+
+    assert offered == [TEAM_NAMES]
+    assert [member.name for team in window.project.teams for member in team] == [""] * 8
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+def test_load_profile_does_not_offer_a_showcase_that_is_not_one_lineup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Twelve characters fill a stygian project, not an abyss one."""
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+    names = [*TEAM_NAMES, "Raiden Shogun", "Yelan", "Xingqiu", "Hu Tao"]
+
+    offered = _load_with_showcase(window, names, True, monkeypatch)
+
+    assert offered == []
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+def test_load_profile_fills_three_stygian_teams_from_a_showcase_of_twelve(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+    window.controls_panel.stygian_radio.setChecked(True)
+    names = [*TEAM_NAMES, "Raiden Shogun", "Yelan", "Xingqiu", "Hu Tao"]
+
+    offered = _load_with_showcase(window, names, True, monkeypatch)
+
+    assert offered == [names]
+    assert [member.name for team in window.project.teams for member in team] == names
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)

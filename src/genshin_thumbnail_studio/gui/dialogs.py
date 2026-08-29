@@ -63,6 +63,18 @@ def show_export_finished(parent: QWidget, written: list[Path]) -> None:
     QMessageBox.information(parent, "Export finished", "\n".join(str(path) for path in written))
 
 
+def confirm_showcase_lineup(parent: QWidget, names: list[str]) -> bool:
+    """Ask whether to fill the teams with a showcase that fits them exactly."""
+    dialog = QMessageBox(parent)
+    dialog.setWindowTitle("Showcase fits the teams")
+    dialog.setText(f"The live showcase holds exactly {len(names)} characters. Fill the teams with them?")
+    dialog.setInformativeText(", ".join(names))
+    fill_button = dialog.addButton("Fill teams", QMessageBox.ButtonRole.AcceptRole)
+    dialog.addButton(QMessageBox.StandardButton.Cancel)
+    dialog.exec()
+    return dialog.clickedButton() == fill_button
+
+
 def ask_lineup_text(parent: QWidget, expected: int) -> str | None:
     """Prompt for a pasted lineup, or return None when the prompt was cancelled."""
     text, ok = QInputDialog.getMultiLineText(
