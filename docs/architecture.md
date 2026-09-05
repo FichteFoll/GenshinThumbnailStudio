@@ -149,6 +149,15 @@ All network interaction with Enka Network, over the `enka` PyPI package.
   before it fetches anything,
   which is the only way to re-download data files
   the library otherwise downloads once and keeps forever.
+  A load refreshes them once more, and fetches a second time,
+  when the first fetch names a character or weapon they do not describe
+  or the library trips over them
+  (`STALE_ASSET_ERRORS`, `_describes_unknown_data()`),
+  which includes the library's own `AssetKeyError` data-miss report,
+  but not its network and API failures, which a refresh cannot fix;
+  at most one refresh happens per load, since it costs a download.
+  `EnkaError` still covers everything that leaves the package,
+  including a stale-data failure that survived the refresh.
 - `assets.py` — `download_assets(builds, root, progress=None, on_build=None)`,
   downloading and validating (dimension/format checks) character art and weapon icons
   to the paths each `Build` derives from `root`,
