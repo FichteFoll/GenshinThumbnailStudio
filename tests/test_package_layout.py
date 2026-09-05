@@ -28,6 +28,7 @@ EXPECTED_MODULES = {
     "enka/__init__.py",
     "enka/errors.py",
     "enka/http.py",
+    "enka/freshness.py",
     "enka/parsing.py",
     "enka/profile.py",
     "enka/client.py",

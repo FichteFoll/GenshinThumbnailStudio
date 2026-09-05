@@ -122,6 +122,11 @@ All network interaction with Enka Network, over the `enka` PyPI package.
 
 - `errors.py` — `EnkaError`, the single error type everything in the package raises.
 - `http.py` — the plain `urllib` side: `USER_AGENT`, `fetch_json()`, `download()`.
+- `freshness.py` — how old a cached Enka data file may get:
+  `DATA_MAX_AGE_DAYS` (seven days, the one threshold every cached data file shares),
+  `is_fresh(path, max_age_days=DATA_MAX_AGE_DAYS)`,
+  which is `False` for a missing file,
+  and `any_stale(paths)`.
 - `parsing.py` — the library's models into our `Build`s,
   against `CharacterLike`, `WeaponLike`, `CostumeLike` and `SavedBuildLike` Protocols
   rather than the library's own types:
@@ -138,7 +143,12 @@ All network interaction with Enka Network, over the `enka` PyPI package.
   and the saved builds when a username resolves to a hash,
   and returns a `Profile`.
   `redirect_asset_files()` rewrites the third-party library's private,
-  CWD-relative asset paths before the first client starts.
+  CWD-relative asset paths before the first client starts,
+  and returns those redirected paths so the client can age them:
+  a stale set makes the next load call the library's `update_assets()`
+  before it fetches anything,
+  which is the only way to re-download data files
+  the library otherwise downloads once and keeps forever.
 - `assets.py` — `download_assets(builds, root, progress=None, on_build=None)`,
   downloading and validating (dimension/format checks) character art and weapon icons
   to the paths each `Build` derives from `root`,
@@ -153,7 +163,7 @@ All network interaction with Enka Network, over the `enka` PyPI package.
   `load_catalog()` reads the `enka` library's already-downloaded
   `characters.json` and `text_map.json` from the asset root,
   and downloads `WEAPON_DATA_URL` (Enka's own weapon catalog) into
-  `weapons.json` there, refreshing it after `WEAPON_DATA_MAX_AGE_DAYS`;
+  `weapons.json` there, refreshing it after `DATA_MAX_AGE_DAYS`;
   a missing or unreadable file degrades to an empty catalog
   and a failed download falls back to whatever is already on disk.
   `load_catalog()` never raises.
@@ -165,13 +175,13 @@ since Python resolves by full dotted name,
 but a bare `import enka` inside our own `enka/client.py`
 would read as a self-import.
 
-Import direction: `errors` imports nothing from the package;
+Import direction: `errors` and `freshness` import nothing from the package;
 `http` and `parsing` import `errors`;
 `profile` imports `errors` and `http`;
 `assets` imports `errors` and `http`;
-`catalog` imports `errors`, `http` and `parsing`, and reaches `Build`
+`catalog` imports `errors`, `freshness`, `http` and `parsing`, and reaches `Build`
 through `..models`;
-`client` imports `errors`, `http`, `parsing` and `profile`.
+`client` imports `errors`, `freshness`, `http`, `parsing` and `profile`.
 Only `client.py` imports the third-party library,
 so everything else in the package is testable without it.
 

@@ -17,13 +17,13 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
 from ..models import Build
 from .errors import EnkaError
+from .freshness import is_fresh
 from .http import download
 from .parsing import ENKA_ROOT
 
@@ -32,11 +32,6 @@ from .parsing import ENKA_ROOT
 WEAPON_DATA_URL = (
     "https://raw.githubusercontent.com/EnkaNetwork/API-docs/refs/heads/master/store/gi/weapons.json"
 )
-
-# New weapons arrive with a patch every few weeks; a week-old copy is never
-# meaningfully wrong, and refreshing it costs a download the popup would
-# otherwise pay every time it opens.
-WEAPON_DATA_MAX_AGE_DAYS = 7
 
 # `characters.json` names a weapon type, `weapons.json` numbers it.
 WEAPON_TYPE_IDS = {
@@ -215,22 +210,15 @@ def _read_mapping(path: Path) -> dict[str, Any]:
     return cast("dict[str, Any]", payload) if isinstance(payload, dict) else {}
 
 
-def _is_fresh(path: Path) -> bool:
-    try:
-        age = time.time() - path.stat().st_mtime
-    except OSError:
-        return False
-    return age < WEAPON_DATA_MAX_AGE_DAYS * 86400
-
-
 def _load_weapons(path: Path) -> dict[str, Any]:
-    """The cached weapon data, refreshed when it is missing or stale.
+    """The cached weapon data, refreshed once it is missing or older than
+    `DATA_MAX_AGE_DAYS`.
 
     The download lands beside the cache entry and is renamed onto it only once it
     parses, the way `assets.py` publishes an image, so a failed or truncated
     refresh leaves the previous copy usable instead of destroying it.
     """
-    if _is_fresh(path):
+    if is_fresh(path):
         return _read_mapping(path)
 
     incoming = path.with_suffix(path.suffix + ".part")
@@ -256,7 +244,7 @@ def load_catalog(asset_root: Path) -> Catalog:
 
     `characters.json` and `text_map.json` are the `enka` library's own downloads,
     already there by the time a profile has been loaded; `weapons.json` is this
-    app's and is refreshed at most every `WEAPON_DATA_MAX_AGE_DAYS`.
+    app's and is refreshed at most every `DATA_MAX_AGE_DAYS`.
     """
     characters = _read_mapping(asset_root / "characters.json")
     text_map = _read_mapping(asset_root / "text_map.json")

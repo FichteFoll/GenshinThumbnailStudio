@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from genshin_thumbnail_studio.enka import catalog
+from genshin_thumbnail_studio.enka import catalog, freshness
 from genshin_thumbnail_studio.enka.errors import EnkaError
 from genshin_thumbnail_studio.models import Build
 
@@ -276,7 +276,7 @@ def stale_weapon_file(root: Path) -> Path:
     """A cached `weapons.json` old enough to be refreshed."""
     path = root / "weapons.json"
     write_json(path, WEAPONS)
-    stale = time.time() - (catalog.WEAPON_DATA_MAX_AGE_DAYS + 1) * 86400
+    stale = time.time() - (freshness.DATA_MAX_AGE_DAYS + 1) * 86400
     os.utime(path, (stale, stale))
     return path
 

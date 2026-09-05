@@ -17,13 +17,14 @@ from enka.clients.gi import GenshinClient
 
 from ..models import LIVE_BUILD_NAME, Build, Profile
 from .errors import EnkaError
+from .freshness import any_stale
 from .http import USER_AGENT
 from .parsing import SavedBuildLike, build_from_character
 from .profile import Hoyo, is_uid, resolve_genshin_hoyo
 
 
-def redirect_asset_files(root: Path) -> None:
-    """Move the library's asset files under `root`.
+def redirect_asset_files(root: Path) -> list[Path]:
+    """Move the library's asset files under `root`, returning their new paths.
 
     The library hardcodes the CWD-relative `.enka_py/assets` and offers no
     setting for it, so the roughly 5 MB it downloads would land wherever the app
@@ -32,13 +33,20 @@ def redirect_asset_files(root: Path) -> None:
     it, since `_download_json()` looks the download URL up by the (now stale)
     original path and would otherwise raise `KeyError` on a first run with no
     cached files yet.
+
+    The paths come back in `GI_ASSETS._assets` order so that the caller can age
+    the cache: the library itself downloads each file once and then keeps it
+    forever, so their mtimes are the only record of how old the data is.
     """
     root.mkdir(parents=True, exist_ok=True)
+    paths: list[Path] = []
     for asset in GI_ASSETS._assets:  # pyright: ignore[reportPrivateUsage]
         old_path = asset._path  # pyright: ignore[reportPrivateUsage]
         new_path = root / old_path.name
         PATH_TO_SOURCE[new_path] = PATH_TO_SOURCE[old_path]
         asset._path = new_path  # pyright: ignore[reportPrivateUsage]
+        paths.append(new_path)
+    return paths
 
 
 def _create_client() -> GenshinClient:
@@ -100,10 +108,17 @@ def _merge_builds(live: list[Build], saved: list[Build]) -> dict[str, list[Build
     return builds
 
 
-async def _load(identifier: str, uid: str, username: str, owner_hash: str) -> Profile:
+async def _load(
+    identifier: str, uid: str, username: str, owner_hash: str, *, refresh_assets: bool
+) -> Profile:
     showcase: list[Build] = []
     response: Mapping[str, Sequence[SavedBuildLike]] = {}
     async with _create_client() as client:
+        if refresh_assets:
+            # `update_assets()` is the library's only way to re-download the data
+            # files it otherwise downloads once, on the first run that finds them
+            # missing, and then keeps forever.
+            await client.update_assets()
         if uid:
             showcase = await _fetch_live_builds(client, uid)
         if owner_hash:
@@ -131,7 +146,7 @@ class EnkaClient:
 
     def __init__(self, asset_root: Path) -> None:
         self.asset_root = asset_root
-        redirect_asset_files(asset_root)
+        self._asset_paths: list[Path] = redirect_asset_files(asset_root)
 
     def load_profile(self, identifier: str) -> Profile:
         identifier = identifier.strip()
@@ -139,7 +154,9 @@ class EnkaClient:
             raise EnkaError("Enter a Genshin UID or an Enka username.")
         uid, username, owner_hash = self._resolve(identifier)
         try:
-            return asyncio.run(_load(identifier, uid, username, owner_hash))
+            return asyncio.run(
+                _load(identifier, uid, username, owner_hash, refresh_assets=any_stale(self._asset_paths))
+            )
         except enka_errors.PlayerDoesNotExistError as error:
             raise EnkaError(f"Enka knows no player with the UID {uid or identifier}.") from error
         except enka_errors.WrongUIDFormatError as error:

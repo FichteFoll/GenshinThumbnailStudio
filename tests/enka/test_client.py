@@ -23,6 +23,10 @@ class FakeGenshinClient:
     def __init__(self) -> None:
         self.builds: Mapping[str, Sequence[StubSavedBuild]] = {}
         self.builds_params: Mapping[str, str] | None = None
+        self.update_calls = 0
+
+    async def update_assets(self) -> None:
+        self.update_calls += 1
 
     async def fetch_builds(self, params: Mapping[str, str]) -> Mapping[str, Sequence[StubSavedBuild]]:
         self.builds_params = params
@@ -224,6 +228,50 @@ def test_live_builds_keeps_only_live_entries_sorted_by_order() -> None:
     assert [build.name for build in builds] == ["Bennett", "Amber"]
     assert [build.build_name for build in builds] == ["Live", "Live"]
     assert [build.build_id for build in builds] == ["", ""]
+
+
+def test_load_profile_refreshes_the_data_files_when_none_are_cached(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_client: FakeGenshinClient
+) -> None:
+    """The library downloads its data files once and keeps them forever, so an
+    asset root with nothing in it is as stale as one that predates a patch."""
+
+    async def fake_live(_client: Any, _uid: str) -> list[Any]:
+        return [make_build("Amber")]
+
+    monkeypatch.setattr(client_module, "_fetch_live_builds", fake_live)
+
+    enka_client(tmp_path).load_profile("700468559")
+
+    assert fake_client.update_calls == 1
+
+
+def test_load_profile_does_not_refresh_freshly_cached_data_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_client: FakeGenshinClient
+) -> None:
+    async def fake_live(_client: Any, _uid: str) -> list[Any]:
+        return [make_build("Amber")]
+
+    monkeypatch.setattr(client_module, "_fetch_live_builds", fake_live)
+    client = enka_client(tmp_path)
+    for path in client._asset_paths:  # pyright: ignore[reportPrivateUsage]
+        path.write_text("{}", encoding="utf-8")
+
+    client.load_profile("700468559")
+
+    assert fake_client.update_calls == 0
+
+
+def test_redirect_asset_files_returns_the_paths_it_assigned(tmp_path: Path) -> None:
+    root = tmp_path / "assets"
+
+    paths = client_module.redirect_asset_files(root)
+
+    assert paths == [
+        asset._path  # pyright: ignore[reportPrivateUsage]
+        for asset in client_module.GI_ASSETS._assets  # pyright: ignore[reportPrivateUsage]
+    ]
+    assert paths, "the library has data files to age"
 
 
 def test_redirect_asset_files_keeps_the_download_urls_reachable(tmp_path: Path) -> None:
