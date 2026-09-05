@@ -12,6 +12,22 @@ All notable changes since the initial import.
   offers to fill the teams with it,
   in the order Enka returned the showcase.
   The slots are then dragged into their intended teams and positions.
+- **Automatic refresh of the cached Enka data files.**
+  They are re-downloaded once they are a week old,
+  and immediately, on demand,
+  whenever a profile load runs into a character or weapon
+  the cached files do not describe.
+- **Console and file logging with full tracebacks.**
+  Every exception that reaches an error popup is also logged,
+  with its traceback,
+  to the console and to a rotating log file under the app data directory.
+
+### Fixed
+
+- **Profile loads that failed with
+  `'NoneType' object is not subscriptable`**
+  on Enka data files older than the patch the profile was recorded under.
+  The affected files are now refreshed and the load retried automatically.
 
 ## 0.2.0 - 2026-08-09
 

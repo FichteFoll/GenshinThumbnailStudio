@@ -16,14 +16,16 @@ from enka.assets.gi.manager import GI_ASSETS
 from enka.clients.gi import GenshinClient
 
 from ..models import LIVE_BUILD_NAME, Build, Profile
+from .catalog import invalidate_weapon_data
 from .errors import EnkaError
+from .freshness import any_stale
 from .http import USER_AGENT
-from .parsing import SavedBuildLike, build_from_character
+from .parsing import UNKNOWN_WEAPON_NAME, SavedBuildLike, build_from_character
 from .profile import Hoyo, is_uid, resolve_genshin_hoyo
 
 
-def redirect_asset_files(root: Path) -> None:
-    """Move the library's asset files under `root`.
+def redirect_asset_files(root: Path) -> list[Path]:
+    """Move the library's asset files under `root`, returning their new paths.
 
     The library hardcodes the CWD-relative `.enka_py/assets` and offers no
     setting for it, so the roughly 5 MB it downloads would land wherever the app
@@ -32,13 +34,20 @@ def redirect_asset_files(root: Path) -> None:
     it, since `_download_json()` looks the download URL up by the (now stale)
     original path and would otherwise raise `KeyError` on a first run with no
     cached files yet.
+
+    The paths come back in `GI_ASSETS._assets` order so that the caller can age
+    the cache: the library itself downloads each file once and then keeps it
+    forever, so their mtimes are the only record of how old the data is.
     """
     root.mkdir(parents=True, exist_ok=True)
+    paths: list[Path] = []
     for asset in GI_ASSETS._assets:  # pyright: ignore[reportPrivateUsage]
         old_path = asset._path  # pyright: ignore[reportPrivateUsage]
         new_path = root / old_path.name
         PATH_TO_SOURCE[new_path] = PATH_TO_SOURCE[old_path]
         asset._path = new_path  # pyright: ignore[reportPrivateUsage]
+        paths.append(new_path)
+    return paths
 
 
 def _create_client() -> GenshinClient:
@@ -100,16 +109,92 @@ def _merge_builds(live: list[Build], saved: list[Build]) -> dict[str, list[Build
     return builds
 
 
-async def _load(identifier: str, uid: str, username: str, owner_hash: str) -> Profile:
+# The library reads its cached data files without guarding every lookup: a
+# profile carrying something they predate, such as a new artifact set, makes
+# `_post_process_artifact` subscript `None` rather than report a miss.
+STALE_ASSET_ERRORS = (TypeError, KeyError)
+
+
+async def _fetch_builds(
+    client: GenshinClient, uid: str, username: str, owner_hash: str
+) -> dict[str, list[Build]]:
+    """Every build Enka holds for the profile, as one list per character.
+
+    Kept separate from `_load()` so that a refresh of the library's data files
+    can run it a second time against the data it just downloaded.
+    """
     showcase: list[Build] = []
     response: Mapping[str, Sequence[SavedBuildLike]] = {}
-    async with _create_client() as client:
-        if uid:
-            showcase = await _fetch_live_builds(client, uid)
-        if owner_hash:
-            response = await _fetch_build_response(client, username, owner_hash)
+    if uid:
+        showcase = await _fetch_live_builds(client, uid)
+    if owner_hash:
+        response = await _fetch_build_response(client, username, owner_hash)
     live = showcase or _live_builds(response)
-    builds = _merge_builds(live, _saved_builds(response))
+    return _merge_builds(live, _saved_builds(response))
+
+
+def _describes_unknown_data(builds: dict[str, list[Build]]) -> bool:
+    """Whether the library failed to name something, which means its data files
+    predate the profile.
+
+    `enka`'s `Character.name` defaults to the empty string and
+    `_post_process_character()` returns early without setting it when the
+    character data misses, and a weapon whose name does not resolve against the
+    text map comes back as `UNKNOWN_WEAPON_NAME`.
+    """
+    return any(
+        not build.name or build.weapon_name == UNKNOWN_WEAPON_NAME
+        for entries in builds.values()
+        for build in entries
+    )
+
+
+async def _refresh_assets(client: GenshinClient, asset_root: Path) -> None:
+    """Re-download the library's data files and drop the weapon catalog beside
+    them, which ages on the same schedule and describes the same patch.
+
+    `update_assets()` is the library's only way to re-download the data files it
+    otherwise downloads once, on the first run that finds them missing, and then
+    keeps forever.
+    """
+    await client.update_assets()
+    invalidate_weapon_data(asset_root)
+
+
+async def _fetch_with_one_refresh(
+    client: GenshinClient, uid: str, username: str, owner_hash: str, asset_root: Path
+) -> dict[str, list[Build]]:
+    """Fetch, and fetch once more against refreshed data files if the first
+    attempt tripped over them or came back naming something they do not describe.
+
+    A refresh is a roughly 5 MB download, so it happens at most once per load: a
+    second failure propagates.
+
+    `enka_errors.AssetKeyError` is deliberately part of the retry: it subclasses
+    `KeyError`, and it is the library's own report of a data miss, the one it
+    raises telling the caller to consider calling `update_assets()`. The network
+    and API failures (`enka_errors.EnkaAPIError` and the rest, `OSError`) are
+    not retried, since a refresh cannot fix them.
+    """
+    try:
+        builds = await _fetch_builds(client, uid, username, owner_hash)
+    except STALE_ASSET_ERRORS:
+        builds = None
+    if builds is not None and not _describes_unknown_data(builds):
+        return builds
+    await _refresh_assets(client, asset_root)
+    return await _fetch_builds(client, uid, username, owner_hash)
+
+
+async def _load(
+    identifier: str, uid: str, username: str, owner_hash: str, asset_root: Path, *, refresh_assets: bool
+) -> Profile:
+    async with _create_client() as client:
+        if refresh_assets:
+            await _refresh_assets(client, asset_root)
+            builds = await _fetch_builds(client, uid, username, owner_hash)
+        else:
+            builds = await _fetch_with_one_refresh(client, uid, username, owner_hash, asset_root)
     if not builds:
         raise EnkaError(f"Enka holds no characters for {identifier}.")
     return Profile(
@@ -131,7 +216,7 @@ class EnkaClient:
 
     def __init__(self, asset_root: Path) -> None:
         self.asset_root = asset_root
-        redirect_asset_files(asset_root)
+        self._asset_paths: list[Path] = redirect_asset_files(asset_root)
 
     def load_profile(self, identifier: str) -> Profile:
         identifier = identifier.strip()
@@ -139,7 +224,16 @@ class EnkaClient:
             raise EnkaError("Enter a Genshin UID or an Enka username.")
         uid, username, owner_hash = self._resolve(identifier)
         try:
-            return asyncio.run(_load(identifier, uid, username, owner_hash))
+            return asyncio.run(
+                _load(
+                    identifier,
+                    uid,
+                    username,
+                    owner_hash,
+                    self.asset_root,
+                    refresh_assets=any_stale(self._asset_paths),
+                )
+            )
         except enka_errors.PlayerDoesNotExistError as error:
             raise EnkaError(f"Enka knows no player with the UID {uid or identifier}.") from error
         except enka_errors.WrongUIDFormatError as error:
@@ -149,6 +243,11 @@ class EnkaClient:
         # `EnkaAPIError` and `EnkaPyError` are two unrelated bases, so both are needed.
         except (enka_errors.EnkaAPIError, enka_errors.EnkaPyError, OSError) as error:
             raise EnkaError(f"Could not load {identifier} from Enka: {error}") from error
+        except STALE_ASSET_ERRORS as error:
+            raise EnkaError(
+                f"Enka's data files do not describe something in {identifier}, "
+                "even after refreshing them."
+            ) from error
 
     def _resolve(self, identifier: str) -> tuple[str, str, str]:
         """`(uid, username, owner_hash)` for what the user entered.

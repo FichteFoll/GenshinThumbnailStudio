@@ -19,6 +19,7 @@ from .dialogs import (
 from .editor_panel import EditorPanel
 from .history import HISTORY_DEBOUNCE_MS, HISTORY_LIMIT, HistoryController, PlacementHistory
 from .lineup import parse_lineup
+from .logging_setup import configure_logging
 from .main_window import MainWindow
 from .placement import MAX_ZOOM, MIN_ZOOM, PlacementController
 from .presets import PresetStore, preset_key
@@ -66,6 +67,7 @@ __all__ = [
     "ask_export_target",
     "ask_lineup_text",
     "build_choices",
+    "configure_logging",
     "confirm_cache_refresh",
     "confirm_discard_changes",
     "parse_lineup",

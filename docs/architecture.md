@@ -122,6 +122,11 @@ All network interaction with Enka Network, over the `enka` PyPI package.
 
 - `errors.py` — `EnkaError`, the single error type everything in the package raises.
 - `http.py` — the plain `urllib` side: `USER_AGENT`, `fetch_json()`, `download()`.
+- `freshness.py` — how old a cached Enka data file may get:
+  `DATA_MAX_AGE_DAYS` (seven days, the one threshold every cached data file shares),
+  `is_fresh(path, max_age_days=DATA_MAX_AGE_DAYS)`,
+  which is `False` for a missing file,
+  and `any_stale(paths)`.
 - `parsing.py` — the library's models into our `Build`s,
   against `CharacterLike`, `WeaponLike`, `CostumeLike` and `SavedBuildLike` Protocols
   rather than the library's own types:
@@ -138,7 +143,24 @@ All network interaction with Enka Network, over the `enka` PyPI package.
   and the saved builds when a username resolves to a hash,
   and returns a `Profile`.
   `redirect_asset_files()` rewrites the third-party library's private,
-  CWD-relative asset paths before the first client starts.
+  CWD-relative asset paths before the first client starts,
+  and returns those redirected paths so the client can age them:
+  a stale set makes the next load call the library's `update_assets()`
+  before it fetches anything,
+  which is the only way to re-download data files
+  the library otherwise downloads once and keeps forever.
+  A load refreshes them once more, and fetches a second time,
+  when the first fetch names a character or weapon they do not describe
+  or the library trips over them
+  (`STALE_ASSET_ERRORS`, `_describes_unknown_data()`),
+  which includes the library's own `AssetKeyError` data-miss report,
+  but not its network and API failures, which a refresh cannot fix;
+  at most one refresh happens per load, since it costs a download.
+  A refresh drops the weapon catalog beside those files
+  (`catalog.invalidate_weapon_data()`),
+  which ages on the same schedule and describes the same patch.
+  `EnkaError` still covers everything that leaves the package,
+  including a stale-data failure that survived the refresh.
 - `assets.py` — `download_assets(builds, root, progress=None, on_build=None)`,
   downloading and validating (dimension/format checks) character art and weapon icons
   to the paths each `Build` derives from `root`,
@@ -153,10 +175,13 @@ All network interaction with Enka Network, over the `enka` PyPI package.
   `load_catalog()` reads the `enka` library's already-downloaded
   `characters.json` and `text_map.json` from the asset root,
   and downloads `WEAPON_DATA_URL` (Enka's own weapon catalog) into
-  `weapons.json` there, refreshing it after `WEAPON_DATA_MAX_AGE_DAYS`;
+  `weapons.json` there, refreshing it after `DATA_MAX_AGE_DAYS`;
   a missing or unreadable file degrades to an empty catalog
   and a failed download falls back to whatever is already on disk.
   `load_catalog()` never raises.
+  `invalidate_weapon_data(asset_root)` removes that `weapons.json`,
+  so the next `load_catalog()` re-fetches it;
+  it is a cache drop and never fails.
 
 Only `client.py` imports the third-party `enka` package,
 and it imports it as `enka_api`:
@@ -165,13 +190,14 @@ since Python resolves by full dotted name,
 but a bare `import enka` inside our own `enka/client.py`
 would read as a self-import.
 
-Import direction: `errors` imports nothing from the package;
+Import direction: `errors` and `freshness` import nothing from the package;
 `http` and `parsing` import `errors`;
 `profile` imports `errors` and `http`;
 `assets` imports `errors` and `http`;
-`catalog` imports `errors`, `http` and `parsing`, and reaches `Build`
+`catalog` imports `errors`, `freshness`, `http` and `parsing`, and reaches `Build`
 through `..models`;
-`client` imports `errors`, `http`, `parsing` and `profile`.
+`client` imports `catalog`, `errors`, `freshness`, `http`, `parsing` and `profile`
+(no cycle: `catalog` does not import `client`).
 Only `client.py` imports the third-party library,
 so everything else in the package is testable without it.
 
@@ -244,6 +270,15 @@ and `storage.py` for persistence.
 
 - `app.py` — `run()`, the entry point behind `pyproject.toml`'s `gui-scripts`,
   `__main__.py` and `launch.py`.
+- `logging_setup.py` — `configure_logging()`, called first in `run()`:
+  a console `StreamHandler` at INFO and a rotating file handler at DEBUG
+  writing `app_data_dir() / "logs" / "app.log"`,
+  both on the root logger,
+  degrading to the console alone when the file cannot be opened.
+  It also replaces `loguru`'s default sink,
+  which the `enka` library logs through,
+  with one that forwards into `logging` at WARNING.
+  Idempotent: a second call attaches nothing.
 - `style.py` — `MAIN_STYLESHEET`, the whole application's QSS,
   applied once to the main window.
 - `main_window.py` — `MainWindow`:
@@ -259,7 +294,10 @@ and `storage.py` for persistence.
   `catalog()` loads it lazily on first use, from the same
   `cache_dir() / "enka"` asset root the client already reads,
   wrapped in the same wait-cursor pattern `ProfileLoader.load()` uses,
-  and caches it for later calls.
+  and caches it for later calls;
+  `invalidate_catalog()` drops that cache,
+  which `ProfileLoader.load()` calls after every successful profile load,
+  since the load may have refreshed the data the catalog was built from.
   A build the editor popup produces reaches the model through the existing
   `build_selected()`; it is not a different kind of thing from the builds
   already in that menu, so it needs no model write of its own.
@@ -467,7 +505,9 @@ and the other four it reaches through the panel or the collaborator that owns th
 `dialogs` and `profile_io` it imports as modules
 (`from . import dialogs, profile_io`) and the rest by name,
 for the reason design-notes' "Where the tests patch" gives.
-`app` imports `main_window`.
+`logging_setup` imports nothing from the package
+except `app_data_dir()` through `..storage`;
+`app` imports `main_window` and `logging_setup`.
 
 ## Data flow
 

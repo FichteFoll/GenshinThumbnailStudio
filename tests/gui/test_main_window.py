@@ -82,3 +82,30 @@ def test_editing_a_placement_marks_the_project_dirty(tmp_path: Path, monkeypatch
     window.project.teams[0][0].offset_x = 0.3
     assert window.is_dirty()
     close_ignoring_unsaved_changes(window, app, monkeypatch)
+
+
+def test_invalidating_the_catalog_rebuilds_it_on_the_next_use(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A profile load may have refreshed the data files the catalog was built
+    from, so the memoized one has to be dropped rather than kept."""
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+    loads = 0
+
+    def fake_load_catalog(_asset_root: Path) -> Catalog:
+        nonlocal loads
+        loads += 1
+        return Catalog({}, {}, {})
+
+    monkeypatch.setattr(main_window, "load_catalog", fake_load_catalog)
+
+    first = window.catalog()
+    window.invalidate_catalog()
+    second = window.catalog()
+
+    assert loads == 2
+    assert first is not second
+    window.close()
+    app.processEvents()

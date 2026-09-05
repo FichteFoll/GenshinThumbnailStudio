@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from genshin_thumbnail_studio.enka import catalog
+from genshin_thumbnail_studio.enka import catalog, freshness
 from genshin_thumbnail_studio.enka.errors import EnkaError
 from genshin_thumbnail_studio.models import Build
 
@@ -276,7 +276,7 @@ def stale_weapon_file(root: Path) -> Path:
     """A cached `weapons.json` old enough to be refreshed."""
     path = root / "weapons.json"
     write_json(path, WEAPONS)
-    stale = time.time() - (catalog.WEAPON_DATA_MAX_AGE_DAYS + 1) * 86400
+    stale = time.time() - (freshness.DATA_MAX_AGE_DAYS + 1) * 86400
     os.utime(path, (stale, stale))
     return path
 
@@ -386,3 +386,19 @@ def test_load_catalog_degrades_to_empty_data(tmp_path: Path, monkeypatch: pytest
         catalog.WeaponOption(build.weapon_name, build.weapon_url, 5)
     ]
     assert not loaded.element_is_variable(build)
+
+
+def test_invalidate_weapon_data_removes_the_cached_file(tmp_path: Path) -> None:
+    weapons_file = tmp_path / "weapons.json"
+    write_json(weapons_file, WEAPONS)
+
+    catalog.invalidate_weapon_data(tmp_path)
+
+    assert not weapons_file.exists()
+
+
+def test_invalidate_weapon_data_ignores_a_root_without_one(tmp_path: Path) -> None:
+    """A cache drop is never a failure, so nothing to drop is a no-op."""
+    catalog.invalidate_weapon_data(tmp_path)
+
+    assert not (tmp_path / "weapons.json").exists()
