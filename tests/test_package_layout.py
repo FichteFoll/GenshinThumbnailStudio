@@ -45,6 +45,7 @@ EXPECTED_MODULES = {
     # In the order docs/architecture.md's `gui/` list describes them.
     "gui/__init__.py",
     "gui/app.py",
+    "gui/logging_setup.py",
     "gui/style.py",
     "gui/main_window.py",
     "gui/actions.py",

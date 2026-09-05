@@ -8,10 +8,13 @@ why these return the user's choice rather than acting on it.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtWidgets import QFileDialog, QInputDialog, QMainWindow, QMessageBox, QWidget
+
+logger = logging.getLogger(__name__)
 
 
 def confirm_discard_changes(
@@ -54,7 +57,16 @@ def confirm_cache_refresh(parent: QWidget, age_minutes: float) -> bool:
 
 
 def show_error(parent: QMainWindow, title: str, error: Exception | str) -> None:
-    """Report `error` modally and leave it in the window's status bar."""
+    """Report `error` modally, log it, and leave it in the window's status bar.
+
+    The log record carries the traceback, so a popup is never the only trace of
+    a failure; `exc_info` takes an exception instance, which works here even
+    though this runs outside the `except` block that caught it.
+    """
+    if isinstance(error, Exception):
+        logger.error("%s: %s", title, error, exc_info=error)
+    else:
+        logger.error("%s: %s", title, error)
     QMessageBox.critical(parent, title, str(error))
     parent.statusBar().showMessage(str(error), 10000)
 

@@ -244,6 +244,15 @@ and `storage.py` for persistence.
 
 - `app.py` — `run()`, the entry point behind `pyproject.toml`'s `gui-scripts`,
   `__main__.py` and `launch.py`.
+- `logging_setup.py` — `configure_logging()`, called first in `run()`:
+  a console `StreamHandler` at INFO and a rotating file handler at DEBUG
+  writing `app_data_dir() / "logs" / "app.log"`,
+  both on the root logger,
+  degrading to the console alone when the file cannot be opened.
+  It also replaces `loguru`'s default sink,
+  which the `enka` library logs through,
+  with one that forwards into `logging` at WARNING.
+  Idempotent: a second call attaches nothing.
 - `style.py` — `MAIN_STYLESHEET`, the whole application's QSS,
   applied once to the main window.
 - `main_window.py` — `MainWindow`:
@@ -467,7 +476,9 @@ and the other four it reaches through the panel or the collaborator that owns th
 `dialogs` and `profile_io` it imports as modules
 (`from . import dialogs, profile_io`) and the rest by name,
 for the reason design-notes' "Where the tests patch" gives.
-`app` imports `main_window`.
+`logging_setup` imports nothing from the package
+except `app_data_dir()` through `..storage`;
+`app` imports `main_window` and `logging_setup`.
 
 ## Data flow
 
