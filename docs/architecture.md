@@ -156,6 +156,9 @@ All network interaction with Enka Network, over the `enka` PyPI package.
   which includes the library's own `AssetKeyError` data-miss report,
   but not its network and API failures, which a refresh cannot fix;
   at most one refresh happens per load, since it costs a download.
+  A refresh drops the weapon catalog beside those files
+  (`catalog.invalidate_weapon_data()`),
+  which ages on the same schedule and describes the same patch.
   `EnkaError` still covers everything that leaves the package,
   including a stale-data failure that survived the refresh.
 - `assets.py` — `download_assets(builds, root, progress=None, on_build=None)`,
@@ -176,6 +179,9 @@ All network interaction with Enka Network, over the `enka` PyPI package.
   a missing or unreadable file degrades to an empty catalog
   and a failed download falls back to whatever is already on disk.
   `load_catalog()` never raises.
+  `invalidate_weapon_data(asset_root)` removes that `weapons.json`,
+  so the next `load_catalog()` re-fetches it;
+  it is a cache drop and never fails.
 
 Only `client.py` imports the third-party `enka` package,
 and it imports it as `enka_api`:
@@ -190,7 +196,8 @@ Import direction: `errors` and `freshness` import nothing from the package;
 `assets` imports `errors` and `http`;
 `catalog` imports `errors`, `freshness`, `http` and `parsing`, and reaches `Build`
 through `..models`;
-`client` imports `errors`, `freshness`, `http`, `parsing` and `profile`.
+`client` imports `catalog`, `errors`, `freshness`, `http`, `parsing` and `profile`
+(no cycle: `catalog` does not import `client`).
 Only `client.py` imports the third-party library,
 so everything else in the package is testable without it.
 
@@ -287,7 +294,10 @@ and `storage.py` for persistence.
   `catalog()` loads it lazily on first use, from the same
   `cache_dir() / "enka"` asset root the client already reads,
   wrapped in the same wait-cursor pattern `ProfileLoader.load()` uses,
-  and caches it for later calls.
+  and caches it for later calls;
+  `invalidate_catalog()` drops that cache,
+  which `ProfileLoader.load()` calls after every successful profile load,
+  since the load may have refreshed the data the catalog was built from.
   A build the editor popup produces reaches the model through the existing
   `build_selected()`; it is not a different kind of thing from the builds
   already in that menu, so it needs no model write of its own.

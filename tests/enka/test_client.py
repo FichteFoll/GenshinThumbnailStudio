@@ -394,3 +394,37 @@ def test_load_profile_refreshes_at_most_once(
 
     assert raised.value.__cause__ is error
     assert fake_client.update_calls == 1
+
+
+def test_load_profile_drops_the_weapon_catalog_when_it_refreshes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_client: FakeGenshinClient
+) -> None:
+    """`weapons.json` describes the same patch as the library's data files, so a
+    refresh that replaces those has to drop it too."""
+    monkeypatch.setattr(
+        client_module,
+        "_fetch_live_builds",
+        sequenced_live_builds([make_build("")], [make_build("Escoffier")]),
+    )
+    client = freshly_cached_client(tmp_path)
+    weapons = client.asset_root / "weapons.json"
+    weapons.write_text("{}", encoding="utf-8")
+
+    client.load_profile("700468559")
+
+    assert fake_client.update_calls == 1
+    assert not weapons.exists()
+
+
+def test_load_profile_keeps_the_weapon_catalog_when_it_does_not_refresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_client: FakeGenshinClient
+) -> None:
+    monkeypatch.setattr(client_module, "_fetch_live_builds", sequenced_live_builds([make_build("Amber")]))
+    client = freshly_cached_client(tmp_path)
+    weapons = client.asset_root / "weapons.json"
+    weapons.write_text("{}", encoding="utf-8")
+
+    client.load_profile("700468559")
+
+    assert fake_client.update_calls == 0
+    assert weapons.is_file()

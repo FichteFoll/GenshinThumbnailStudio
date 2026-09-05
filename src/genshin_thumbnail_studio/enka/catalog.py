@@ -15,6 +15,7 @@ choices and nothing else. That guarantee is `load_catalog()`'s alone; a
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from dataclasses import dataclass
@@ -252,3 +253,14 @@ def load_catalog(asset_root: Path) -> Catalog:
     english = cast("dict[str, Any]", english) if isinstance(english, dict) else {}
     names = {str(key): str(value) for key, value in english.items()}
     return Catalog(characters, _load_weapons(asset_root / _WEAPON_DATA_FILE), names)
+
+
+def invalidate_weapon_data(asset_root: Path) -> None:
+    """Drop the cached weapon catalog so the next load re-fetches it.
+
+    `_load_weapons()` already treats a missing file as stale, so removing it is
+    the whole operation. A cache drop is never a failure, so an `OSError` from a
+    file that cannot be removed is swallowed: the worst case is a stale catalog.
+    """
+    with contextlib.suppress(OSError):
+        (asset_root / _WEAPON_DATA_FILE).unlink(missing_ok=True)

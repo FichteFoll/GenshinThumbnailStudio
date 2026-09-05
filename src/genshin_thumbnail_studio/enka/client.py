@@ -16,6 +16,7 @@ from enka.assets.gi.manager import GI_ASSETS
 from enka.clients.gi import GenshinClient
 
 from ..models import LIVE_BUILD_NAME, Build, Profile
+from .catalog import invalidate_weapon_data
 from .errors import EnkaError
 from .freshness import any_stale
 from .http import USER_AGENT
@@ -148,8 +149,20 @@ def _describes_unknown_data(builds: dict[str, list[Build]]) -> bool:
     )
 
 
+async def _refresh_assets(client: GenshinClient, asset_root: Path) -> None:
+    """Re-download the library's data files and drop the weapon catalog beside
+    them, which ages on the same schedule and describes the same patch.
+
+    `update_assets()` is the library's only way to re-download the data files it
+    otherwise downloads once, on the first run that finds them missing, and then
+    keeps forever.
+    """
+    await client.update_assets()
+    invalidate_weapon_data(asset_root)
+
+
 async def _fetch_with_one_refresh(
-    client: GenshinClient, uid: str, username: str, owner_hash: str
+    client: GenshinClient, uid: str, username: str, owner_hash: str, asset_root: Path
 ) -> dict[str, list[Build]]:
     """Fetch, and fetch once more against refreshed data files if the first
     attempt tripped over them or came back naming something they do not describe.
@@ -169,22 +182,19 @@ async def _fetch_with_one_refresh(
         builds = None
     if builds is not None and not _describes_unknown_data(builds):
         return builds
-    await client.update_assets()
+    await _refresh_assets(client, asset_root)
     return await _fetch_builds(client, uid, username, owner_hash)
 
 
 async def _load(
-    identifier: str, uid: str, username: str, owner_hash: str, *, refresh_assets: bool
+    identifier: str, uid: str, username: str, owner_hash: str, asset_root: Path, *, refresh_assets: bool
 ) -> Profile:
     async with _create_client() as client:
         if refresh_assets:
-            # `update_assets()` is the library's only way to re-download the data
-            # files it otherwise downloads once, on the first run that finds them
-            # missing, and then keeps forever.
-            await client.update_assets()
+            await _refresh_assets(client, asset_root)
             builds = await _fetch_builds(client, uid, username, owner_hash)
         else:
-            builds = await _fetch_with_one_refresh(client, uid, username, owner_hash)
+            builds = await _fetch_with_one_refresh(client, uid, username, owner_hash, asset_root)
     if not builds:
         raise EnkaError(f"Enka holds no characters for {identifier}.")
     return Profile(
@@ -215,7 +225,14 @@ class EnkaClient:
         uid, username, owner_hash = self._resolve(identifier)
         try:
             return asyncio.run(
-                _load(identifier, uid, username, owner_hash, refresh_assets=any_stale(self._asset_paths))
+                _load(
+                    identifier,
+                    uid,
+                    username,
+                    owner_hash,
+                    self.asset_root,
+                    refresh_assets=any_stale(self._asset_paths),
+                )
             )
         except enka_errors.PlayerDoesNotExistError as error:
             raise EnkaError(f"Enka knows no player with the UID {uid or identifier}.") from error

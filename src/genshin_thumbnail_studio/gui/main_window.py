@@ -234,6 +234,10 @@ class MainWindow(QMainWindow):
                 QApplication.restoreOverrideCursor()
         return self._catalog
 
+    def invalidate_catalog(self) -> None:
+        """Forget the memoized catalog so the next "Edit ..." rebuilds it."""
+        self._catalog = None
+
     def _save_current_preset(self) -> None:
         self._presets.remember(self, self.current_member())
 

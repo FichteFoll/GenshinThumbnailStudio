@@ -42,6 +42,8 @@ class ProfileEditor(EditorState, Protocol):
 
     def schedule_render(self) -> None: ...
 
+    def invalidate_catalog(self) -> None: ...
+
 
 class ProfileLoader:
     """Profile fetching and lineup entry, wired once to the window they act on.
@@ -69,6 +71,9 @@ class ProfileLoader:
         try:
             profile = editor.client.load_profile(identifier)
             editor.builds = profile.builds
+            # The load may have refreshed the Enka data files the catalog was
+            # built from, so what it offers could describe the previous patch.
+            editor.invalidate_catalog()
             save_profile_cache(profile)
             save_last_profile(identifier)
             for team in editor.project.teams:
