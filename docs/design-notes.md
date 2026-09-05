@@ -134,6 +134,32 @@ without knowing which one and which element the player chose,
 so `element_is_variable()` enables the control exactly there
 and shows the source build's element, disabled, everywhere else.
 
+**The library downloads its seven data files once, and never again.**
+`AssetData.load()` downloads only what is missing:
+present means keep, missing means download,
+with no TTL and no version check,
+so a Genshin patch leaves the cache describing the previous patch's game
+until it is deleted by hand.
+`DATA_MAX_AGE_DAYS` in `enka/freshness.py` is the one age threshold that governs this,
+shared between those seven files and this app's own `weapons.json`,
+replacing what used to be `catalog.WEAPON_DATA_MAX_AGE_DAYS` alone.
+A profile load refreshes the cache once it is older than that threshold,
+and once more, regardless of age,
+when the result names a character or weapon the cache does not describe,
+or when the library trips over the mismatch itself:
+`_post_process_artifact` subscripts `None`
+on an artifact set newer than the cached `artifacts.json`,
+which is the reported `'NoneType' object is not subscriptable`,
+unfixed upstream (`enka-py` `master`, `enka/clients/gi.py`) as of 2026-09-05,
+which is why the retry lives on this side rather than waiting for that fix.
+A refresh happens at most once per load,
+since it costs a ~5 MB download,
+and a second failure after that refresh is left to propagate
+rather than retried again.
+`invalidate_weapon_data()` drops the cached `weapons.json` alongside
+the library's own files whenever a refresh runs,
+since it ages on the same patch schedule as they do.
+
 ## `renderer/`
 
 **One pan-range formula.**
@@ -177,6 +203,24 @@ that is what lets the panel-cache tests patch them on `renderer.panels`
 and intercept a render already in flight.
 
 ## `gui/`
+
+### Logging
+
+**`configure_logging()` runs before anything else in `run()`.**
+It attaches a console handler at INFO
+and a rotating file handler at DEBUG under the app data directory,
+both on the root logger,
+so a traceback survives past whatever an error popup shows.
+`show_error()` logs with `exc_info` before it ever puts up a dialog,
+so the popup is never the only record of what happened.
+`loguru`, which `enka` uses internally,
+is bridged into the same `logging` stream at WARNING
+rather than left alone or silenced:
+its default sink is stderr at DEBUG
+and prints a line per asset file opened,
+which would drown out the signal,
+while its `consider calling update_assets()` warnings
+are the library's only report of a data miss and must survive.
 
 ### Decomposition
 
