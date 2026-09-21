@@ -241,8 +241,8 @@ wheels = [
 
 [[package]]
 name = "enka"
-version = "2.5.20"
-source = { git = "https://github.com/seriaati/enka-py?rev=1d6f102f126a20ed5818fc45f2467cd432694f39#1d6f102f126a20ed5818fc45f2467cd432694f39" }
+version = "2.6.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiofiles" },
     { name = "aiohttp" },
@@ -250,6 +250,10 @@ dependencies = [
     { name = "loguru" },
     { name = "orjson" },
     { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/66/50/790218f14d3a022ef534dbb64a909c8e0ee9f0710bb435fd941be37fd455/enka-2.6.0.tar.gz", hash = "sha256:5afd91d00577a636084710f95acd31ee58929149305565f5311fbbf81b50c74c", size = 61569, upload-time = "2026-09-11T12:35:51.823Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ee/e7/ff1a9a49fb77d1f1b36408f9a5967a0ad4b979e0c35d794efc075433e659/enka-2.6.0-py3-none-any.whl", hash = "sha256:5225109a38ac576b255b4c6de276d72660edf94be29fe51b5b842ba84a3d8bc3", size = 71365, upload-time = "2026-09-11T12:35:50.9Z" },
 ]
 
 [[package]]
@@ -406,7 +410,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "basedpyright", marker = "extra == 'dev'", specifier = ">=1.39,<2" },
-    { name = "enka", git = "https://github.com/seriaati/enka-py?rev=1d6f102f126a20ed5818fc45f2467cd432694f39" },
+    { name = "enka", specifier = ">=2.6,<3" },
     { name = "pillow", specifier = ">=10.2,<13" },
     { name = "pyinstaller", marker = "extra == 'dev'", specifier = ">=6.10,<7" },
     { name = "pyside6", specifier = ">=6.7,<7" },
