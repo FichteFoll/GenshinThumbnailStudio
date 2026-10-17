@@ -29,6 +29,10 @@ All notable changes since the initial import.
   for example `GenshinThumbnailStudio-0.2.0-windows-x64.zip`.
 - **The Linux package is built on Ubuntu 22.04**
   and runs on distributions with glibc 2.35 or newer.
+- **Smaller packages,**
+  since the unused Qt Quick, QML,
+  virtual keyboard and PDF modules are no longer bundled.
+  The unpacked Linux package shrinks from 268 MiB to 248 MiB.
 
 ### Fixed
 
