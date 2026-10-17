@@ -7,8 +7,8 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThreadPool
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtCore import Qt, QThreadPool, Signal
+from PySide6.QtGui import QCloseEvent, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -34,6 +34,10 @@ from .team_fields import TeamFieldsController
 
 
 class MainWindow(QMainWindow):
+    # The render pipeline's own outcome signals, re-emitted for `run()`'s smoke test.
+    preview_rendered = Signal(QPixmap)
+    preview_failed = Signal(str)
+
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Genshin Thumbnail Studio")
@@ -68,6 +72,8 @@ class MainWindow(QMainWindow):
         # Connected only now: the preview does not exist before `_build_ui()`.
         self._render.rendered.connect(self.editor_panel.preview.set_preview)
         self._render.failed.connect(self._on_render_failed)
+        self._render.rendered.connect(self.preview_rendered)
+        self._render.failed.connect(self.preview_failed)
         self._actions = ProjectActions(self, self)
         self._actions.bind_buttons(self.controls_panel)
         # `__init__`'s own `self.project_path = None` cannot go through
