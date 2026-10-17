@@ -20,6 +20,10 @@ dev = [
   "basedpyright>=1.39,<2",
   "ruff>=0.16,<0.17",
 ]
+lint = [
+  "actionlint-py>=1.7,<2",
+  "zizmor>=1.31,<2; python_version >= '3.11'",
+]
 
 [project.gui-scripts]
 genshin-thumbnail-studio = "genshin_thumbnail_studio.gui:run"

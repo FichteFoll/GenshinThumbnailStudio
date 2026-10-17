@@ -1,0 +1,153 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # A tag push publishes a release and must run to completion.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: false
+      - name: Install dependencies
+        run: uv sync --locked --group lint
+      - name: Lint the code
+        run: uv run ruff check
+      - name: Lint the workflows
+        run: uv run --group lint actionlint
+      - name: Audit the workflows
+        run: uv run --group lint zizmor --offline .github
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: false
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Type check
+        run: uv run basedpyright
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Include-only, so the 3.10 entry is a third job
+        # instead of merging into the plain ubuntu-latest one.
+        include:
+          - os: ubuntu-latest
+          - os: windows-latest
+          - os: ubuntu-latest
+            python: "3.10"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: false
+          # Empty unless set by the matrix, which leaves `.python-version` in charge.
+          python-version: ${{ matrix.python }}
+      - name: Install Linux Qt libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libxkbcommon-x11-0
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run pytest
+
+  build:
+    needs: [lint, typecheck, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        # The oldest available Ubuntu, since the frozen binary needs the build host's glibc or newer.
+        os: [ubuntu-22.04, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          enable-cache: false
+      - name: Install Linux Qt libraries
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libxkbcommon-x11-0
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Build the package
+        run: uv run python packaging/build.py --skip-tests
+      - name: Upload the package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: GenshinThumbnailStudio-${{ runner.os }}
+          path: release/*
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the draft release and upload its assets
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Check the tag and extract the release notes
+        id: notes
+        run: |
+          version=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match the project version $version"
+            exit 1
+          fi
+          awk -v version="$version" '
+            /^## / { if (in_section) exit; if ($2 == version) { in_section = 1; next } }
+            in_section { print }
+          ' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "::error::CHANGELOG.md has no '## $version' section"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.notes.outputs.version }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME" assets/*
+          --draft --verify-tag
+          --title "Genshin Thumbnail Studio $VERSION"
+          --notes-file notes.md

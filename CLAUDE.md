@@ -25,6 +25,8 @@ uv run pytest                     # run the test suite
 uv run pytest tests/renderer/test_geometry.py::test_name   # run a single test
 uv run basedpyright               # strict type check (configured in pyproject.toml)
 uv run ruff check                 # lint the source and tests
+uv run --group lint actionlint    # lint the GitHub workflows
+uv run --group lint zizmor --offline .github   # audit the GitHub workflows
 ```
 
 Headless/CI runs need an offscreen Qt platform:
@@ -142,3 +144,5 @@ under an `## Unreleased` heading
 that a release renames to the version and date.
 The version itself lives in `pyproject.toml` and `src/genshin_thumbnail_studio/__init__.py`,
 which have to be bumped together.
+Pushing a `v<version>` tag makes CI create a draft GitHub release with both packages,
+using the `## <version>` section of CHANGELOG.md as its notes.
