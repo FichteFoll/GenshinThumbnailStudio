@@ -10,4 +10,5 @@ __pycache__/
 plans/
 *.jpg
 *.png
+!/media/*.png
 /*.json

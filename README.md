@@ -2,6 +2,8 @@
 
 Standalone desktop application for creating Genshin Impact team thumbnails.
 
+![Genshin Thumbnail Studio main window](media/sceenshot.png)
+
 ## Features
 
 - Loads character builds from Enka Network,
