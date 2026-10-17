@@ -72,14 +72,23 @@ uv run pytest
 
 ## Build standalone packages
 
-- Windows: run `packaging/build_windows.ps1`
-- Linux: run `packaging/build_linux.sh`
-- Clean source ZIP: run `powershell -ExecutionPolicy Bypass -File packaging/create_source_package.ps1`
+```bash
+uv run python packaging/build.py
+```
 
-Each script runs the tests and creates a platform-specific package in `release/`.
-The Windows and Linux packages are separate
+The script runs the tests,
+freezes the application with PyInstaller,
+checks that the frozen binary starts and renders its first preview,
+and archives it in `release/`,
+as `GenshinThumbnailStudio-<version>-linux-x64.tar.gz`
+or `GenshinThumbnailStudio-<version>-windows-x64.zip`.
+`--skip-tests` skips the tests.
+
+It must run on the operating system the package is for,
 because native Qt binaries cannot be shared across operating systems.
-End users do not need Python, Node.js, or Codex.
+Tagged releases on GitHub carry both packages,
+next to the source archives GitHub attaches to every release.
+End users do not need Python.
 
 ## Data source
 

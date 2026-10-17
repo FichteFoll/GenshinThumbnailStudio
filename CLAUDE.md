@@ -50,15 +50,14 @@ so two worktrees alternating against a shared `.venv`
 would silently run the tests against the other one's sources.
 A commit that changes a dependency needs its own environment as well.
 
-Packaging (runs the test suite first, then builds into `release/`):
+Packaging, driven by the PyInstaller spec `packaging/GenshinThumbnailStudio.spec`:
 
 ```bash
-packaging/build_linux.sh          # Linux tarball via PyInstaller
-packaging/build_windows.ps1       # Windows package via PyInstaller
-packaging/create_source_package.ps1  # clean source ZIP
+uv run python packaging/build.py   # tests, PyInstaller, smoke test, archive into release/
 ```
 
-Windows and Linux packages are built separately,
+`--skip-tests` skips the test suite.
+Each OS builds its own package, on that OS,
 since native Qt binaries aren't portable across OSes.
 
 ## Architecture

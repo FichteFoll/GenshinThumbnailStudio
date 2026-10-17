@@ -269,7 +269,7 @@ to `enka/` for fetching,
 and `storage.py` for persistence.
 
 - `app.py` — `run()`, the entry point behind `pyproject.toml`'s `gui-scripts`,
-  `__main__.py` and `launch.py`.
+  `__main__.py` and `packaging/launch.py`.
   With `--smoke-test` among the arguments it starts as usual,
   then closes the window and returns `0` once the first preview render arrives
   (`MainWindow.preview_rendered`),

@@ -37,7 +37,7 @@ genshin_thumbnail_studio = ["py.typed"]
 testpaths = ["tests"]
 
 [tool.basedpyright]
-include = ["src", "tests", "launch.py"]
+include = ["src", "tests", "packaging"]
 typeCheckingMode = "strict"
 pythonVersion = "3.10"
 venvPath = "."
