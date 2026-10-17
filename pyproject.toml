@@ -19,9 +19,9 @@ dependencies = [
 [dependency-groups]
 dev = [
   "PyInstaller>=6.10,<7",
-  "pytest>=8.2,<9",
+  "pytest>=8.2,<10",
   "basedpyright>=1.39,<2",
-  "ruff>=0.16,<0.17",
+  "ruff>=0.16,<0.18",
 ]
 lint = [
   "actionlint-py>=1.7,<2",
