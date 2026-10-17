@@ -62,10 +62,11 @@ uv run genshin-thumbnail-studio
 ```
 
 `uv run` creates the virtual environment and installs dependencies automatically on first use.
-For development, install the `dev` extra as well:
+The `dev` dependency group (pytest, PyInstaller, linters) is installed by default.
+For development, sync the environment explicitly:
 
 ```bash
-uv sync --extra dev
+uv sync
 uv run pytest
 ```
 

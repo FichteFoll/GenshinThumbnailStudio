@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.10"
 
 [[package]]
@@ -399,7 +399,7 @@ dependencies = [
     { name = "pyside6" },
 ]
 
-[package.optional-dependencies]
+[package.dev-dependencies]
 dev = [
     { name = "basedpyright" },
     { name = "pyinstaller" },
@@ -409,15 +409,18 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "basedpyright", marker = "extra == 'dev'", specifier = ">=1.39,<2" },
     { name = "enka", specifier = ">=2.6,<3" },
     { name = "pillow", specifier = ">=10.2,<13" },
-    { name = "pyinstaller", marker = "extra == 'dev'", specifier = ">=6.10,<7" },
     { name = "pyside6", specifier = ">=6.7,<7" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.2,<9" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16,<0.17" },
 ]
-provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "basedpyright", specifier = ">=1.39,<2" },
+    { name = "pyinstaller", specifier = ">=6.10,<7" },
+    { name = "pytest", specifier = ">=8.2,<9" },
+    { name = "ruff", specifier = ">=0.16,<0.17" },
+]
 
 [[package]]
 name = "idna"

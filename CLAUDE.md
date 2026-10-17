@@ -20,7 +20,7 @@ Dependency management uses [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv run genshin-thumbnail-studio   # run the app (auto-installs deps on first use)
-uv sync --extra dev               # install dev deps (pytest, PyInstaller, basedpyright)
+uv sync                           # install the app and its dev dependency group
 uv run pytest                     # run the test suite
 uv run pytest tests/renderer/test_geometry.py::test_name   # run a single test
 uv run basedpyright               # strict type check (configured in pyproject.toml)
@@ -34,7 +34,7 @@ QT_QPA_PLATFORM=offscreen uv run pytest
 ```
 
 A fresh git worktree gets its own `.venv`,
-so each one pays a full `uv sync --extra dev` before the first check.
+so each one pays a full `uv sync` before the first check.
 When several worktrees run the same dependency set,
 as they do while executing a plan whose commits do not touch `pyproject.toml`,
 point them at one environment instead:

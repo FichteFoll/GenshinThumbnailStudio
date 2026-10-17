@@ -13,7 +13,7 @@ dependencies = [
   "enka>=2.6,<3",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
   "PyInstaller>=6.10,<7",
   "pytest>=8.2,<9",
