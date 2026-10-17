@@ -2,7 +2,8 @@
 
 Clears `build/`, `dist/` and `release/`, runs the test suite,
 freezes the app with PyInstaller from the committed spec,
-smoke-tests the frozen binary and archives it.
+smoke-tests the frozen binary
+and archives it together with the license.
 Run it as `uv run python packaging/build.py [--skip-tests]`.
 """
 
@@ -25,6 +26,7 @@ SPEC = PACKAGING / "GenshinThumbnailStudio.spec"
 BUILD = ROOT / "build"
 DIST = ROOT / "dist"
 RELEASE = ROOT / "release"
+LICENSE = ROOT / "LICENSE"
 APP_NAME = "GenshinThumbnailStudio"
 SMOKE_TEST_TIMEOUT_S = 120
 
@@ -49,6 +51,7 @@ def main() -> int:
         run_tests()
     freeze()
     smoke_test(DIST / APP_NAME / executable_name(os_name))
+    add_license()
     archive_path = archive(os_name)
     print(f"Created {archive_path}")
     return 0
@@ -110,6 +113,12 @@ def print_log(log_file: Path) -> None:
         return
     print(f"--- {log_file} ---", file=sys.stderr)
     print(log_file.read_text(encoding="utf-8", errors="replace"), file=sys.stderr)
+
+
+def add_license() -> None:
+    # Next to the executable rather than as a PyInstaller data file,
+    # which would end up inside `_internal/`, where no user looks for it.
+    shutil.copy2(LICENSE, DIST / APP_NAME / LICENSE.name)
 
 
 def archive(os_name: str) -> str:

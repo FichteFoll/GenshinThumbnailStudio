@@ -1,5 +1,6 @@
 [build-system]
-requires = ["setuptools>=69"]
+# 77 is the first release to take an SPDX `license` expression and `license-files`.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,6 +8,8 @@ name = "genshin-thumbnail-studio"
 version = "1.0.0"
 description = "Standalone Enka-based Genshin team thumbnail editor"
 requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
   "Pillow>=10.2,<13",
   "PySide6>=6.7,<7",

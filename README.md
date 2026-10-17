@@ -82,7 +82,7 @@ The script empties `build/`, `dist/` and `release/`,
 runs the tests,
 freezes the application with PyInstaller,
 checks that the frozen binary starts and renders its first preview,
-and archives it in `release/`,
+and archives it together with the license in `release/`,
 as `GenshinThumbnailStudio-<version>-linux-x64.tar.gz`
 or `GenshinThumbnailStudio-<version>-windows-x64.zip`.
 `--skip-tests` skips the tests.
@@ -102,3 +102,7 @@ Saved builds come from a verified, public Enka account
 and are reached by entering that account's username.
 Enka is an external service,
 so its rate limits or changes may require a future application update.
+
+## License
+
+[MIT](LICENSE).
