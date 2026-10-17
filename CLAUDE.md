@@ -55,7 +55,7 @@ A commit that changes a dependency needs its own environment as well.
 Packaging, driven by the PyInstaller spec `packaging/GenshinThumbnailStudio.spec`:
 
 ```bash
-uv run python packaging/build.py   # tests, PyInstaller, smoke test, archive into release/
+uv run python packaging/build.py   # clear build/, dist/ and release/, then tests, PyInstaller, smoke test, archive
 ```
 
 `--skip-tests` skips the test suite.

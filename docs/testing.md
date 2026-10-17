@@ -7,7 +7,7 @@
 alongside the flat `tests/test_models.py`, `tests/test_storage.py`
 and `tests/test_version.py`,
 which keeps `__version__` in step with the version in `pyproject.toml`.
-Each of those three directories is a package (`__init__.py`) with its own `helpers.py`
+Each of the three subdirectories is a package (`__init__.py`) with its own `helpers.py`
 for the helpers more than one of its test modules needs;
 helpers used by a single file stay in that file.
 `tests/__init__.py` exists and is load-bearing:
@@ -56,7 +56,10 @@ since it is the test that will fail.
 
 Tests assert what a timer does,
 for example that the render throttle dispatches during a burst of `schedule()` calls,
-never what `QTimer.remainingTime()` reports.
+rather than what `QTimer.remainingTime()` reports
+for a timer that may have come due by the time it is sampled:
+one started before the test's own setup,
+or sampled later than its interval after starting.
 A test runs no event loop between its statements,
 so a timer that comes due stays active, undelivered,
 and its remaining time is clamped to 0 from then on,

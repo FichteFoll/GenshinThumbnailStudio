@@ -76,7 +76,8 @@ uv run pytest
 uv run python packaging/build.py
 ```
 
-The script runs the tests,
+The script empties `build/`, `dist/` and `release/`,
+runs the tests,
 freezes the application with PyInstaller,
 checks that the frozen binary starts and renders its first preview,
 and archives it in `release/`,

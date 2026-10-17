@@ -167,8 +167,8 @@ def test_schedule_render_throttles_instead_of_restarting_the_timer(
     wait_for_render(window, app)
     token = window._render.token
 
-    # Imitate a drag: calls 10 to 16 ms apart (Windows rounds the sleep up to
-    # its timer granularity), always shorter than the throttle.
+    # Imitate a drag: calls about 10 ms apart, or up to 16 ms where the sleep
+    # resolution is coarse, always shorter than the throttle.
     # A throttle dispatches a render within the burst, whereas a debounce
     # (restarting the timer on every call) never fires inside it.
     deadline = time.monotonic() + 4 * RENDER_THROTTLE_MS / 1000
