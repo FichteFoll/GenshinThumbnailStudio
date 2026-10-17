@@ -1,6 +1,5 @@
 """Tests for `MainWindow`'s throttled preview rendering."""
 
-import itertools
 import time
 from collections.abc import Callable
 from dataclasses import replace
@@ -12,6 +11,7 @@ from PIL import Image, ImageDraw
 import genshin_thumbnail_studio.enka.assets as enka_assets
 from genshin_thumbnail_studio.gui import MainWindow, asset_loader
 from genshin_thumbnail_studio.gui.render_job import RenderJob
+from genshin_thumbnail_studio.gui.render_pipeline import RENDER_THROTTLE_MS
 from genshin_thumbnail_studio.models import Build, Placement
 from genshin_thumbnail_studio.renderer import (
     BASE_H,
@@ -161,21 +161,25 @@ def test_schedule_render_throttles_instead_of_restarting_the_timer(
     fill_window_teams(window, names)
     create_test_assets(window.art_root, names)
 
-    window.schedule_render()
-    assert window._render.timer.isActive()
+    # The constructor already started the throttle timer, which may be overdue
+    # by now on a slow machine; start from a quiet pipeline instead.
+    window._render.timer.stop()
+    wait_for_render(window, app)
+    token = window._render.token
 
-    # Imitate a drag: many calls in quick succession, with a little wall-clock
-    # time between them so a restart would show up as a jump back up.
-    remaining = [window._render.timer.remainingTime()]
-    for _ in range(5):
-        time.sleep(0.005)
+    # Imitate a drag: calls 10 to 16 ms apart (Windows rounds the sleep up to
+    # its timer granularity), always shorter than the throttle.
+    # A throttle dispatches a render within the burst, whereas a debounce
+    # (restarting the timer on every call) never fires inside it.
+    deadline = time.monotonic() + 4 * RENDER_THROTTLE_MS / 1000
+    while time.monotonic() < deadline:
         window.schedule_render()
-        assert window._render.timer.isActive()
-        remaining.append(window._render.timer.remainingTime())
+        app.processEvents()
+        time.sleep(0.01)
 
-    assert all(later <= earlier for earlier, later in itertools.pairwise(remaining)), remaining
-    assert remaining[-1] < remaining[0], remaining
+    assert window._render.token > token
 
+    wait_for_render(window, app)
     close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
