@@ -2,7 +2,7 @@
 
 All notable changes since the initial import.
 
-## Unreleased
+## 1.0.0 - 2026-10-17
 
 ### Added
 
@@ -26,7 +26,7 @@ All notable changes since the initial import.
 
 - **Linux and Windows packages are attached to each GitHub release.**
 - **The package archive names carry the version,**
-  for example `GenshinThumbnailStudio-0.2.0-windows-x64.zip`.
+  for example `GenshinThumbnailStudio-1.0.0-windows-x64.zip`.
 - **The Linux package is built on Ubuntu 22.04**
   and runs on distributions with glibc 2.35 or newer.
 - **Smaller packages,**
