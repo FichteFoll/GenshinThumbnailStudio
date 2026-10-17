@@ -100,18 +100,10 @@ class StubMessageBox:
     def critical(parent: object, title: str, text: str) -> None:
         raise AssertionError(f"unexpected error dialog: {title}: {text}")
 
-    @staticmethod
-    def information(parent: object, title: str, text: str) -> None:
-        return None
-
 
 class ForbiddenMessageBox(StubMessageBox):
     def __init__(self, parent: object = None) -> None:
         raise AssertionError("unexpected message box")
-
-    @staticmethod
-    def information(parent: object, title: str, text: str) -> None:
-        raise AssertionError(f"unexpected info dialog: {title}: {text}")
 
 
 def prepare_cached_open(
@@ -730,6 +722,31 @@ def test_saving_project_clears_the_dirty_flag(tmp_path: Path, monkeypatch: pytes
 
     window.close()
     app.processEvents()
+
+
+def test_a_failed_save_reports_the_error_and_keeps_the_project_dirty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GENSHIN_THUMBNAIL_STUDIO_DATA_DIR", str(tmp_path / "app-data"))
+    app = qapp()
+    window = MainWindow()
+    window.project.teams[0][0].offset_x = 0.3
+    # A directory where the project file should go makes the write itself fail.
+    unwritable = tmp_path / "thumbnail-project.json"
+    unwritable.mkdir()
+
+    recorder = RecordingCritical()
+    monkeypatch.setattr(dialogs, "QMessageBox", recorder)
+    monkeypatch.setattr(
+        project_io.QFileDialog, "getSaveFileName", staticmethod(lambda *args, **kwargs: (str(unwritable), ""))
+    )
+    window.save_project()
+
+    assert [title for title, _ in recorder.calls] == ["Could not save project"]
+    assert window.is_dirty()
+    assert window.project_path is None
+
+    close_ignoring_unsaved_changes(window, app, monkeypatch)
 
 
 def test_opening_a_project_takes_its_dirty_baseline_before_the_art_arrives(

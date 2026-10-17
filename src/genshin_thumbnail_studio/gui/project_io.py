@@ -98,7 +98,11 @@ class ProjectFiles:
         editor.project.uid = identifier if is_uid(identifier) else ""
         editor.project.profile_name = "" if is_uid(identifier) else identifier
         editor.project.output_name = controls.output_name.text().strip() or "genshin_thumbnail"
-        storage.save_project(editor.project, path)
+        try:
+            storage.save_project(editor.project, path)
+        except Exception as error:
+            dialogs.show_error(self._parent, "Could not save project", error)
+            return
         editor.set_project_path(path)
         editor.saved_snapshot = copy.deepcopy(editor.project)
         self._parent.statusBar().showMessage("Project saved", 5000)
@@ -234,7 +238,6 @@ class ProjectFiles:
             editor.project.output_name = stem
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
             written = export_project(editor.project, editor.art_root, directory)
-            dialogs.show_export_finished(parent, written)
             parent.statusBar().showMessage(f"Exported {len(written)} thumbnail(s)", 7000)
         except Exception as error:
             dialogs.show_error(parent, "Export failed", error)

@@ -14,7 +14,6 @@ from .dialogs import (
     confirm_cache_refresh,
     confirm_discard_changes,
     show_error,
-    show_export_finished,
 )
 from .editor_panel import EditorPanel
 from .history import HISTORY_DEBOUNCE_MS, HISTORY_LIMIT, HistoryController, PlacementHistory
@@ -75,5 +74,4 @@ __all__ = [
     "run",
     "selected_build",
     "show_error",
-    "show_export_finished",
 ]

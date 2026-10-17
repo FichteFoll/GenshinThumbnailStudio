@@ -366,7 +366,7 @@ and `storage.py` for persistence.
   a row for it, element, plus `build_name=custom_name` and `build_id=""`.
 - `dialogs.py` — the blocking dialogs as free functions taking the parent widget:
   `confirm_discard_changes()`, `confirm_cache_refresh()`,
-  `show_error()`, `show_export_finished()`, `confirm_showcase_lineup()`,
+  `show_error()`, `confirm_showcase_lineup()`,
   `ask_lineup_text()`, `ask_export_target()`.
   They return the user's choice rather than acting on it.
 - `project_io.py` — `ProjectFiles` (`new()`, `save()`, `save_as()`, `open()`, `export()`)

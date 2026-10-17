@@ -71,10 +71,6 @@ def show_error(parent: QMainWindow, title: str, error: Exception | str) -> None:
     parent.statusBar().showMessage(str(error), 10000)
 
 
-def show_export_finished(parent: QWidget, written: list[Path]) -> None:
-    QMessageBox.information(parent, "Export finished", "\n".join(str(path) for path in written))
-
-
 def confirm_showcase_lineup(parent: QWidget, names: list[str]) -> bool:
     """Ask whether to fill the teams with a showcase that fits them exactly."""
     dialog = QMessageBox(parent)

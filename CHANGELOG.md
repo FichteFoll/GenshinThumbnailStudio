@@ -33,6 +33,8 @@ All notable changes since the initial import.
   since the unused Qt Quick, QML,
   virtual keyboard and PDF modules are no longer bundled.
   The unpacked Linux package shrinks from 268 MiB to 248 MiB.
+- **No confirmation popup after a successful export.**
+  The status bar still reports how many thumbnails were written.
 
 ### Fixed
 
@@ -40,6 +42,9 @@ All notable changes since the initial import.
   `'NoneType' object is not subscriptable`**
   on Enka data files older than the patch the profile was recorded under.
   The affected files are now refreshed and the load retried automatically.
+- **Project saves that failed without an error popup.**
+  A failed save is now reported,
+  and the project stays marked as unsaved.
 
 ## 0.2.0 - 2026-08-09
 
