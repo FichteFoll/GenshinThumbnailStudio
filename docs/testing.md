@@ -4,7 +4,9 @@
 
 `tests/` mirrors the package layout:
 `tests/enka/`, `tests/renderer/` and `tests/gui/`,
-alongside the flat `tests/test_models.py` and `tests/test_storage.py`.
+alongside the flat `tests/test_models.py`, `tests/test_storage.py`
+and `tests/test_version.py`,
+which keeps `__version__` in step with the version in `pyproject.toml`.
 Each of those three directories is a package (`__init__.py`) with its own `helpers.py`
 for the helpers more than one of its test modules needs;
 helpers used by a single file stay in that file.
