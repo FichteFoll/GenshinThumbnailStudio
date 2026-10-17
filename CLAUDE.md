@@ -20,11 +20,13 @@ Dependency management uses [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv run genshin-thumbnail-studio   # run the app (auto-installs deps on first use)
-uv sync --extra dev               # install dev deps (pytest, PyInstaller, basedpyright)
+uv sync                           # install the app and its dev dependency group
 uv run pytest                     # run the test suite
 uv run pytest tests/renderer/test_geometry.py::test_name   # run a single test
 uv run basedpyright               # strict type check (configured in pyproject.toml)
 uv run ruff check                 # lint the source and tests
+uv run --group lint actionlint    # lint the GitHub workflows
+uv run --group lint zizmor --offline .github   # audit the GitHub workflows
 ```
 
 Headless/CI runs need an offscreen Qt platform:
@@ -34,7 +36,7 @@ QT_QPA_PLATFORM=offscreen uv run pytest
 ```
 
 A fresh git worktree gets its own `.venv`,
-so each one pays a full `uv sync --extra dev` before the first check.
+so each one pays a full `uv sync` before the first check.
 When several worktrees run the same dependency set,
 as they do while executing a plan whose commits do not touch `pyproject.toml`,
 point them at one environment instead:
@@ -50,15 +52,14 @@ so two worktrees alternating against a shared `.venv`
 would silently run the tests against the other one's sources.
 A commit that changes a dependency needs its own environment as well.
 
-Packaging (runs the test suite first, then builds into `release/`):
+Packaging, driven by the PyInstaller spec `packaging/GenshinThumbnailStudio.spec`:
 
 ```bash
-packaging/build_linux.sh          # Linux tarball via PyInstaller
-packaging/build_windows.ps1       # Windows package via PyInstaller
-packaging/create_source_package.ps1  # clean source ZIP
+uv run python packaging/build.py   # clear build/, dist/ and release/, then tests, PyInstaller, smoke test, archive
 ```
 
-Windows and Linux packages are built separately,
+`--skip-tests` skips the test suite.
+Each OS builds its own package, on that OS,
 since native Qt binaries aren't portable across OSes.
 
 ## Architecture
@@ -143,3 +144,5 @@ under an `## Unreleased` heading
 that a release renames to the version and date.
 The version itself lives in `pyproject.toml` and `src/genshin_thumbnail_studio/__init__.py`,
 which have to be bumped together.
+Pushing a `v<version>` tag makes CI create a draft GitHub release with both packages,
+using the `## <version>` section of CHANGELOG.md as its notes.

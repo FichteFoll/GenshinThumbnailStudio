@@ -22,6 +22,18 @@ All notable changes since the initial import.
   with its traceback,
   to the console and to a rotating log file under the app data directory.
 
+### Changed
+
+- **Linux and Windows packages are attached to each GitHub release.**
+- **The package archive names carry the version,**
+  for example `GenshinThumbnailStudio-0.2.0-windows-x64.zip`.
+- **The Linux package is built on Ubuntu 22.04**
+  and runs on distributions with glibc 2.35 or newer.
+- **Smaller packages,**
+  since the unused Qt Quick, QML,
+  virtual keyboard and PDF modules are no longer bundled.
+  The unpacked Linux package shrinks from 268 MiB to 248 MiB.
+
 ### Fixed
 
 - **Profile loads that failed with

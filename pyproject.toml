@@ -13,12 +13,16 @@ dependencies = [
   "enka>=2.6,<3",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
   "PyInstaller>=6.10,<7",
   "pytest>=8.2,<9",
   "basedpyright>=1.39,<2",
   "ruff>=0.16,<0.17",
+]
+lint = [
+  "actionlint-py>=1.7,<2",
+  "zizmor>=1.31,<2; python_version >= '3.11'",
 ]
 
 [project.gui-scripts]
@@ -37,7 +41,7 @@ genshin_thumbnail_studio = ["py.typed"]
 testpaths = ["tests"]
 
 [tool.basedpyright]
-include = ["src", "tests", "launch.py"]
+include = ["src", "tests", "packaging"]
 typeCheckingMode = "strict"
 pythonVersion = "3.10"
 venvPath = "."

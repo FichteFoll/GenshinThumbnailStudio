@@ -6,12 +6,16 @@ import logging
 import sys
 from types import TracebackType
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
 from .logging_setup import configure_logging
 from .main_window import MainWindow
 
 logger = logging.getLogger(__name__)
+
+SMOKE_TEST_FLAG = "--smoke-test"
+SMOKE_TEST_TIMEOUT_MS = 30_000
 
 
 def run() -> int:
@@ -26,8 +30,39 @@ def run() -> int:
     app.setApplicationName("Genshin Thumbnail Studio")
     app.setOrganizationName("GenshinThumbnailStudio")
     window = MainWindow()
+    if SMOKE_TEST_FLAG in sys.argv[1:]:
+        _exit_after_first_render(app, window)
     window.show()
     return app.exec()
+
+
+def _exit_after_first_render(app: QApplication, window: MainWindow) -> None:
+    """End the event loop with 0 once the first preview arrives, or 1 when it
+    fails or does not arrive in time, instead of waiting for the user."""
+    timeout = QTimer(window)
+    timeout.setSingleShot(True)
+    finished = False
+
+    def finish(code: int) -> None:
+        # A late render can still arrive over its queued connection after the
+        # first outcome; it must not end some later event loop.
+        nonlocal finished
+        if finished:
+            return
+        finished = True
+        timeout.stop()
+        window.close()
+        # Not `quit()`: Qt 6's `quit()` first tries to close every window.
+        app.exit(code)
+
+    def fail(message: str) -> None:
+        logger.error("Smoke test failed: %s", message)
+        finish(1)
+
+    window.preview_rendered.connect(lambda: finish(0))
+    window.preview_failed.connect(fail)
+    timeout.timeout.connect(lambda: fail(f"no preview within {SMOKE_TEST_TIMEOUT_MS} ms"))
+    timeout.start(SMOKE_TEST_TIMEOUT_MS)
 
 
 def _install_excepthook() -> None:

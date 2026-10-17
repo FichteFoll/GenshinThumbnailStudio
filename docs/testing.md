@@ -4,8 +4,10 @@
 
 `tests/` mirrors the package layout:
 `tests/enka/`, `tests/renderer/` and `tests/gui/`,
-alongside the flat `tests/test_models.py` and `tests/test_storage.py`.
-Each of those three directories is a package (`__init__.py`) with its own `helpers.py`
+alongside the flat `tests/test_models.py`, `tests/test_storage.py`
+and `tests/test_version.py`,
+which keeps `__version__` in step with the version in `pyproject.toml`.
+Each of the three subdirectories is a package (`__init__.py`) with its own `helpers.py`
 for the helpers more than one of its test modules needs;
 helpers used by a single file stay in that file.
 `tests/__init__.py` exists and is load-bearing:
@@ -49,6 +51,38 @@ see the note on `catalog()` in [design-notes.md](design-notes.md).
 
 Read it before moving or adding a module,
 since it is the test that will fail.
+
+## Timers
+
+Tests assert what a timer does,
+for example that the render throttle dispatches during a burst of `schedule()` calls,
+rather than what `QTimer.remainingTime()` reports
+for a timer that may have come due by the time it is sampled:
+one started before the test's own setup,
+or sampled later than its interval after starting.
+A test runs no event loop between its statements,
+so a timer that comes due stays active, undelivered,
+and its remaining time is clamped to 0 from then on,
+by both dispatchers:
+`QEventDispatcherWin32::remainingTime()` in `src/corelib/kernel/qeventdispatcher_win.cpp`
+(`return timeoutMs > currentTimeMs ? ... : 0ms;`)
+and `QTimerInfoList::remainingDuration()` in `src/corelib/kernel/qtimerinfo_unix.cpp`,
+both at `qtbase` tag `v6.11.1`.
+The offscreen platform on Windows uses the Win32 dispatcher,
+whose due time comes from the same `steady_clock` it compares against,
+so the value is not a quirk of the Win32 dispatcher
+but a race against wall-clock time.
+That race is how the throttle test sampling `remainingTime()`
+failed on `windows-latest` with `[0, 0, 0, 0, 0, 0]` and passed on Linux:
+its timer was started by `MainWindow.__init__`, not by the test,
+and an all-zero result with an active timer can only come from an overdue timer.
+So on the Windows runner the interval between that start and the first sample,
+returning from the constructor, `fill_window_teams()`
+and mostly writing the test's PNG assets,
+exceeded the 80 ms throttle
+(inferred from the Qt source, not measured).
+The throttle itself was intact:
+a restarting `schedule()` would have reported about 80 ms after every call.
 
 ## Headless runs
 
