@@ -145,4 +145,5 @@ that a release renames to the version and date.
 The version itself lives in `pyproject.toml` and `src/genshin_thumbnail_studio/__init__.py`,
 which have to be bumped together.
 Pushing a `v<version>` tag makes CI create a draft GitHub release with both packages,
-using the `## <version>` section of CHANGELOG.md as its notes.
+using the `## <version> (<YYYY-MM-DD>)` section of CHANGELOG.md
+as its title and notes.

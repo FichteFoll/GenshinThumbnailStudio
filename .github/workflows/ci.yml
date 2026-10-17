@@ -140,14 +140,19 @@ jobs:
             echo "::error::CHANGELOG.md has no '## $version' section"
             exit 1
           fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          title=$(awk -v version="$version" '$1 == "##" && $2 == version { sub(/^## /, ""); print; exit }' CHANGELOG.md)
+          if ! [[ "$title" =~ ^"$version"\ \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$ ]]; then
+            echo "::error::CHANGELOG.md heading '## $title' does not match '## $version (YYYY-MM-DD)'"
+            exit 1
+          fi
+          echo "title=$title" >> "$GITHUB_OUTPUT"
       - name: Create the draft release
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          VERSION: ${{ steps.notes.outputs.version }}
+          TITLE: ${{ steps.notes.outputs.title }}
         run: >-
           gh release create "$GITHUB_REF_NAME" assets/*
           --draft --verify-tag
-          --title "Genshin Thumbnail Studio $VERSION"
+          --title "$TITLE"
           --notes-file notes.md

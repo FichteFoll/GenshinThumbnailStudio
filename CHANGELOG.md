@@ -2,7 +2,7 @@
 
 All notable changes since the initial import.
 
-## 1.0.0 - 2026-10-17
+## 1.0.0 (2026-10-17)
 
 ### Added
 
@@ -46,7 +46,7 @@ All notable changes since the initial import.
   A failed save is now reported,
   and the project stays marked as unsaved.
 
-## 0.2.0 - 2026-08-09
+## 0.2.0 (2026-08-09)
 
 ### Added
 
