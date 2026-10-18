@@ -133,6 +133,13 @@ jobs:
       - name: Check the tag and extract the release notes
         id: notes
         run: |
+          # The canonical PEP 440 form, which hatch-vcs names the packages after,
+          # so the CHANGELOG section is looked up by the same version string.
+          pep440='^v([1-9][0-9]*!)?(0|[1-9][0-9]*)(\.(0|[1-9][0-9]*))*((a|b|rc)(0|[1-9][0-9]*))?(\.post(0|[1-9][0-9]*))?(\.dev(0|[1-9][0-9]*))?$'
+          if ! [[ "$GITHUB_REF_NAME" =~ $pep440 ]]; then
+            echo "::error::Tag $GITHUB_REF_NAME is not 'v' followed by a canonical PEP 440 version"
+            exit 1
+          fi
           version=${GITHUB_REF_NAME#v}
           awk -v version="$version" '
             /^## / { if (in_section) exit; if ($2 == version) { in_section = 1; next } }
