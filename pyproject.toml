@@ -1,11 +1,11 @@
 [build-system]
-# 77 is the first release to take an SPDX `license` expression and `license-files`.
-requires = ["setuptools>=77"]
-build-backend = "setuptools.build_meta"
+# 1.27 is the first hatchling release to support PEP 639 `license-files`.
+requires = ["hatchling>=1.27", "hatch-vcs>=0.5"]
+build-backend = "hatchling.build"
 
 [project]
 name = "genshin-thumbnail-studio"
-version = "1.0.0"
+dynamic = ["version"]
 description = "Standalone Enka-based Genshin team thumbnail editor"
 requires-python = ">=3.10"
 license = "MIT"
@@ -22,6 +22,7 @@ dev = [
   "pytest>=8.2,<9",
   "basedpyright>=1.39,<2",
   "ruff>=0.16,<0.17",
+  "packaging>=26,<27",
 ]
 lint = [
   "actionlint-py>=1.7,<2",
@@ -31,14 +32,16 @@ lint = [
 [project.gui-scripts]
 genshin-thumbnail-studio = "genshin_thumbnail_studio.gui:run"
 
-[tool.setuptools]
-package-dir = {"" = "src"}
+[tool.hatch.version]
+source = "vcs"
 
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.hatch.build.targets.wheel]
+packages = ["src/genshin_thumbnail_studio"]
 
-[tool.setuptools.package-data]
-genshin_thumbnail_studio = ["py.typed"]
+[tool.uv]
+# Rebuild the editable install whenever HEAD or the tags move,
+# since the version it reports is taken from git at build time.
+cache-keys = [{ file = "pyproject.toml" }, { git = { commit = true, tags = true } }]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

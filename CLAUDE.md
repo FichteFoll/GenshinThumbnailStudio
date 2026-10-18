@@ -142,8 +142,10 @@ When a change invalidates something in `docs/`, update that file rather than thi
 User-visible changes go into [CHANGELOG.md](CHANGELOG.md),
 under an `## Unreleased` heading
 that a release renames to the version and date.
-The version itself lives in `pyproject.toml` and `src/genshin_thumbnail_studio/__init__.py`,
-which have to be bumped together.
-Pushing a `v<version>` tag makes CI create a draft GitHub release with both packages,
+The version itself is not stored in any file:
+hatch-vcs derives it from the latest `v*` git tag,
+so a release takes only that rename
+and pushing a `v<version>` tag.
+The tag makes CI create a draft GitHub release with both packages,
 using the `## <version> (<YYYY-MM-DD>)` section of CHANGELOG.md
 as its title and notes.

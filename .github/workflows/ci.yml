@@ -66,6 +66,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # hatch-vcs derives the version from the tags and the history since,
+          # which a shallow checkout lacks.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: false
@@ -93,6 +96,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # hatch-vcs derives the version from the tags and the history since,
+          # which a shallow checkout lacks.
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: false
@@ -127,11 +133,7 @@ jobs:
       - name: Check the tag and extract the release notes
         id: notes
         run: |
-          version=$(python3 -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
-          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME does not match the project version $version"
-            exit 1
-          fi
+          version=${GITHUB_REF_NAME#v}
           awk -v version="$version" '
             /^## / { if (in_section) exit; if ($2 == version) { in_section = 1; next } }
             in_section { print }

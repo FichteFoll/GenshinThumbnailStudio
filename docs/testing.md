@@ -6,7 +6,8 @@
 `tests/enka/`, `tests/renderer/` and `tests/gui/`,
 alongside the flat `tests/test_models.py`, `tests/test_storage.py`
 and `tests/test_version.py`,
-which keeps `__version__` in step with the version in `pyproject.toml`.
+which checks that the installed version derives from the latest `v*` git tag,
+and therefore needs a checkout with the tags and the history since.
 Each of the three subdirectories is a package (`__init__.py`) with its own `helpers.py`
 for the helpers more than one of its test modules needs;
 helpers used by a single file stay in that file.
